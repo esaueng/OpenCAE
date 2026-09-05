@@ -293,63 +293,23 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
     setConfirmSampleLoad(false);
   }
 
-  return (
-    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll." study={study}>
-      {showSampleModelPicker && (
-        <div className="field">
-          <HelpLabel helpId="sampleModel">Sample model</HelpLabel>
-          <div className="sample-option-grid panel-sample-grid" role="group" aria-label="Sample model">
-            {SAMPLE_OPTIONS.map((option) => (
-              <SampleOptionCard
-                key={option.id}
-                option={option}
-                selected={pendingSampleModel === option.id}
-                compact
-                analysisType={pendingAnalysisType}
-                onSelect={handleSampleSelect}
-                onOpen={handleSampleOpen}
-              />
-            ))}
-          </div>
-          <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
-          <div className="segmented analysis-type sample-analysis-type-grid" role="group" aria-label="Analysis type">
-            {SAMPLE_ANALYSIS_OPTIONS.map((option) => (
-              <button
-                key={option.id}
-                className={pendingAnalysisType === option.id ? "active" : ""}
-                type="button"
-                aria-pressed={pendingAnalysisType === option.id}
-                onClick={() => handleAnalysisSelect(option.id)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <button
-            className={confirmSampleLoad ? "primary wide" : "secondary wide"}
-            type="button"
-            onClick={handleLoadSampleClick}
-            title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
-          >
-            <RotateCcw size={16} />
-            {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysis.label.toLowerCase()} sample`}
-          </button>
-          {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} as {sampleAnalysisLabel} and reset the sample setup.</span>}
-        </div>
-      )}
-      <input
-        ref={uploadInputRef}
-        className="hidden-file-input"
-        type="file"
-        tabIndex={-1}
-        aria-hidden="true"
-        accept={GEOMETRY_FILE_ACCEPT}
-        onChange={(event) => {
-          const file = event.currentTarget.files?.[0];
-          event.currentTarget.value = "";
-          if (file) onUploadModel(file);
-        }}
-      />
+  const uploadInput = (
+    <input
+      ref={uploadInputRef}
+      className="hidden-file-input"
+      type="file"
+      tabIndex={-1}
+      aria-hidden="true"
+      accept={GEOMETRY_FILE_ACCEPT}
+      onChange={(event) => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = "";
+        if (file) onUploadModel(file);
+      }}
+    />
+  );
+  const uploadAction = (
+    <>
       <button className={isBlankProject ? "primary wide" : "secondary wide"} type="button" onClick={() => uploadInputRef.current?.click()}>
         <Upload size={16} />
         {isBlankProject ? "Upload model" : "Replace model"}
@@ -359,6 +319,23 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       ) : isUploadedProject ? (
         <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`}</Callout>
       ) : null}
+    </>
+  );
+  const parametricBuilder = (
+    <Collapsible title="Create parametric part" subtitle="Analytic STEP solid" defaultOpen={isBlankProject}>
+      <ParametricPartBuilder onCreatePart={onUploadModel} />
+    </Collapsible>
+  );
+
+  /* Plan 027 B: the panel leads with the state of THIS model. Alternatives
+     (other samples, other analysis types) and the parametric builder sit in
+     closed collapsibles below the actions; a blank project inverts that, since
+     getting a model in is its only state. */
+  return (
+    <Panel title="Model" step="model" helper="Inspect the 3D part. Orbit with left-drag, pan with right-drag, zoom with scroll." study={study}>
+      {uploadInput}
+      {isBlankProject && uploadAction}
+      {isBlankProject && parametricBuilder}
       {stepGeometry?.status === "repairable" && !stepGeometryResolvedByMesh && (
         <div className="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">
           <p className="panel-warning"><AlertTriangle size={16} />{stepGeometry.message ?? "This STEP model has open or invalid surfaces and is not a closed simulation solid."}</p>
@@ -375,11 +352,9 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       {(stepGeometry?.status === "repaired" || (stepGeometryResolvedByMesh && stepGeometry?.status === "repairable")) && (
         <Callout>Geometry repair complete. Open boundaries were converted into a closed solid for simulation; review the shape before relying on results.</Callout>
       )}
-      <Collapsible title="Create parametric part" subtitle="Analytic STEP solid" defaultOpen={isBlankProject}>
-        <ParametricPartBuilder onCreatePart={onUploadModel} />
-      </Collapsible>
       <div className="summary-box">
         <Info label="Project" value={project.name} />
+        <Info label="Study" value={study.name} />
         <Info label="Model" value={geometry?.filename ?? "No model loaded"} />
         <Info label="Bodies" value={String(bodyCount)} />
         <Info label="Faces" value={String(faceCount)} />
@@ -387,6 +362,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
           <>
             <Info label="Volume" value={formatVolume(sampleSummaryVolumeMm3, "mm^3", project.unitSystem)} />
             <Info label="Mass" value={formatMass(sampleSummaryMassG, "g", project.unitSystem)} />
+            <Info label="Sample analysis" value={sampleAnalysisLabel} />
           </>
         )}
         <Info label="Units" value={project.unitSystem === "US" ? "in" : "mm"} />
@@ -458,8 +434,51 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
           <Callout>{sampleSetup.callout}</Callout>
         </>
       )}
-      <Info label="Study" value={study.name} />
-      {showSampleModelPicker && <Info label="Sample analysis" value={sampleAnalysisLabel} />}
+      {!isBlankProject && uploadAction}
+      {showSampleModelPicker && (
+        <Collapsible title="Change model" subtitle="Sample and analysis type" helpId="sampleModel">
+          <div className="field">
+            <div className="sample-option-grid panel-sample-grid" role="group" aria-label="Sample model">
+              {SAMPLE_OPTIONS.map((option) => (
+                <SampleOptionCard
+                  key={option.id}
+                  option={option}
+                  selected={pendingSampleModel === option.id}
+                  compact
+                  analysisType={pendingAnalysisType}
+                  onSelect={handleSampleSelect}
+                  onOpen={handleSampleOpen}
+                />
+              ))}
+            </div>
+            <HelpLabel helpId="sampleModel">Analysis type</HelpLabel>
+            <div className="segmented analysis-type sample-analysis-type-grid" role="group" aria-label="Analysis type">
+              {SAMPLE_ANALYSIS_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  className={pendingAnalysisType === option.id ? "active" : ""}
+                  type="button"
+                  aria-pressed={pendingAnalysisType === option.id}
+                  onClick={() => handleAnalysisSelect(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <button
+              className={confirmSampleLoad ? "primary wide" : "secondary wide"}
+              type="button"
+              onClick={handleLoadSampleClick}
+              title={confirmSampleLoad ? "Click again to reload the sample project" : "Prepare to reload the sample project"}
+            >
+              <RotateCcw size={16} />
+              {confirmSampleLoad ? "Click again to load sample" : `Load ${sampleAnalysis.label.toLowerCase()} sample`}
+            </button>
+            {confirmSampleLoad && <span className="panel-copy confirm-copy">This will reload {sampleLabel} as {sampleAnalysisLabel} and reset the sample setup.</span>}
+          </div>
+        </Collapsible>
+      )}
+      {!isBlankProject && parametricBuilder}
     </Panel>
   );
 }
@@ -505,6 +524,24 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
     ? `${assignedProcess.label}${assignedProcess.id === "fdm" ? ` · ${assignedParameters?.infillDensity}% infill` : ""}`
     : "Process not selected";
   const assignedSelectionLabel = study.geometryScope[0]?.label ?? displayModel.name;
+  const pendingParameters = manufacturingParametersForAssignment(selectedMaterial, manufacturingParameters);
+  // Both sides go through the assignment normalizer: stored parameters may
+  // predate a derived field (e.g. `printed`) that the normalizer adds today.
+  const selectionMatchesAssignment = Boolean(currentAssignment) && selectedMaterialId === current
+    && sameManufacturingParameters(pendingParameters, manufacturingParametersForAssignment(assignedMaterial, currentParameters));
+  // Only processes that change the properties earn a second table; for solid
+  // stock the effective values are the base values and repeating them was noise.
+  const processAltersProperties = Boolean(fdmFactors)
+    || differs(effectiveMaterial.youngsModulus, selectedMaterial.youngsModulus)
+    || differs(effectiveMaterial.density, selectedMaterial.density)
+    || differs(effectiveMaterial.yieldStrength, selectedMaterial.yieldStrength);
+  const assignmentStatus = selectionMatchesAssignment
+    ? `Assigned to ${assignedSelectionLabel} · ${assignedDetail}`
+    : currentAssignment && resolvedAssignedMaterial
+      ? `Not applied yet · ${assignedSelectionLabel} still uses ${resolvedAssignedMaterial.name}`
+      : currentAssignment
+        ? `Not applied yet · assigned material “${currentAssignment.materialId}” is unknown`
+        : "Not applied yet · no material assigned";
 
   useEffect(() => {
     onPreviewPrintLayerOrientation?.(processUsesBuildDirection ? manufacturingParameters.layerOrientation ?? "z" : null);
@@ -556,7 +593,12 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
           <Info label="Modulus" value={formatMaterialStress(selectedMaterial.youngsModulus, project.unitSystem)} />
           <Info label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", project.unitSystem)} />
           <Info label="Yield strength" value={formatMaterialStress(selectedMaterial.yieldStrength, project.unitSystem)} />
+          <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
         </div>
+        <p className={`base-material-status${selectionMatchesAssignment ? "" : " pending"}`} role="status">
+          {selectionMatchesAssignment ? <Check size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
+          {assignmentStatus}
+        </p>
       </div>
 
       <SectionTitle helpId="manufacturingProcess">Manufacturing Process</SectionTitle>
@@ -636,17 +678,22 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
         </>
       ) : null}
 
-      <SectionTitle helpId="simulationProperties">Simulation Properties</SectionTitle>
-      <div className="summary-box material-simulation-properties">
-        {fdmFactors ? <Info label="Governing load path" value={fdmFactors.criticalAxis ? `${fdmFactors.criticalAxis.toUpperCase()} axis` : "Conservative"} /> : null}
-        {fdmFactors ? <Info label="Layer response" value={fdmLayerResponseLabel(fdmFactors.loadPathRelation)} /> : null}
-        <Info label="Effective modulus" value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
-        <Info label="Effective density" value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
-        <Info label="Effective yield" value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
-        <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
-      </div>
+      {processAltersProperties && (
+        <>
+          <SectionTitle helpId="simulationProperties">Simulation Properties</SectionTitle>
+          <div className="summary-box material-simulation-properties">
+            {fdmFactors ? <Info label="Governing load path" value={fdmFactors.criticalAxis ? `${fdmFactors.criticalAxis.toUpperCase()} axis` : "Conservative"} /> : null}
+            {fdmFactors ? <Info label="Layer response" value={fdmLayerResponseLabel(fdmFactors.loadPathRelation)} /> : null}
+            <Info label="Effective modulus" value={formatMaterialStress(effectiveMaterial.youngsModulus, project.unitSystem)} />
+            <Info label="Effective density" value={formatDensity(effectiveMaterial.density, "kg/m^3", project.unitSystem)} />
+            <Info label="Effective yield" value={formatMaterialStress(effectiveMaterial.yieldStrength, project.unitSystem)} />
+          </div>
+        </>
+      )}
 
-      <button className="primary wide material-apply-button" type="button" onClick={() => onAssignMaterial(selectedMaterialId, manufacturingParametersForAssignment(selectedMaterial, manufacturingParameters))}>Apply material &amp; process</button>
+      {!selectionMatchesAssignment && (
+        <button className="primary wide material-apply-button" type="button" onClick={() => onAssignMaterial(selectedMaterialId, pendingParameters)}>Apply material &amp; process</button>
+      )}
       <MaterialLibraryModal
         open={showLibrary}
         selectedMaterialId={selectedMaterialId}
@@ -663,17 +710,20 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
         }}
         onClose={() => setShowLibrary(false)}
       />
-      <SectionTitle helpId="assignedMaterial">Assigned</SectionTitle>
       {currentAssignment && !resolvedAssignedMaterial ? <Callout>Unknown material “{currentAssignment.materialId}”. Choose a valid material before solving.</Callout> : null}
-      {currentAssignment ? (
-        <div className="concept-card-list">
-          <ConceptCard icon={<Check size={18} />} title={resolvedAssignedMaterial?.name ?? currentAssignment.materialId} detail={`${assignedSelectionLabel} · ${resolvedAssignedMaterial ? assignedDetail : "Unresolved material"}`} tone="accent" />
-        </div>
-      ) : (
-        <Callout>No material assigned</Callout>
-      )}
     </Panel>
   );
+}
+
+function differs(a: number, b: number) {
+  return Math.abs(a - b) > 1e-9 * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+/* Key order and explicit undefineds are storage noise, not a different setup. */
+function sameManufacturingParameters(a: ManufacturingParameters | undefined, b: ManufacturingParameters | undefined) {
+  const entries = (value: ManufacturingParameters | undefined) =>
+    Object.entries(value ?? {}).filter(([, item]) => item !== undefined).sort(([x], [y]) => x.localeCompare(y));
+  return JSON.stringify(entries(a)) === JSON.stringify(entries(b));
 }
 
 function fdmLayerResponseLabel(relation: "within_layers" | "across_layers" | "conservative") {
@@ -912,12 +962,19 @@ function LoadsPanel({
       )}><Plus size={18} />{addLabel}</button>
       </div>
       {structuralStudy && (
-        <LoadCasesEditor
-          studyType={structuralStudy.type}
-          loadCases={loadCases}
-          loadCombinations={loadCombinations}
-          onChange={(cases, combinations) => onLoadCasesChange?.(cases, combinations)}
-        />
+        <Collapsible
+          title="Load cases"
+          subtitle={`${loadCases.length} case${loadCases.length === 1 ? "" : "s"}${loadCombinations.length ? ` · ${loadCombinations.length} combination${loadCombinations.length === 1 ? "" : "s"}` : ""}`}
+          helpId="loadCases"
+          defaultOpen={loadCases.length > 1 || loadCombinations.length > 0}
+        >
+          <LoadCasesEditor
+            studyType={structuralStudy.type}
+            loadCases={loadCases}
+            loadCombinations={loadCombinations}
+            onChange={(cases, combinations) => onLoadCasesChange?.(cases, combinations)}
+          />
+        </Collapsible>
       )}
       <LoadEditorList editingId={editingLoadId} onEditingIdChange={setEditingLoadId} study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
@@ -1026,7 +1083,6 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
   );
   return (
     <section className="load-case-editor" aria-label="Load cases">
-      <SectionTitle helpId="loadCases">Load cases</SectionTitle>
       {loadCases.map((loadCase) => {
         const canDelete = loadCases.length > 1 && loadCase.loadIds.length === 0 && !referencedCaseIds.has(loadCase.id);
         return (
@@ -1614,18 +1670,25 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
             </>
           ) : (
             <>
-              <Info label="Nodes" value="Reported after solve" />
-              <Info label="Elements" value="Reported after solve" />
+              {/* Preset-only summaries carry no geometry-specific counts; "--" is the
+                  app-wide honest placeholder and the copy below says when real counts arrive. */}
+              <Info label="Nodes" value="--" />
+              <Info label="Elements" value="--" />
             </>
           )}
           <Info label="Analysis samples" value={(meshSummary.analysisSampleCount ?? 0).toLocaleString()} />
           <Info label="Warnings" value={String(meshSummary.warnings.length)} />
         </div>
       )}
+      {meshSummary && meshSummary.warnings.length > 0 && (
+        <ul className="mesh-warning-list" aria-label="Mesh warnings">
+          {meshSummary.warnings.map((warning) => <li key={warning}><AlertTriangle size={14} aria-hidden="true" />{warning}</li>)}
+        </ul>
+      )}
       <p className="panel-copy">Meshing runs locally in your browser at the selected quality. Preset-only summaries do not predict solver mesh counts; actual node and element counts appear with the results.</p>
       {staticStudy ? (
+        <Collapsible title="Mesh convergence" subtitle="Coarse → fine" defaultOpen={convergenceBusy || Boolean(latestRecord)}>
         <section className="convergence-card" aria-label="Static mesh convergence">
-          <h3>Mesh convergence</h3>
           <p className="panel-copy">Runs an isolated static case at coarse, medium, then fine. Your working mesh and active results stay unchanged.</p>
           <label className="field">
             <span>Static case</span>
@@ -1661,6 +1724,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
           {convergenceBusy && <p className="panel-copy" aria-live="polite">{convergenceProgress || "Running convergence study."}</p>}
           {latestRecord && <ConvergenceRecordCard record={latestRecord} />}
         </section>
+        </Collapsible>
       ) : (
         <p className="panel-copy">Mesh-convergence studies are available for static load cases only.</p>
       )}
@@ -2639,12 +2703,12 @@ function ResultsPanelContent({
         </div>
       )}
       <SectionTitle helpId="resultMode">Result mode</SectionTitle>
-      <div className="result-buttons">
-        <button type="button" className={resultMode === "stress" ? "primary" : "secondary"} aria-pressed={resultMode === "stress"} onClick={() => onResultModeChange("stress")}>Stress</button>
-        <button type="button" className={resultMode === "displacement" ? "primary" : "secondary"} aria-pressed={resultMode === "displacement"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
-        {resultFields.some((field) => field.type === "velocity") && <button type="button" className={resultMode === "velocity" ? "primary" : "secondary"} aria-pressed={resultMode === "velocity"} onClick={() => onResultModeChange("velocity")}>Velocity</button>}
-        {resultFields.some((field) => field.type === "acceleration") && <button type="button" className={resultMode === "acceleration" ? "primary" : "secondary"} aria-pressed={resultMode === "acceleration"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
-        <button type="button" className={resultMode === "safety_factor" ? "primary" : "secondary"} aria-pressed={resultMode === "safety_factor"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
+      <div className="segmented result-mode" role="group" aria-label="Result mode">
+        <button type="button" className={resultMode === "stress" ? "active" : ""} aria-pressed={resultMode === "stress"} onClick={() => onResultModeChange("stress")}>Stress</button>
+        <button type="button" className={resultMode === "displacement" ? "active" : ""} aria-pressed={resultMode === "displacement"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
+        {resultFields.some((field) => field.type === "velocity") && <button type="button" className={resultMode === "velocity" ? "active" : ""} aria-pressed={resultMode === "velocity"} onClick={() => onResultModeChange("velocity")}>Velocity</button>}
+        {resultFields.some((field) => field.type === "acceleration") && <button type="button" className={resultMode === "acceleration" ? "active" : ""} aria-pressed={resultMode === "acceleration"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
+        <button type="button" className={resultMode === "safety_factor" ? "active" : ""} aria-pressed={resultMode === "safety_factor"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
       </div>
       {resultMode === "stress" && stressComponents.length > 0 && (
         <div className="field">
@@ -3095,11 +3159,12 @@ function Callout({ children }: { children: ReactNode }) {
   return <p className="callout">{children}</p>;
 }
 
-function Collapsible({ title, subtitle, defaultOpen = false, children }: { title: string; subtitle?: string; defaultOpen?: boolean; children: ReactNode }) {
+function Collapsible({ title, subtitle, helpId, defaultOpen = false, children }: { title: string; subtitle?: string; helpId?: SettingHelpId; defaultOpen?: boolean; children: ReactNode }) {
   return (
     <details className="collapsible-section" open={defaultOpen}>
       <summary className="collapsible-summary">
-        <span className="collapsible-title">{title}</span>
+        {/* The help trigger stops click propagation, so opening the tooltip does not toggle the section. */}
+        <span className="collapsible-title">{helpId ? <HelpLabel helpId={helpId}>{title}</HelpLabel> : title}</span>
         {subtitle && <span className="collapsible-subtitle">{subtitle}</span>}
         <ChevronDown className="collapsible-chevron" size={16} aria-hidden="true" />
       </summary>
