@@ -6572,18 +6572,18 @@ export function displayedLegendTickLabels(minValue: number, maxValue: number) {
 
 export function resultLegendTitle(resultMode: ResultMode, stressComponent: StressComponent): string {
   if (resultMode === "stress") {
-    if (stressComponent === "principal_max") return "Principal Stress σ₁";
-    if (stressComponent === "principal_min") return "Principal Stress σ₃";
-    if (stressComponent === "max_shear") return "Maximum Shear Stress";
-    return "Von Mises Stress";
+    if (stressComponent === "principal_max") return "Principal stress σ₁";
+    if (stressComponent === "principal_min") return "Principal stress σ₃";
+    if (stressComponent === "max_shear") return "Maximum shear stress";
+    return "Von Mises stress";
   }
   if (resultMode === "displacement") return "Displacement";
   if (resultMode === "velocity") return "Velocity";
   if (resultMode === "acceleration") return "Acceleration";
-  if (resultMode === "mode_shape") return "Normalized Mode Shape";
+  if (resultMode === "mode_shape") return "Normalized mode shape";
   if (resultMode === "temperature") return "Temperature";
-  if (resultMode === "heat_flux") return "Heat Flux";
-  return "Safety Factor";
+  if (resultMode === "heat_flux") return "Heat flux";
+  return "Safety factor";
 }
 
 export function legendMeshStats(meshSummary: MeshSummary | undefined) {

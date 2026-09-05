@@ -1949,7 +1949,9 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, solve
         {isRunning ? <X size={16} /> : <Play size={16} />}
         {isRunning ? "Stop simulation" : "Run simulation"}
       </button>
-      {missingRunItems.length > 0 && <p className="panel-copy">Complete {missingRunItems.join(", ").toLowerCase()} before running.</p>}
+      {/* Same phrasing as the top-bar tooltip and status message; no lowercasing, which
+          turned "STEP" into "step". */}
+      {missingRunItems.length > 0 && <p className="panel-copy">Complete before running: {missingRunItems.join(", ")}.</p>}
       {runError && !isRunning && <p className="panel-warning" role="alert">{runError}</p>}
       {isRunning && (
         <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progressPercent} aria-label="Simulation progress">
@@ -2767,7 +2769,7 @@ function ResultsPanelContent({
         <section className="result-probe-list" aria-label="Pinned result probes">
           <div className="result-probe-list-header">
             <SectionTitle helpId="pinnedProbes">Pinned probes</SectionTitle>
-            {resultProbes.length > 0 && onClearResultProbes && <button className="text-button" type="button" onClick={onClearResultProbes}>Clear All</button>}
+            {resultProbes.length > 0 && onClearResultProbes && <button className="text-button" type="button" onClick={onClearResultProbes}>Clear all</button>}
           </div>
           {resultProbeLimitReached && <p className="panel-warning" role="status">Probe limit reached. Remove a pin to place another.</p>}
           {resultProbes.length > 0 && (

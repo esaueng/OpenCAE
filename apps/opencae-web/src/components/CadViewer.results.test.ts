@@ -832,7 +832,12 @@ describe("CadViewer result coloring", () => {
 
   test("labels thermal fields with their actual engineering quantities", () => {
     expect(resultLegendTitle("temperature", "principal_max")).toBe("Temperature");
-    expect(resultLegendTitle("heat_flux", "principal_max")).toBe("Heat Flux");
+    expect(resultLegendTitle("heat_flux", "principal_max")).toBe("Heat flux");
+    // Sentence case everywhere; uppercase is reserved for CSS-transformed eyebrows.
+    expect(resultLegendTitle("stress", "von_mises")).toBe("Von Mises stress");
+    expect(resultLegendTitle("stress", "principal_max")).toBe("Principal stress σ₁");
+    expect(resultLegendTitle("stress", "max_shear")).toBe("Maximum shear stress");
+    expect(resultLegendTitle("safety_factor", "von_mises")).toBe("Safety factor");
   });
 
   test("renders solver surface results outside the legacy sample base rotation", () => {

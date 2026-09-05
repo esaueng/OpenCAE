@@ -96,7 +96,7 @@ describe("StartScreen", () => {
     expect(html).toContain("wing.opencae.json");
     expect(html).toContain("Open");
     expect(html).toContain("Remove");
-    expect(html).toContain("Clear List");
+    expect(html).toContain("Clear list");
   });
 });
 
