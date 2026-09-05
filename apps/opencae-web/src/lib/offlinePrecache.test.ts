@@ -111,6 +111,9 @@ describe("workbox settings", () => {
   test("header changes force a service-worker update", () => {
     expect(PRECACHE_GLOB_PATTERNS).toContain("_headers");
     expect(PRECACHE_GLOB_PATTERNS[0]).toContain("ttf");
+    // UI typeface: offline readiness must include the WOFF2 faces or the app
+    // shell swaps to system-ui the moment the network drops.
+    expect(PRECACHE_GLOB_PATTERNS[0]).toContain("woff2");
   });
 
   test("service-worker updates import the stale-client refresh hook", () => {

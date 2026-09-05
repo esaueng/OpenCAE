@@ -62,10 +62,15 @@ and the GPL-free opt-out build (`VITE_WASM_MESHING=0`).
 
 ### IBM Plex Sans
 
-- Purpose: Embedded report typography (Regular and SemiBold weights).
+- Purpose: App UI typeface (WOFF2 Latin and Greek subsets for weights 400, 500
+  and 600 in `apps/opencae-web/src/assets/fonts/`, packaged by
+  `@fontsource/ibm-plex-sans` 5.3.0) and embedded report typography (Regular
+  and SemiBold TTF in `apps/opencae-web/src/report/fonts/`).
 - Copyright: Copyright 2017 IBM Corp.
-- License: SIL Open Font License 1.1.
-- Source: https://github.com/IBM/plex
+- License: SIL Open Font License 1.1
+  (`apps/opencae-web/src/assets/fonts/LICENSE-IBM-Plex-Sans.txt`).
+- Source: https://github.com/IBM/plex; subsets from
+  https://github.com/fontsource/fontsource
 
 OpenCAE workspace packages declare their own source code as Apache-2.0, but
 package dependencies and transitive dependencies are licensed separately by
