@@ -812,7 +812,7 @@ function LoadsPanel({
         fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
         detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
       />
-      <div className="field">
+      <label className="field">
         <HelpLabel helpId="loadType">Load type</HelpLabel>
         <select
           value={draftLoadType}
@@ -832,7 +832,7 @@ function LoadsPanel({
             <option value="gravity">Payload mass</option>
           </>}
         </select>
-      </div>
+      </label>
       {draftLoadType === "gravity" ? (
         <PayloadMassControls
           unitSystem={project.unitSystem}
@@ -2661,6 +2661,9 @@ function ResultsPanelContent({
             ))}
           </div>
         </div>
+      )}
+      {resultMode === "stress" && (
+        <p className="panel-copy">Max stress reports the solver&apos;s peak von Mises stress. Surface averaging or smoothing can lower the legend maximum; changing the stress measure or color range does not change Max stress.</p>
       )}
       {resultColorScaleControl && (
         <section className="result-scale-controls" aria-label="Result color scale">
