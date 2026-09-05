@@ -232,7 +232,7 @@ export function RecentProjectsSection({
     <section className="recent-projects" aria-label="Recent Projects">
       <div className="recent-projects-header">
         <h2>Recent Projects</h2>
-        {entries.length > 0 && <button type="button" onClick={onClear}>Clear List</button>}
+        {entries.length > 0 && <button type="button" onClick={onClear}>Clear list</button>}
       </div>
       {entries.length === 0 ? <p>No recent project files yet.</p> : (
         <ul>

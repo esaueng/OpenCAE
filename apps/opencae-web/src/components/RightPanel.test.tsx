@@ -262,7 +262,7 @@ describe("RightPanel result probes", () => {
     expect(html).toContain("Pinned probes");
     expect(html).toContain("0.000456789 MPa");
     expect(html).toContain("Governed near probe by Service");
-    expect(html).toContain("Clear All");
+    expect(html).toContain("Clear all");
     expect(html).toContain('aria-label="Remove probe 1"');
     expect(html).toContain("Probe limit reached. Remove a pin to place another.");
   });
@@ -1006,7 +1006,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(runHtml).toContain("Local (in-browser)");
-    expect(runHtml).toContain("Complete valid core volume mesh before running.");
+    expect(runHtml).toContain("Complete before running: Valid Core volume mesh.");
     expect(runHtml).not.toContain("Local estimate");
     expect(runHtml).not.toContain("CalculiX");
   });
@@ -1208,7 +1208,8 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Peak displacement");
     expect(html).toContain("Result mode");
     expect(html).not.toContain("Switches the color plot");
-    expect(html).not.toContain("Von Mises Stress");
+    // The legend title must not leak into the panel (it is a viewer overlay label).
+    expect(html).not.toContain("Von Mises stress");
   });
 
   test("shows interpolated playback time instead of jumping between integer frames", () => {
