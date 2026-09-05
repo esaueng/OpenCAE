@@ -3232,6 +3232,23 @@ img {
   border-bottom: var(--border-thin);
 }
 
+/* Result mode: three per row, wrapping to a second row for the dynamic
+   velocity/acceleration fields. Every button not in the last row gets the
+   row divider; the last column and the last button drop the column divider. */
+.segmented.result-mode {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--sp-25) 0 14px;
+}
+
+.segmented.result-mode button:nth-child(3n),
+.segmented.result-mode button:last-child {
+  border-right: 0;
+}
+
+.segmented.result-mode button:nth-last-child(n + 4) {
+  border-bottom: var(--border-thin);
+}
+
 .modal-mode-table {
   display: grid;
   gap: var(--sp-2);
@@ -3408,6 +3425,24 @@ input {
 .base-material-properties .info-row:last-child,
 .material-simulation-properties .info-row:last-child {
   border-bottom: 0;
+}
+
+/* Assignment status lives on the material card: one card is the state and the
+   selection. Amber "pending" means the selection has not been applied yet. */
+.base-material-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-15);
+  margin: 0;
+  padding: var(--sp-15) var(--sp-3);
+  border-top: var(--border-thin);
+  color: var(--color-success);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+.base-material-status.pending {
+  color: var(--color-warning);
 }
 
 .material-process-helper {
@@ -3739,13 +3774,6 @@ button:disabled {
 
 .button-grid,
 .result-buttons {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--sp-2);
-  margin: 14px 0;
-}
-
-.result-buttons {
   grid-template-columns: 1fr;
 }
 
@@ -3938,6 +3966,14 @@ button:disabled {
   padding: 0 var(--sp-3) var(--sp-3);
 }
 
+/* The convergence card draws its own top rule when it sits loose in the panel;
+   inside a collapsible the summary already separates it. */
+.collapsible-body .convergence-card {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
 .parametric-part-summary {
   margin: 0 0 var(--sp-3);
 }
@@ -4122,6 +4158,32 @@ button:disabled {
   min-width: 90px;
   padding: var(--sp-1) var(--sp-15);
   font-size: var(--fs-xs);
+}
+
+.mesh-warning-list {
+  display: grid;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mesh-warning-list li {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: var(--sp-2);
+  align-items: start;
+  padding: var(--sp-15) var(--sp-25);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+}
+
+.mesh-warning-list li > svg {
+  margin-top: 2px;
 }
 
 .convergence-card {

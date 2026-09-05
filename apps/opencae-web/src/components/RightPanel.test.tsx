@@ -522,7 +522,10 @@ describe("RightPanel payload mass controls", () => {
   test("does not show an assigned material before one is applied", () => {
     const html = renderPanel("material", { study: { ...study, materialAssignments: [] } });
 
-    expect(html).toContain("No material assigned");
+    // The card states the gap and the only way to close it is the apply action.
+    expect(html).toContain("Not applied yet · no material assigned");
+    expect(html).toContain('class="base-material-status pending"');
+    expect(html).toContain("Apply material &amp; process");
     expect(html).not.toContain("bracket · all bodies");
   });
 
@@ -876,7 +879,13 @@ describe("RightPanel payload mass controls", () => {
       }
     });
 
-    expect(meshHtml).toContain("Reported after solve");
+    // "--" is the app-wide honest placeholder; the panel copy says real counts arrive with results.
+    expect(meshHtml).toContain("<span>Nodes</span><strong>--</strong>");
+    expect(meshHtml).toContain("<span>Elements</span><strong>--</strong>");
+    expect(meshHtml).not.toContain("Reported after solve");
+    // A warning count is not a warning: the strings themselves render, in view.
+    expect(meshHtml).toContain('aria-label="Mesh warnings"');
+    expect(meshHtml).toContain("Preset fallback");
     expect(meshHtml).toContain("4,800");
     expect(meshHtml).not.toContain("42,381");
     expect(meshHtml).not.toContain("26,944");
@@ -1494,7 +1503,11 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("Effective density");
     expect(html).toContain("Effective yield");
     expect(html).toContain("Poisson ratio");
-    expect(html).toContain("Apply material &amp; process");
+    // The selection matches the stored assignment, so there is nothing to apply;
+    // the card says so instead of offering a no-op action.
+    expect(html).toContain("Assigned to");
+    expect(html).toContain('class="base-material-status"');
+    expect(html).not.toContain("Apply material &amp; process");
     expect(html).not.toContain("3D printed part");
   });
 
