@@ -4,6 +4,7 @@ import { App } from "./App";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
 import { initPlausibleAnalytics } from "./analytics";
 import { registerOfflineCaching } from "./lib/registerOfflineCaching";
+import "./theme/fonts.css";
 import "./theme/tokens.css";
 import "./styles/app.css";
 
