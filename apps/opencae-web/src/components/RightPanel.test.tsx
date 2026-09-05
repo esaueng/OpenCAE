@@ -7,6 +7,7 @@ import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@
 import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
 import { readinessForStudy } from "../runReadiness";
+import { StudySchema } from "@opencae/schema";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepGeometryMetadata } from "../lib/api";
 
@@ -127,6 +128,36 @@ function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof Ri
     />
   );
 }
+
+test.each(["static_stress", "dynamic_structural", "steady_state_thermal"] as const)("labels the new-load type selector for %s", (type) => {
+  const html = renderPanel("loads", { study: StudySchema.parse({ ...study, type }) });
+  const loadTypeField = html.match(/<label class="field"><span class="field-label-with-help">Load type[\s\S]*?<\/label>/)?.[0];
+
+  expect(loadTypeField).toBeDefined();
+  expect(loadTypeField).toContain("<select");
+  expect(loadTypeField).toContain(type === "steady_state_thermal" ? "Surface heat flux" : "Face force (total)");
+});
+
+test("explains the solver peak separately from the plotted stress range without changing either", () => {
+  const overrides = {
+    resultSummary: { ...resultSummary, maxStress: 45.2 },
+    resultColorScaleControl: {
+      setting: { rangeMode: "auto" as const, bands: "continuous" as const },
+      automaticMin: 0.729822,
+      automaticMax: 39.7469,
+      displayMin: 0.729822,
+      displayMax: 39.7469,
+      units: "MPa"
+    }
+  };
+  const html = renderPanel("results", overrides);
+
+  expect(html).toContain("45.2 MPa");
+  expect(html).toContain("Automatic run range: 0.729822–39.7469 MPa");
+  expect(html).toContain("peak von Mises stress");
+  expect(html).toContain("Surface averaging or smoothing can lower the legend maximum");
+  expect(renderPanel("results", { ...overrides, resultMode: "displacement" })).not.toContain("Surface averaging or smoothing");
+});
 
 test("renders per-field range and band controls from the shared color-scale contract", () => {
   const html = renderPanel("results", {
