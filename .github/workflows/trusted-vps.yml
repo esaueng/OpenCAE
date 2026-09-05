@@ -2,7 +2,7 @@ name: Trusted VPS checks
 on:
   workflow_dispatch:
   push:
-    branches: [codex/trusted-vps-ci]
+    branches: [main]
 permissions:
   contents: read
 concurrency:
