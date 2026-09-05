@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.PORT ?? 5199);
 const CDP_PORT = Number(process.env.CDP_PORT ?? 9337);
-const TIMEOUT_MS = Number(process.env.PROOF_TIMEOUT_MS ?? 120_000);
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const profileDir = mkdtempSync(join(tmpdir(), "opencae-project-results-"));
 const children = [];
@@ -114,6 +113,20 @@ async function evaluate(cdp, expression) {
   return response.result?.result?.value;
 }
 
+async function callInPage(cdp, fn, ...args) {
+  const target = await cdp.send("Runtime.evaluate", { expression: "globalThis" });
+  const response = await cdp.send("Runtime.callFunctionOn", {
+    objectId: target.result.result.objectId,
+    functionDeclaration: fn.toString(),
+    arguments: args.map(value => ({ value })),
+    awaitPromise: true,
+    returnByValue: true
+  });
+  if (response.error || response.result?.exceptionDetails) {
+    throw new Error(JSON.stringify(response.error ?? response.result.exceptionDetails).slice(0, 800));
+  }
+  return response.result?.result?.value;
+}
 
 let activeCdp;
 
@@ -143,13 +156,18 @@ async function run() {
   })()`));
   async function restore(projectFile, ui) {
     const token = `${Date.now()}-${Math.random()}`;
+    await callInPage(cdp, (projectFile, ui, token) => {
+      sessionStorage.setItem('opencae-test-fixture', JSON.stringify({ projectFile, ui, token }));
+    }, projectFile, ui, token);
     const injection = await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
-      window.__projectFixtureToken = ${JSON.stringify(token)};
+      const fixture = JSON.parse(sessionStorage.getItem('opencae-test-fixture'));
+      sessionStorage.removeItem('opencae-test-fixture');
+      window.__projectFixtureToken = fixture.token;
       localStorage.clear();
-      localStorage.setItem('opencae.workspace.autosave.v1', JSON.stringify({ version: 1, savedAt: new Date().toISOString(), projectFile: ${JSON.stringify(projectFile)}, ui: ${JSON.stringify(ui)} }));
+      localStorage.setItem('opencae.workspace.autosave.v1', JSON.stringify({ version: 1, savedAt: new Date().toISOString(), projectFile: fixture.projectFile, ui: fixture.ui }));
     })()` });
     await cdp.send("Page.reload");
-    await waitFor("restored results", () => evaluate(cdp, `window.__projectFixtureToken === ${JSON.stringify(token)} && Boolean(document.querySelector(".result-variant-selector select"))`));
+    await waitFor("restored results", () => callInPage(cdp, token => window.__projectFixtureToken === token && Boolean(document.querySelector(".result-variant-selector select")), token));
     await cdp.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: injection.result.identifier });
     await evaluate(cdp, `(() => {
       window.__savedProject = null;
@@ -171,7 +189,10 @@ async function run() {
     console.log(`${direction}: load restored; stale results absent from UI and saved file.`);
   }
   await restore(projectFile, ui);
-  await evaluate(cdp, `(async () => { const store = await import('/src/lib/localResultsStore.ts'); await store.saveLocalRunVariantResult('run-local-history-proof', 'Side', ${JSON.stringify(fixture.other)}); })()`);
+  await callInPage(cdp, async variant => {
+    const store = await import('/src/lib/localResultsStore.ts');
+    await store.saveLocalRunVariantResult('run-local-history-proof', 'Side', variant);
+  }, fixture.other);
   const saved = await save();
   if (saved.results.variants.length !== 2 || saved.results.variantRefs.some(ref => ref.persistedSeparately)) throw new Error('Save omitted a case or retained storage dependencies');
   await evaluate(cdp, `(async () => { const store = await import('/src/lib/localResultsStore.ts'); await store.deleteLocalRunVariantResults('run-local-history-proof'); })()`);
