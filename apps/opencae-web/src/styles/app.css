@@ -2573,6 +2573,18 @@ img {
   line-height: var(--lh-snug);
 }
 
+.study-type-warning {
+  margin-top: var(--sp-2);
+}
+
+.study-type-warning .text-button {
+  display: inline;
+  padding: 0;
+  min-height: 0;
+  color: inherit;
+  text-decoration: underline;
+}
+
 .panel-warning > svg {
   display: inline-block;
   margin-right: 7px;

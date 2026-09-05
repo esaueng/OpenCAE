@@ -820,6 +820,19 @@ describe("RightPanel payload mass controls", () => {
     expect(renderPanel("run")).not.toContain("Start time");
   });
 
+  test("warns on the analysis-type button before a switch that clears the setup", () => {
+    const support = (id: string): Study["constraints"][number] => ({ id, type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" });
+    const load: Study["loads"][number] = { id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" };
+    const html = renderPanel("run", { study: { ...study, constraints: [support("support-1"), support("support-2")], loads: [load] } });
+    // Crossing into thermal clears the structural setup; the button says so before the click.
+    expect(html).toMatch(/title="Switching to Thermal clears 2 supports and 1 load\. Click twice to confirm\."[^>]*>Thermal</);
+    // Staying structural loses nothing, so those buttons carry no warning.
+    expect(html).not.toMatch(/title="Switching to Dynamic/);
+    expect(html).not.toMatch(/title="Switching to Modal/);
+    // Nothing set up yet: nothing to warn about.
+    expect(renderPanel("run")).not.toContain("Switching to Thermal");
+  });
+
   test("offers an analysis-type switch on the run panel reflecting the study type", () => {
     const staticHtml = renderPanel("run");
     expect(staticHtml).toContain('aria-label="Analysis type"');

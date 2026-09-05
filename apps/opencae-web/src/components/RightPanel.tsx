@@ -7,6 +7,7 @@ import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResul
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { RunReadinessItem } from "../runReadiness";
+import { STUDY_TYPE_LABELS, studyTypeSwitchConsequence } from "../studyTypeSwitch";
 import { GEOMETRY_FILE_ACCEPT, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
@@ -1816,6 +1817,21 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, solve
   const remainingLabel = formatSimulationEta(runTiming?.estimatedRemainingMs, isRunning);
   const elapsedLabel = formatSimulationElapsed(runTiming?.elapsedMs);
   const [invalidSettingFields, setInvalidSettingFields] = useState<readonly string[]>([]);
+  /* Forward warning (plan 027): structural ↔ thermal clears supports and loads. The
+     first click on such a type shows what will be lost; only the second click switches. */
+  const [pendingStudyType, setPendingStudyType] = useState<Study["type"] | null>(null);
+  const pendingSwitchId = useId();
+  useEffect(() => { setPendingStudyType(null); }, [study.type]);
+  const pendingConsequence = pendingStudyType ? studyTypeSwitchConsequence(study, pendingStudyType) : null;
+  function requestStudyType(type: Study["type"]) {
+    if (study.type === type) return;
+    if (studyTypeSwitchConsequence(study, type) && pendingStudyType !== type) {
+      setPendingStudyType(type);
+      return;
+    }
+    setPendingStudyType(null);
+    onChangeStudyType?.(type);
+  }
   const trackSettingValidity = useCallback((field: string, invalid: boolean) => {
     setInvalidSettingFields((current) => {
       const has = current.includes(field);
@@ -1863,35 +1879,29 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, solve
       <div className="field">
         <span>Analysis type</span>
         <div className="segmented analysis-type run-analysis-type" role="group" aria-label="Analysis type">
-          <button
-            className={study.type === "static_stress" ? "active" : ""}
-            type="button"
-            aria-pressed={study.type === "static_stress"}
-            disabled={isRunning}
-            onClick={() => study.type !== "static_stress" && onChangeStudyType?.("static_stress")}
-          >Static</button>
-          <button
-            className={study.type === "dynamic_structural" ? "active" : ""}
-            type="button"
-            aria-pressed={study.type === "dynamic_structural"}
-            disabled={isRunning}
-            onClick={() => study.type !== "dynamic_structural" && onChangeStudyType?.("dynamic_structural")}
-          >Dynamic</button>
-          <button
-            className={study.type === "modal_analysis" ? "active" : ""}
-            type="button"
-            aria-pressed={study.type === "modal_analysis"}
-            disabled={isRunning}
-            onClick={() => study.type !== "modal_analysis" && onChangeStudyType?.("modal_analysis")}
-          >Modal</button>
-          <button
-            className={thermal ? "active" : ""}
-            type="button"
-            aria-pressed={thermal}
-            disabled={isRunning}
-            onClick={() => !thermal && onChangeStudyType?.("steady_state_thermal")}
-          >Thermal</button>
+          {(["static_stress", "dynamic_structural", "modal_analysis", "steady_state_thermal"] as const).map((type) => {
+            const consequence = studyTypeSwitchConsequence(study, type);
+            return (
+              <button
+                key={type}
+                className={study.type === type ? "active" : ""}
+                type="button"
+                aria-pressed={study.type === type}
+                aria-describedby={pendingStudyType === type ? pendingSwitchId : undefined}
+                disabled={isRunning}
+                title={consequence ? `${consequence.message} Click twice to confirm.` : undefined}
+                onClick={() => requestStudyType(type)}
+              >{STUDY_TYPE_LABELS[type]}</button>
+            );
+          })}
         </div>
+        {pendingStudyType && pendingConsequence && (
+          <p className="panel-warning study-type-warning" role="alert" id={pendingSwitchId}>
+            <AlertTriangle size={16} />
+            {pendingConsequence.message} Click {STUDY_TYPE_LABELS[pendingStudyType]} again to switch, or{" "}
+            <button className="text-button" type="button" onClick={() => setPendingStudyType(null)}>keep the current setup</button>.
+          </p>
+        )}
       </div>
       <label className="field">
         <span>Fidelity</span>

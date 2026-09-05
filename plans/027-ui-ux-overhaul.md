@@ -99,8 +99,11 @@ lie from the token. Either answer is fine; the current state is neither.
   explaining they arrive with results). "Warnings: 1" becomes an expandable
   list of the warning strings. `Mesh convergence` becomes a closed
   `Collapsible`.
-- **Run:** unchanged except the analysis-type block gains the forward
-  warning on Thermal that the review proposed.
+- **Run:** the analysis-type buttons carry a forward warning (title text and,
+  on first click, an inline card with a cancel) whenever the switch would
+  clear the current supports and loads — structural ↔ thermal in either
+  direction, as `handleChangeStudyType` does. Only a second click switches.
+  Landed separately (increment E) after B.
 - **Results:** `Result mode` becomes a segmented control matching
   `Stress measure`. Nothing else moves; the headline stays.
 
