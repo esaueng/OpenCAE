@@ -24,7 +24,7 @@ import {
   type LoadType
 } from "./loadPreview";
 import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
-import { buildLocalProjectFile, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
+import { buildLocalProjectFile, portableResultBundle, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
 import type { ConvergenceProbe } from "./meshConvergence";
 import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
@@ -207,6 +207,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     ? withDerivedSurfaceSafetyFactorFields(restoredResults)
     : []);
   const [resultVariants, setResultVariants] = useState<RunVariantResult[]>(restoredResults?.variants ?? []);
+  const resultVariantLoadGenerationRef = useRef(0);
   const [resultVariantRefs, setResultVariantRefs] = useState<RunVariantRef[]>(() => restoredResults?.variantRefs
     ?? restoredResults?.variants?.map(({ id, name, kind, caseId, combinationId }) => ({ id, name, kind, caseId, combinationId }))
     ?? []);
@@ -516,8 +517,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const openStepNeedsRepair = stepGeometryNeedsRepair(project) && !hasActualVolumeMesh;
   const effectiveMissingRunItems = openStepNeedsRepair ? [...missingRunItems, "Closed STEP solid"] : missingRunItems;
   const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair;
-  const canUndoAction = undoStack.length > 0;
-  const canRedoAction = redoStack.length > 0;
+  const canUndoAction = undoStack.length > 0 && !solverRunning && !convergenceBusy;
+  const canRedoAction = redoStack.length > 0 && !solverRunning && !convergenceBusy;
 
   useEffect(() => {
     setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
@@ -1477,7 +1478,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
       } : undefined);
       if (!saved) return;
-      setProject((current) => current ? { ...current, updatedAt: saved.savedAt } : current);
+      setProject((current) => current === project ? { ...current, updatedAt: saved.savedAt } : current);
       if (saved.handle && isRecentProjectsSupported()) {
         try {
           await defaultRecentProjectService().add(saved.handle, { filename: saved.handle.name, projectName: project.name });
@@ -2006,6 +2007,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   function invalidateCompletedRunState() {
+    resultVariantLoadGenerationRef.current += 1;
     setResultSummary(null);
     setSolveElapsedMs(null);
     setCompletedRunId("");
@@ -2163,30 +2165,36 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // runtime, so every undo threw, logged a failure, and left "Needs attention"
   // over a change that had in fact applied.
   function handleUndoAction() {
-    if (!project || !canUndoAction) return;
+    if (!project || !canUndoAction || processingRunIdRef.current) return;
     const previous = undoStack[undoStack.length - 1];
     if (!previous) return;
     setUndoStack(undoStack.slice(0, -1));
     setRedoStack([...redoStack, cloneProjectSharingEmbeddedModels(project)]);
-    setProject(cloneProjectSharingEmbeddedModels(previous));
+    invalidateCompletedRunState();
+    projectRef.current = cloneProjectSharingEmbeddedModels(previous);
+    setProject(projectRef.current);
     pushMessage("Undo applied.");
   }
 
   function handleRedoAction() {
-    if (!project || !canRedoAction) return;
+    if (!project || !canRedoAction || processingRunIdRef.current) return;
     const next = redoStack[redoStack.length - 1];
     if (!next) return;
     setRedoStack(redoStack.slice(0, -1));
     setUndoStack([...undoStack, cloneProjectSharingEmbeddedModels(project)].slice(-30));
-    setProject(cloneProjectSharingEmbeddedModels(next));
+    invalidateCompletedRunState();
+    projectRef.current = cloneProjectSharingEmbeddedModels(next);
+    setProject(projectRef.current);
     pushMessage("Redo applied.");
   }
 
   async function handleResultVariantChange(variantId: string) {
     if (!completedRunId || variantId === activeResultVariantId) return;
+    const generation = ++resultVariantLoadGenerationRef.current;
     try {
       const inMemory = resultVariants.find((variant) => variant.id === variantId);
       const variant = inMemory ?? await getRunVariant(completedRunId, variantId);
+      if (generation !== resultVariantLoadGenerationRef.current) return;
       const withSafetyFactor = withDerivedSurfaceSafetyFactorFields({
         summary: variant.summary,
         fields: variant.fields
@@ -2205,6 +2213,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setRunError(null);
       pushMessage(`Showing ${variant.name}.`);
     } catch (error) {
+      if (generation !== resultVariantLoadGenerationRef.current) return;
       const message = errorMessage(error, "Could not load the selected result variant.");
       setRunError(message);
       pushMessage(message);
@@ -3065,15 +3074,15 @@ function defaultValueForLoadType(type: LoadType) {
 async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<{ savedAt: string; handle?: SaveFilePickerHandle } | null> {
   const savedAt = new Date().toISOString();
   const filename = suggestedProjectFilename(project.name);
-  const savedResults = results?.fields.length ? results : undefined;
-  const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt, savedResults), null, 2)], {
-    type: "application/json"
-  });
   const target = await prepareBlobSaveToDisk(filename, {
     description: "OpenCAE project",
     accept: { "application/json": [".json", ".opencae"] }
   });
   if (target === "cancelled") return null;
+  const savedResults = results?.fields.length ? await portableResultBundle(results, getRunVariant) : undefined;
+  const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt, savedResults), null, 2)], {
+    type: "application/json"
+  });
   await target.save(blob);
   return { savedAt, ...(target.handle ? { handle: target.handle } : {}) };
 }
