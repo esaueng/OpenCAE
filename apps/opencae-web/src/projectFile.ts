@@ -47,6 +47,29 @@ export interface LocalProjectFile {
   results?: LocalResultBundle;
 }
 
+export async function portableResultBundle(
+  results: LocalResultBundle,
+  loadVariant: (runId: string, variantId: string) => Promise<RunVariantResult>
+): Promise<LocalResultBundle> {
+  if (!results.variantRefs?.length) return results;
+  const variants = new Map((results.variants ?? []).map((variant) => [variant.id, variant]));
+  const runId = results.completedRunId || results.activeRunId;
+  // Resolve sequentially to avoid concurrent IndexedDB copies of large transient cases.
+  for (const reference of results.variantRefs) {
+    if (variants.has(reference.id)) continue;
+    if (!runId) throw new Error(`Cannot save ${reference.name}: the result run is missing. Re-run the simulation.`);
+    const variant = await loadVariant(runId, reference.id);
+    if (variant.id !== reference.id) throw new Error(`Cannot save ${reference.name}: the stored result belongs to a different case.`);
+    variants.set(reference.id, variant);
+  }
+  return {
+    ...results,
+    variants: [...variants.values()],
+    // Portable cases must remain available in memory when switching cases after import.
+    variantRefs: results.variantRefs.map(({ persistedSeparately: _persistedSeparately, ...reference }) => reference)
+  };
+}
+
 export function buildLocalProjectFile(
   project: Project,
   displayModel: DisplayModel,

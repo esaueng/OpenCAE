@@ -29,11 +29,14 @@ node scripts/verify-cloudflare-config.mjs
 pnpm typecheck
 pnpm test
 pnpm verify:step-selection-browser
+pnpm verify:project-results-browser
 pnpm build:cloudflare
 pnpm --filter @opencae/web check:bundle
 ```
 
 `verify:step-selection-browser` requires Chrome or Chromium and free local ports 5198 and 9336; set `CHROME_BIN` when auto-detection cannot find the browser. The bundle check reads `apps/opencae-web/dist`, so it must follow `build:cloudflare`.
+
+`verify:project-results-browser` checks history invalidation and portable dynamic cases in Chrome with software WebGL, using local ports 5199 and 9337.
 
 There is no root lint script and CI has no lint job. The five `packages/*` lint scripts are aliases for their typechecks; `pnpm typecheck` is the workspace-wide check.
 

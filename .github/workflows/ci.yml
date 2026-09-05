@@ -52,3 +52,6 @@ jobs:
 
       - name: Verify STEP selection across display LODs in Chrome
         run: pnpm verify:step-selection-browser
+
+      - name: Verify project history and portable result cases in Chrome
+        run: pnpm verify:project-results-browser
