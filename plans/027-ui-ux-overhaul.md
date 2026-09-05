@@ -112,26 +112,33 @@ restructuring does not touch `WorkspaceApp.tsx`, so only the RightPanel suite
 needs rewriting. Rewrite those assertions to test behavior (what is visible,
 what is disabled), not markup strings, in the same PR.
 
-### C — Chrome
+### C — Chrome (measured 2026-09-04: withdrawn)
 
-- Viewer: drop the `X Y Z Iso` strip; the cube already offers every axis and
-  Iso is a double-click on the cube. Keep `Perspective / Orthographic` and
-  raise its contrast to the segmented-control recipe. This merges the two
-  camera reducers; the sticky panel-side re-fit must survive (review 3.4).
-- Rail footer: replace the unlabeled readout with the units toggle only, or
-  remove it; the breadcrumb already carries study type.
-- Status bar: keep Tips, Logs and the status pill. Move Ko-fi, feedback and
-  github behind the existing Keys popover (renamed "Help") and keep them on
-  the start screen footer where they already are.
+- The `X Y Z Iso` strip stays. The view cube is drawn inside the WebGL
+  canvas and is not keyboard-operable; the strip (`role="group"`, "Camera
+  views") is the only accessible camera control. Its muted labels measure
+  5.3:1 on their own background in dark mode, so the "low contrast" claim
+  does not reproduce. The two-row wrap at 390 px is pre-existing and equal
+  with the system font.
+- The rail footer readout is labeled (`study`, `units`) and carries the
+  units toggle; not worth a change.
+- The status bar is left alone: moving the Ko-fi link out of the persistent
+  strip changes donation exposure, which is the maintainer's call, not a
+  design fix.
 
-### D — Copy sweep (review 3.5, own PR, last)
+### D — Copy sweep (scoped down after grepping the tree)
 
-Sentence case for "Download Project", "Clear All", "Clear List", the legend's
-six Title Case quantities; fix the four "Use Save project" strings; fix the
-readiness hint that lowercases "STEP". Touches 11+ pinned strings across five
-suites plus the report module; one assertion is a negative guard
-(`not.toContain("Von Mises Stress")`) that goes vacuous if the string is
-renamed. Update the guard in the same commit.
+The review's list was partly stale: the top bar no longer has a "Download
+Project" button (it is "Storage" + Cmd+S "Save project"), so the four "Use
+Save project" messages match the shortcut label and stay. What remained:
+the legend's six Title Case result titles ("Von Mises Stress", "Principal
+Stress σ₁/σ₃", "Maximum Shear Stress", "Normalized Mode Shape", "Heat Flux",
+"Safety Factor") → sentence case; "Clear All" / "Clear List" → sentence
+case; the Run readiness hint, which lowercased the whole item list (so
+"STEP" became "step"), now uses the same "Complete before running: …"
+phrasing as the top-bar tooltip. The negative guard in `RightPanel.test.tsx`
+(`not.toContain("Von Mises Stress")`) was updated to the new string in the
+same commit so it keeps testing something.
 
 ## Not in this plan
 
