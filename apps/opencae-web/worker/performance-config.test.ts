@@ -18,7 +18,7 @@ describe("Cloudflare Worker performance config", () => {
     for (const configPath of ["../../../wrangler.jsonc", "../../../wrangler.static.jsonc"]) {
       const config = readJson(configPath);
 
-      expect(config.assets?.run_worker_first).toEqual(["/api/*", "/health"]);
+      expect(config.assets?.run_worker_first).toEqual(["/api/*", "/health", "/healthz"]);
       expect(config.compatibility_flags).toContain("nodejs_compat");
     }
   });

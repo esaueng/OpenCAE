@@ -84,8 +84,8 @@ function validateProductionTarget(label, config, failures) {
   }
 
   const runWorkerFirst = config.assets?.run_worker_first;
-  if (!Array.isArray(runWorkerFirst) || !runWorkerFirst.includes("/api/*") || !runWorkerFirst.includes("/health")) {
-    failures.push(`${label} config assets.run_worker_first must include "/api/*" and "/health"`);
+  if (!Array.isArray(runWorkerFirst) || !runWorkerFirst.includes("/api/*") || !runWorkerFirst.includes("/health") || !runWorkerFirst.includes("/healthz")) {
+    failures.push(`${label} config assets.run_worker_first must include "/api/*", "/health", and "/healthz"`);
   }
   if (config.assets?.binding !== "ASSETS") {
     failures.push(`${label} config must bind Workers Static Assets as ASSETS`);
