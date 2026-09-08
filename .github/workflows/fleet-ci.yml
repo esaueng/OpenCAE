@@ -1,0 +1,178 @@
+name: Trusted CI jobs
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  quality:
+    timeout-minutes: 60
+    runs-on: &fleet-runner ${{ fromJSON(vars.CI_FLEET_ENABLED == 'true' && (github.repository == 'esaueng/OpenCAE' && github.repository_id == '1222078082' && github.actor == 'petergstfsn' && github.actor_id == '171875562' && github.triggering_actor == 'petergstfsn' && ((github.event_name == 'pull_request' && github.event.pull_request.state == 'open' && github.event.pull_request.user.login == 'petergstfsn' && github.event.pull_request.user.id == 171875562 && github.event.pull_request.head.repo.id == 1222078082 && github.event.pull_request.base.repo.id == 1222078082 && github.event.pull_request.head.repo.fork == false && github.event.pull_request.base.repo.fork == false && github.event.pull_request.base.ref == 'main' && github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.ref_protected == true))) && (vars.CI_FLEET_TARGET == 'ci-server-jane' && '{"group":"ci-trusted-main","labels":"ci-server-jane"}' || vars.CI_FLEET_TARGET == 'ci-server-john' && '{"group":"ci-trusted-main","labels":"ci-server-john"}') || '"ubuntu-latest"') }}
+    env:
+      CI: "true"
+    steps:
+      - &fleet-isolation
+        name: Verify runner isolation and fresh storage
+        if: runner.environment == 'self-hosted'
+        run: |
+          set -euo pipefail
+          case "$RUNNER_NAME" in
+            ci-vm-1441561|ci-server-jane|ci-server-john)
+              CI_USER=ci-runner CI_STORAGE=/srv/ci CI_SLICE=ci.slice
+              CI_DOCKER=ci-docker CI_MEMORY=3221225472 CI_CPUS=1
+              CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 ;;
+            ci-server-jane-1|ci-server-jane-2)
+              slot=${RUNNER_NAME##*-}
+              CI_USER=ci-slot$slot CI_STORAGE=/srv/ci-slot$slot CI_SLICE=cislot$slot.slice
+              CI_DOCKER=ci-slot$slot-docker CI_MEMORY=6442450944 CI_CPUS=6
+              CARGO_BUILD_JOBS=3 RUST_TEST_THREADS=6 ;;
+            *) echo 'Unknown trusted runner' >&2; exit 1 ;;
+          esac
+          CI_CGROUP=/sys/fs/cgroup/$CI_SLICE
+          test "$(id -un)" = "$CI_USER"
+          test "$(id -u)" != 0
+          test "$HOME" = "$CI_STORAGE/home"
+          test -f "/opt/$CI_USER/bin/Runner.Listener"
+          test -f "/etc/systemd/system/$CI_USER.service"
+          test ! -w "/opt/$CI_USER/bin/Runner.Listener"
+          test ! -w "/etc/systemd/system/$CI_USER.service"
+          test "$(awk '/^NoNewPrivs:/ {print $2}' /proc/self/status)" = 1
+          test ! -e "$HOME/.app-ci-sentinel"
+          test ! -e "$CI_STORAGE/work/.app-ci-sentinel"
+          touch "$HOME/.app-ci-sentinel" "$CI_STORAGE/work/.app-ci-sentinel"
+          test "$DOCKER_HOST" = "unix:///run/$CI_DOCKER/docker.sock"
+          docker info --format '{{json .SecurityOptions}}' | jq -e 'index("name=rootless") != null'
+          test -z "$(docker ps --all --quiet)"
+          test -z "$(docker image ls --quiet)"
+          test "$(cat "$CI_CGROUP/memory.max")" = "$CI_MEMORY"
+          test "$(cat "$CI_CGROUP/memory.swap.max")" = 0
+          awk -v cpus="$CI_CPUS" '{exit !($1 == $2 * cpus)}' "$CI_CGROUP/cpu.max"
+          grep -Fx "0::/$CI_SLICE/$CI_USER.service" /proc/self/cgroup
+          case ",$(findmnt -n -o OPTIONS --mountpoint "$CI_STORAGE")," in
+            *,nosuid,*) ;; *) exit 1 ;; esac
+          {
+            echo "CI_CGROUP=$CI_CGROUP"
+            echo "CI_STORAGE=$CI_STORAGE"
+            echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS"
+            echo "RUST_TEST_THREADS=$RUST_TEST_THREADS"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify direct scheduling policy
+        run: python3 scripts/test-direct-fleet.py
+      - name: Test trusted routing policy
+        run: python3 scripts/test-ci-routing.py
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build OpenCAE Core packages
+        run: |
+          pnpm --filter @opencae/core build
+          pnpm --filter @opencae/examples build
+          pnpm --filter @opencae/solver-cpu build
+          pnpm --filter @opencae/solver-webgpu build
+          pnpm --filter @opencae/viewer build
+
+      - name: Test OpenCAE Core packages
+        run: pnpm --filter "./packages/*" --if-present test
+
+      - name: Verify Cloudflare config
+        run: node scripts/verify-cloudflare-config.mjs
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build web app
+        run: pnpm --filter @opencae/web build
+
+      - name: Enforce web bundle budget
+        run: node scripts/check-web-bundle-budget.mjs
+  browser:
+    needs: quality
+    if: always() && !cancelled() && needs.quality.result == 'success'
+    timeout-minutes: 30
+    runs-on: *fleet-runner
+    steps:
+      - *fleet-isolation
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build OpenCAE Core packages
+        run: |
+          pnpm --filter @opencae/core build
+          pnpm --filter @opencae/examples build
+          pnpm --filter @opencae/solver-cpu build
+          pnpm --filter @opencae/solver-webgpu build
+          pnpm --filter @opencae/viewer build
+
+      - name: Build web app
+        run: pnpm --filter @opencae/web build
+
+      - name: Verify STEP selection across display LODs in Chrome
+        run: |
+          if [ "${{ runner.environment }}" = self-hosted ]; then
+            exec 9</run/ci-browser.lock
+            flock --exclusive 9
+          fi
+          pnpm verify:step-selection-browser
+
+      - name: Verify project history and portable result cases in Chrome
+        run: |
+          if [ "${{ runner.environment }}" = self-hosted ]; then
+            exec 9</run/ci-browser.lock
+            flock --exclusive 9
+          fi
+          pnpm verify:project-results-browser
+  test:
+    name: test
+    needs: [quality, browser]
+    if: always()
+    runs-on: *fleet-runner
+    steps:
+      - *fleet-isolation
+      - name: Require all checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY_GATE'
+          import json, os
+          results = json.loads(os.environ["RESULTS"])
+          assert results and all(job["result"] == "success" for job in results.values()), results
+          PY_GATE
+  cloudflare-verify:
+    runs-on: *fleet-runner
+    timeout-minutes: 30
+    steps:
+      - *fleet-isolation
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.22.2
+      - run: |
+          mkdir -p "$HOME/.local/bin"
+          corepack enable --install-directory "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm deploy:cloudflare:dry-run
