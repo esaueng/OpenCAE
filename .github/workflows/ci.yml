@@ -9,49 +9,19 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    permissions:
+      contents: read
+      id-token: write
+    uses: esaueng/OpenCAE/.github/workflows/trusted-ci.yml@6a040e47150ab0436b70e7016737a5051edc558a
+
   test:
+    name: test
+    needs: checks
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build OpenCAE Core packages
-        run: |
-          pnpm --filter @opencae/core build
-          pnpm --filter @opencae/examples build
-          pnpm --filter @opencae/solver-cpu build
-          pnpm --filter @opencae/solver-webgpu build
-          pnpm --filter @opencae/viewer build
-
-      - name: Test OpenCAE Core packages
-        run: pnpm --filter "./packages/*" --if-present test
-
-      - name: Verify Cloudflare config
-        run: node scripts/verify-cloudflare-config.mjs
-
-      - name: Type check
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build web app
-        run: pnpm --filter @opencae/web build
-
-      - name: Enforce web bundle budget
-        run: node scripts/check-web-bundle-budget.mjs
-
-      - name: Verify STEP selection across display LODs in Chrome
-        run: pnpm verify:step-selection-browser
-
-      - name: Verify project history and portable result cases in Chrome
-        run: pnpm verify:project-results-browser
+      - name: Require all checks
+        env:
+          RESULT: ${{ needs.checks.result }}
+        run: test "$RESULT" = success
