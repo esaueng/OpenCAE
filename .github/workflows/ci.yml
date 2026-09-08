@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: esaueng/OpenCAE/.github/workflows/trusted-ci.yml@c21730f0026c7e810a44bad5901f2eeb57028c9b
+    uses: esaueng/OpenCAE/.github/workflows/trusted-ci.yml@6a040e47150ab0436b70e7016737a5051edc558a
 
   test:
     name: test
