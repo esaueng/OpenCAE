@@ -12,16 +12,4 @@ jobs:
   checks:
     permissions:
       contents: read
-      id-token: write
-    uses: esaueng/OpenCAE/.github/workflows/trusted-ci.yml@6a040e47150ab0436b70e7016737a5051edc558a
-
-  test:
-    name: test
-    needs: checks
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Require all checks
-        env:
-          RESULT: ${{ needs.checks.result }}
-        run: test "$RESULT" = success
+    uses: esaueng/OpenCAE/.github/workflows/fleet-ci.yml@a915b8b19fdfd0f1694484d3b02e75d9bafdbff3
