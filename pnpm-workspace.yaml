@@ -47,6 +47,10 @@ overrides:
   # GHSA-m8rv-5g2x-5cg5, GHSA-v3r7-h72x-cjcm (moderate): dev-only, via
   # wrangler -> miniflare (local Workers simulator). 7.29.0 is the patched floor.
   "undici@^7.0.0": "^7.29.0"
+  # Patched floors for transitive image tooling and both compression API lines.
+  "sharp@^0.35.0": "^0.35.4"
+  "fflate@^0.8.0": "^0.8.3"
+  "fflate@^0.6.0": "^0.6.11"
 allowBuilds:
   better-sqlite3: true
   core-js: false

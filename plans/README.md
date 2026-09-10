@@ -2,7 +2,7 @@
 
 Four advisory runs are indexed here:
 
-- **Run 1 — 2026-06-12**, base commit `3a67db9`, standard read-only survey (plans 001–005). Written when the repo lived at `/Users/userzero/codex/opencae-alpha`.
+- **Run 1 — 2026-06-12**, base commit `3a67db9`, standard read-only survey (plans 001–005).
 - **Run 2 — 2026-07-01**, standard read-only survey (plans 006–010). Audited **`origin/main` at `d1556f2`** via a detached worktree, because the local checkout's `main` (`4373faf`) is 1 ahead / 34 behind `origin/main` — see plan 006, which must land first. Run 2 re-verified plans 001–005 against `d1556f2`: **all five remain unimplemented and their cited code is unchanged**; they stay TODO.
 - **Run 3 — 2026-07-02**, standard engineering/CAE-validity survey (plans 011–014). Audited the **solver itself**: the sibling OpenCAE-Core checkout at the pinned ref `08ca7a6` (byte-identical to the production runner 0.1.5) plus the open-cae post-processing chain at `d1556f2`. Four parallel numerical-methods audits plus independent hand checks (Timoshenko deflection/stress, first-bending frequency, HRZ mass-fraction conservation). Headline: **the production solver's math is sound — the gaps are in the verification harness** (gates run in no CI, single-configuration benchmark, no gmsh-path gate, no unit round-trip).
 - **Run 4 — 2026-07-05**, local-first solver migration plan (plans 015–016). Split the revised fully-local solver memo into an executable browser-solver parity track and a WASM meshing/offline-assets track. Plan 015 is already in progress with a dynamic step-budget preflight slice; plan 016 remains gated by Gmsh WASM viability and licensing.

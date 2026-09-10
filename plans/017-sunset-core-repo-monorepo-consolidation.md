@@ -89,12 +89,8 @@ Core branch state (verified against `origin` 2026-07-09):
 - `security/redact-secrets`: 1 unmerged commit — triage before archive.
 - `audit-fixes`, `improvement-plans`, `fix/bracket-tet10-inverted-jacobian`,
   `solver-accuracy-0.1.5`: fully merged, nothing to rescue.
-- Old checkout `~/claude/open-cae-core` (branch `improvement-plans`): has an
-  **uncommitted** `plans/README.md` edit and **untracked** Core advisor plans
-  006–009 (unit conventions, dynamic diagnostics, safety-factor metadata,
-  cloud meshing guards). Rescue before deleting the checkout.
-- Extra local clones of open-cae itself (`open-cae-dup`, `open-cae-gradient`,
-  `open-cae-tierwork`) will go stale after the restructure; retire them.
+- Inspect legacy and additional local checkouts for uncommitted, untracked,
+  or unpushed work. Preserve useful changes before retiring any checkout.
 
 ## Implementation Steps
 
@@ -109,7 +105,7 @@ Core branch state (verified against `origin` 2026-07-09):
    expected to be clean since everything else is merged.
 3. In Core: triage `security/redact-secrets` (1 commit) — merge or reject
    explicitly.
-4. Rescue the old checkout: in `~/claude/open-cae-core`, commit the
+4. Rescue the old checkout: in `<legacy-core-checkout>`, commit the
    `plans/README.md` edit and plans 006–009 to `improvement-plans` and push —
    or, simpler, copy those four plan files into this repo's `plans/` as
    Core-lineage reference docs (`docs/core/plans/`). Do not let uncommitted
@@ -162,8 +158,8 @@ Core branch state (verified against `origin` 2026-07-09):
 
 ### Phase 3 — prove standalone (gates for the Phase 1+2 PR)
 
-15. With the sibling temporarily renamed away (`mv ~/claude/opencae-core
-    ~/claude/opencae-core.parked`):
+15. With the sibling temporarily renamed away (`mv <core-checkout>
+    <core-checkout>.parked`):
     - `pnpm install --frozen-lockfile`
     - `pnpm build` (includes web production build)
     - `pnpm typecheck` — note the pre-existing `localCantileverAccuracy`
@@ -187,8 +183,8 @@ Core branch state (verified against `origin` 2026-07-09):
 
 20. Push a tombstone commit to Core `main` (README: "Merged into
     esaueng/OpenCAE at <SHA>; archived read-only") and archive the GitHub repo.
-21. Delete local checkouts: `~/claude/opencae-core` (the parked sibling) and
-    `~/claude/open-cae-core` (after step 4's rescue). Decide the fate of
+21. Delete local checkouts: `<core-checkout>` (the parked sibling) and
+    `<legacy-core-checkout>` (after step 4's rescue). Decide the fate of
     `open-cae-dup`, `open-cae-gradient`, `open-cae-tierwork` — they are stale
     full clones and will not pick up the restructure; recommend deletion after
     checking each for unpushed branches (`git -C <dir> log --branches --not

@@ -76,7 +76,7 @@ The browser already has a real OpenCAE Core solve path (`opencae_core_local`), b
 ## Verification Gates
 
 ```sh
-PATH=/Users/userzero/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH node_modules/.bin/vitest run apps/opencae-web/src/lib/api.test.ts apps/opencae-web/src/workers/opencaeCoreSolve.test.ts apps/opencae-web/src/workers/localCantileverAccuracy.test.ts
+pnpm exec vitest run apps/opencae-web/src/lib/api.test.ts apps/opencae-web/src/workers/opencaeCoreSolve.test.ts apps/opencae-web/src/workers/localCantileverAccuracy.test.ts
 pnpm typecheck
 pnpm test
 ```
