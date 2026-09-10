@@ -28,6 +28,8 @@ import { highlightPayloadObjectMeshes } from "../payloadObjectHighlight";
 import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } from "../calloutLabelLayout";
 import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
+export { finalVisualScaleForDisplacementField } from "../resultDeformation";
+import { RESULT_DEFORMATION_CAP_FRACTION as SHARED_DEFORMATION_CAP_FRACTION, finalVisualScaleForDisplacementField, isSolverSurfaceNodeField, maxDisplacementMagnitude, resolvedDeformation, transientDisplacementPeakMagnitude } from "../resultDeformation";
 import { resultColorAtNormalized, resultColorForValue as colorForScaleValue, resultScaleCssGradient, type ResolvedResultColorScale } from "../resultColorScale";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
@@ -176,8 +178,8 @@ const DEBUG_FORCE_DEFORMATION_SCALE =
   import.meta.env.DEV && DEBUG_RESULTS && typeof window !== "undefined"
     ? Number(new URLSearchParams(window.location.search).get("forceDeformScale"))
     : Number.NaN;
-const RESULT_DEFORMATION_TARGET_FRACTION = 0.08;
-const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : 0.25;
+// The production cap lives in ../resultDeformation; the debug flag only widens it locally.
+const RESULT_DEFORMATION_CAP_FRACTION = DEBUG_RESULTS ? 1 : SHARED_DEFORMATION_CAP_FRACTION;
 const ResultColorScaleContext = createContext<ResolvedResultColorScale | null>(null);
 const StressComponentContext = createContext<StressComponent>("von_mises");
 /* Scene labels are drawn into the canvas, so no DOM contrast check can see them — which is
@@ -3752,15 +3754,6 @@ export function recoverSurfaceNodeScalarField(
   };
 }
 
-function isSolverSurfaceNodeField(field: ResultField, surfaceMesh: SolverSurfaceMesh, resultMode: ResultMode): boolean {
-  return (
-    field.type === resultMode &&
-    field.location === "node" &&
-    field.surfaceMeshRef === surfaceMesh.id &&
-    field.values.length === surfaceMesh.nodes.length
-  );
-}
-
 function SolverSurfaceResultMesh({
   surfaceMesh,
   scalarField,
@@ -4568,39 +4561,6 @@ export function interpolateDisplacementAtPoint(
   return (totalWeight > 0 ? vector.multiplyScalar(1 / totalWeight) : vector).toArray() as [number, number, number];
 }
 
-export function finalVisualScaleForDisplacementField(
-  modelExtent: number,
-  displacementField: ResultField | undefined,
-  deformationScale: number,
-  capFraction = RESULT_DEFORMATION_CAP_FRACTION,
-  displacementPeakMagnitude?: number
-) {
-  // Prefer an explicit run-wide peak (transient) so the scale is constant across frames;
-  // fall back to the field's own max for single-frame (static) results.
-  const displacementMax = Number.isFinite(displacementPeakMagnitude) && (displacementPeakMagnitude ?? 0) > 0
-    ? (displacementPeakMagnitude as number)
-    : maxDisplacementMagnitude(displacementField);
-  const requestedScale = Math.max(0, deformationScale);
-  const safeExtent = Math.max(0, modelExtent);
-  const autoScale = displacementMax > 1e-12
-    ? (safeExtent * RESULT_DEFORMATION_TARGET_FRACTION) / displacementMax
-    : 0;
-  const unclampedFinalScale = autoScale * requestedScale;
-  const maxVisualDisplacement = safeExtent * Math.max(0, capFraction);
-  const maxFinalScale = displacementMax > 1e-12
-    ? maxVisualDisplacement / displacementMax
-    : 0;
-  const finalVisualScale = Math.min(unclampedFinalScale, maxFinalScale);
-  return {
-    deformationScale: requestedScale,
-    autoScale,
-    unclampedFinalScale,
-    maxFinalScale,
-    finalVisualScale,
-    capActive: unclampedFinalScale > maxFinalScale
-  };
-}
-
 function visualScaleForDisplacementField(modelExtent: number, displacementField: ResultField | undefined, deformationScale: number): number {
   return finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale).finalVisualScale;
 }
@@ -4779,32 +4739,6 @@ function finiteOr0(value: number | undefined): number {
 // single already-globally-stabilized frame (so this returns that frame's global max). Either
 // way the deformation scale stays constant across the transient instead of self-normalizing
 // each frame, which would amplify a near-zero opening frame into a torn shape.
-function transientDisplacementPeakMagnitude(fields: ResultField[], currentField: ResultField | undefined): number {
-  let peak = 0;
-  for (const field of fields) {
-    if (field.type !== "displacement") continue;
-    peak = Math.max(peak, maxDisplacementMagnitude(field));
-  }
-  return peak > 0 ? peak : maxDisplacementMagnitude(currentField);
-}
-
-function maxDisplacementMagnitude(field: ResultField | undefined): number {
-  if (!field) return 0;
-  let max = Number.NEGATIVE_INFINITY;
-  const consider = (magnitude: number) => {
-    if (Number.isFinite(magnitude) && magnitude > max) max = magnitude;
-  };
-  consider(Math.abs(Number(field.max)));
-  consider(Math.abs(Number(field.min)));
-  for (const value of field.values) consider(Math.abs(value));
-  for (const vector of field.vectors ?? []) consider(Math.hypot(vector[0], vector[1], vector[2]));
-  for (const sample of field.samples ?? []) {
-    consider(Math.abs(sample.value));
-    consider(sample.vector ? Math.hypot(sample.vector[0], sample.vector[1], sample.vector[2]) : 0);
-  }
-  return Number.isFinite(max) ? max : 0;
-}
-
 function resultFieldPointExtent(field: ResultField | undefined): number {
   const samples = field?.samples;
   if (!samples?.length) return 0;
@@ -6671,26 +6605,19 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
   const resizeDragRef = useRef<ResultLegendResizeDrag | null>(null);
   const [legendSize, setLegendSize] = useState<ResultLegendSize | null>(null);
   const deformationLabel = useMemo(() => {
-    if (!showDeformed || !surfaceMesh) return null;
-    const deformationMode = resultMode === "mode_shape" ? "mode_shape" : "displacement";
-    const displacementFields = resultFields.filter((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, deformationMode));
-    const displacementField = displacementFields[0];
-    if (!displacementField?.vectors?.length) return null;
-    const bounds = new THREE.Box3();
-    for (const node of surfaceMesh.nodes) {
-      if (node.every(Number.isFinite)) bounds.expandByPoint(new THREE.Vector3(...node));
-    }
-    const modelExtent = bounds.isEmpty() ? 1 : bounds.getSize(new THREE.Vector3()).length();
-    // Match the geometry's run-wide deformation scale so the reported exaggeration factor
-    // is consistent across frames rather than reflecting the opening frame's own max.
-    const displacementPeakMagnitude = transientDisplacementPeakMagnitude(displacementFields, displacementField);
-    const appliedScale = finalVisualScaleForDisplacementField(modelExtent, displacementField, deformationScale ?? 1, RESULT_DEFORMATION_CAP_FRACTION, displacementPeakMagnitude).finalVisualScale;
-    // Solver surface meshes are in solver units (meters) while displacement
-    // fields are normalized to mm; the true exaggeration is 1000x the applied
-    // vertex-shift factor in that case.
-    if (resultMode === "mode_shape") return `${(deformationScale ?? 1).toFixed(1)}x visual`;
-    const unitFactor = displacementField.units === "mm" && surfaceMesh.coordinateSpace === "solver" ? 1000 : 1;
-    return legendDeformationLabel(appliedScale * unitFactor);
+    // One definition of the applied factor, shared with the PDF report caption so the two
+    // can no longer disagree about what the rendered shape is exaggerated by.
+    const resolved = resolvedDeformation({
+      surfaceMesh,
+      resultFields,
+      resultMode,
+      deformationScale,
+      showDeformed,
+      capFraction: RESULT_DEFORMATION_CAP_FRACTION
+    });
+    if (!resolved) return null;
+    if (resolved.kind === "mode_shape") return `${resolved.factor.toFixed(1)}x visual`;
+    return legendDeformationLabel(resolved.factor);
   }, [deformationScale, resultFields, resultMode, showDeformed, surfaceMesh]);
   const title = resultLegendTitle(resultMode, stressComponent);
   // Prefer the field actually rendered on the solver surface mesh so the legend

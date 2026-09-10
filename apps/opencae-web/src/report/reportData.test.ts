@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/samples";
 import type { Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { buildReportData, suggestedReportFilename } from "./reportData";
+import { resolvedDeformation } from "../resultDeformation";
 
 const productionSummary: ResultSummary = {
   maxStress: 142,
@@ -52,6 +53,76 @@ function report(overrides: Partial<Parameters<typeof buildReportData>[0]> = {}) 
 }
 
 describe("buildReportData", () => {
+  test("captions the figure with the exaggeration applied, not the emphasis slider", () => {
+    // The reported defect: the caption printed the panel's slider value (1-4) and called it
+    // the exaggeration, while the shape was auto-fitted to 8% of model extent and THEN
+    // multiplied by that slider — routinely a factor in the hundreds or thousands.
+    const data = report({
+      resolvedDeformation: { kind: "displacement", factor: 2150.4 }
+    });
+
+    const caption = data.figures.stress.caption;
+    expect(caption).toContain("×2,150 exaggeration");
+    expect(caption).toContain("×1.8 emphasis");
+    // The bug was that the slider value stood alone as the exaggeration.
+    expect(caption).not.toContain("×1.8 exaggeration");
+  });
+
+  test("never presents a mode shape's emphasis as a displacement exaggeration", () => {
+    // Modal amplitudes are normalized and carry no physical magnitude.
+    const data = report({
+      resolvedDeformation: { kind: "mode_shape", factor: 1.8 }
+    });
+
+    expect(data.figures.stress.caption).toContain("visual emphasis (unscaled amplitude)");
+    expect(data.figures.stress.caption).not.toContain("exaggeration");
+  });
+
+  test("claims no factor when the viewport could not resolve one", () => {
+    const data = report({ resolvedDeformation: null });
+    expect(data.figures.stress.caption).toContain("Deformed shape (display only)");
+    expect(data.figures.stress.caption).not.toMatch(/×[\d,.]+ exaggeration/);
+  });
+
+  test("reports the same factor the viewport legend derives", () => {
+    // Both sides call resolvedDeformation, so this pins that the report is fed the resolved
+    // number rather than recomputing it — the drift that produced the original bug.
+    const surfaceMesh = {
+      id: "surface-1",
+      nodes: [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]],
+      triangles: [[0, 1, 2]],
+      coordinateSpace: "solver" as const
+    };
+    const displacement: ResultField = {
+      id: "disp",
+      type: "displacement",
+      location: "node",
+      units: "mm",
+      surfaceMeshRef: "surface-1",
+      label: "Displacement",
+      min: 0,
+      max: 0.2,
+      values: [0, 0.1, 0.15, 0.2],
+      vectors: [[0, 0, 0], [0, 0, 0.1], [0, 0, 0.15], [0, 0, 0.2]]
+    } as unknown as ResultField;
+
+    const resolved = resolvedDeformation({
+      surfaceMesh: surfaceMesh as never,
+      resultFields: [displacement],
+      resultMode: "displacement",
+      deformationScale: 1.8,
+      showDeformed: true
+    });
+    expect(resolved?.kind).toBe("displacement");
+    // Auto-fit puts peak displacement at 8% of the model diagonal, then the slider scales it,
+    // and the mm-on-solver-metres correction multiplies by 1000 — nowhere near 1.8.
+    expect(resolved!.factor).toBeGreaterThan(100);
+
+    const data = report({ resolvedDeformation: resolved });
+    expect(data.figures.stress.caption).toContain(`×${Math.round(resolved!.factor).toLocaleString()} exaggeration`);
+  });
+
+
   test("preserves honest panel formatting and estimated mesh labels", () => {
     const data = report();
 
