@@ -76,7 +76,7 @@ describe("buildReportData", () => {
     expect(data.keyResults).toContainEqual({ label: "Max displacement", value: "0.007 in" });
     expect(data.keyResults).toContainEqual({ label: "Reaction force", value: "112.4 lbf" });
     expect(data.materials.rows[0]?.[1]).toContain("ksi");
-    expect(data.materials.rows[0]?.[3]).toContain("lb/ft^3");
+    expect(data.materials.rows[0]?.[3]).toContain("lb/in^3");
     expect(data.figures.stress.legendMax).toContain("ksi");
     expect(data.figures.stress.legendMin).toContain("ksi");
     expect(data.figures.displacement.legendMax).toContain("in");

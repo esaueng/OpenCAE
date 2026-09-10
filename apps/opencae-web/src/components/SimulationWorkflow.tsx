@@ -3,7 +3,7 @@ import { Search, X } from "lucide-react";
 import { compatibleManufacturingProcessesFor, materialCategoryLabel, starterMaterials } from "@opencae/materials";
 import type { CustomMaterial, Material } from "@opencae/schema";
 import { useFocusTrap } from "../hooks/useFocusTrap";
-import { formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
+import { KG_PER_M3_PER_LB_PER_IN3, formatDensity, formatMaterialStress, type UnitSystem } from "../unitDisplay";
 import dynamicAnalysisImage from "../assets/simulation-showcase/dynamic-analysis.webp";
 import staticAnalysisImage from "../assets/simulation-showcase/static-analysis.webp";
 
@@ -450,7 +450,9 @@ function MaterialEditor({ draft, unitSystem, error, onChange, onCancel, onSave }
   onSave: () => void;
 }) {
   const stressUnit = unitSystem === "US" ? "ksi" : "MPa";
-  const densityUnit = unitSystem === "US" ? "lb/in³" : "kg/m³";
+  // Spelled the way formatDensity renders it, so the field the user types into and
+  // the preview row beside it read as the same unit rather than two notations.
+  const densityUnit = unitSystem === "US" ? "lb/in^3" : "kg/m^3";
   return (
     <div className="material-editor">
       <h3>Edit custom material</h3>
@@ -472,7 +474,6 @@ function MaterialEditor({ draft, unitSystem, error, onChange, onCancel, onSave }
 }
 
 const PASCALS_PER_KSI = 6_894_757.293168;
-const KG_PER_M3_PER_LB_PER_IN3 = 27_679.9047102;
 
 export function stressForEditor(pascals: number, unitSystem: UnitSystem): number {
   return unitSystem === "US" ? pascals / PASCALS_PER_KSI : pascals / 1e6;
