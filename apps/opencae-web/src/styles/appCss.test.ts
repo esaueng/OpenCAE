@@ -202,6 +202,27 @@ describe("app CSS", () => {
     expect(betaTag).toMatch(/border:\s*1px\s+solid\s+var\(--color-accent-border\)/);
   });
 
+  test("keeps the start screen scrollable when it outgrows a short viewport", () => {
+    const startScreen = cssRule(".start-screen");
+
+    // The sample menu is taller than a 600px viewport, and html/body are
+    // overflow:hidden, so .start-screen is the only box that can scroll it.
+    // It can only do that while its own height is constrained: under
+    // `min-height: 100%` it grows to fit its content instead, overflow:auto
+    // finds nothing to scroll, and the Load button becomes unreachable.
+    expect(startScreen).toMatch(/\n\s*height:\s*100%/);
+    expect(startScreen).not.toMatch(/min-height:\s*100%/);
+    expect(startScreen).toMatch(/overflow:\s*auto/);
+
+    // Constraining the height alone clips the top: a centred flex item that
+    // overflows does so in both directions, and the part above the scroll
+    // origin cannot be reached. `safe` degrades to start-alignment exactly
+    // then. The bare `center` before it is the fallback for engines that drop
+    // the `safe` keyword, so both must be present and in that order.
+    const alignments = [...startScreen.matchAll(/align-items:\s*([^;]+);/g)].map((match) => (match[1] ?? "").trim());
+    expect(alignments).toEqual(["center", "safe center"]);
+  });
+
   test("keeps the main start screen compact and stacks the sample submenu vertically", () => {
     const startScreen = cssRule(".start-screen");
     const startBrand = cssRule(".start-brand");
