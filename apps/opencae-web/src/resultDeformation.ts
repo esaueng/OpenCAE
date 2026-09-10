@@ -121,11 +121,19 @@ export function resolvedDeformation(input: {
   const { surfaceMesh, resultFields, resultMode, showDeformed } = input;
   const deformationScale = input.deformationScale ?? 1;
   if (!showDeformed || !surfaceMesh) return null;
-  if (resultMode === "mode_shape") return { kind: "mode_shape", factor: deformationScale };
 
-  const displacementFields = resultFields.filter((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, "displacement"));
+  // The field lookup runs for mode shapes too, and its guard gates them as well: with no
+  // deforming field on this surface there is nothing being exaggerated, so there is no
+  // factor to report. Returning the mode-shape emphasis before this point would announce
+  // one for a shape that is not deformed.
+  const deformationMode = resultMode === "mode_shape" ? "mode_shape" : "displacement";
+  const displacementFields = resultFields.filter((candidate) => isSolverSurfaceNodeField(candidate, surfaceMesh, deformationMode));
   const displacementField = displacementFields[0];
   if (!displacementField?.vectors?.length) return null;
+
+  // Modal amplitudes are normalised, so the slider value is the whole story: there is no
+  // physical magnitude for an auto-fit to scale against.
+  if (resultMode === "mode_shape") return { kind: "mode_shape", factor: deformationScale };
 
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;

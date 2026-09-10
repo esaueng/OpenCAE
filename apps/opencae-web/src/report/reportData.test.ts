@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/samples";
 import type { Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { buildReportData, suggestedReportFilename } from "./reportData";
-import { resolvedDeformation } from "../resultDeformation";
+import { formatDeformationFactor, resolvedDeformation } from "../resultDeformation";
 
 const productionSummary: ResultSummary = {
   maxStress: 142,
@@ -122,6 +122,52 @@ describe("buildReportData", () => {
     expect(data.figures.stress.caption).toContain(`×${Math.round(resolved!.factor).toLocaleString()} exaggeration`);
   });
 
+  test("keeps sub-10 factors to one decimal and never rounds one away", () => {
+    // formatDeformationFactor switches to whole numbers at 10; below it a factor must keep
+    // its decimal rather than collapsing to a bare integer.
+    expect(formatDeformationFactor(2.5)).toBe("2.5");
+    expect(formatDeformationFactor(9.94)).toBe("9.9");
+    expect(formatDeformationFactor(10)).toBe("10");
+    expect(formatDeformationFactor(2150.4)).toBe("2,150");
+    const data = report({ resolvedDeformation: { kind: "displacement", factor: 2.5 } });
+    expect(data.figures.stress.caption).toContain("×2.5 exaggeration");
+  });
+
+  test("resolves no factor when nothing on the surface is deforming", () => {
+    const surfaceMesh = {
+      id: "surface-1",
+      nodes: [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]],
+      triangles: [[0, 1, 2]],
+      coordinateSpace: "solver" as const
+    } as never;
+    const base = {
+      id: "disp",
+      type: "displacement",
+      location: "node",
+      units: "mm",
+      surfaceMeshRef: "surface-1",
+      label: "Displacement",
+      min: 0,
+      max: 0.2,
+      values: [0, 0.1, 0.15, 0.2]
+    };
+
+    const common = { surfaceMesh, resultMode: "displacement" as const, deformationScale: 1.8, showDeformed: true };
+
+    // No vectors at all — nothing to displace.
+    expect(resolvedDeformation({ ...common, resultFields: [base as unknown as ResultField] })).toBeNull();
+    // Vectors present but all zero: the auto-fit divides by a zero peak, so the factor
+    // degenerates to 0 and must be reported as "no factor" rather than "×0".
+    const zeroed = { ...base, max: 0, values: [0, 0, 0, 0], vectors: [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]] };
+    expect(resolvedDeformation({ ...common, resultFields: [zeroed as unknown as ResultField] })).toBeNull();
+    // Not deformed, and no surface, are both null regardless of the fields.
+    const real = { ...base, vectors: [[0, 0, 0], [0, 0, 0.1], [0, 0, 0.15], [0, 0, 0.2]] } as unknown as ResultField;
+    expect(resolvedDeformation({ ...common, resultFields: [real], showDeformed: false })).toBeNull();
+    expect(resolvedDeformation({ ...common, resultFields: [real], surfaceMesh: undefined })).toBeNull();
+    // A mode shape with no mode-shape field on this surface reports nothing either: the
+    // field guard gates both modes, matching the viewport legend.
+    expect(resolvedDeformation({ ...common, resultFields: [real], resultMode: "mode_shape" })).toBeNull();
+  });
 
   test("preserves honest panel formatting and estimated mesh labels", () => {
     const data = report();
