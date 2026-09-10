@@ -22,7 +22,7 @@
     "@opencae/storage": "workspace:*",
     "@opencae/study-core": "workspace:*",
     "@opencae/units": "workspace:*",
-    "fastify": "^5.10.0"
+    "fastify": "^5.12.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
