@@ -1724,6 +1724,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         exaggeration: stressExaggeration,
         // The slider is an emphasis multiplier on an auto-fit, so the report caption needs
         // the factor the viewport actually applied, not the control's value.
+        //
+        // capFraction is left at the production default deliberately. CadViewer widens its
+        // own cap to 1 under ?debugResults=1, but that flag is import.meta.env.DEV-gated and
+        // exists to inspect the viewport, not to change what a report asserts — a exported
+        // PDF should carry the factor a real user would see.
         resolvedDeformation: resolvedDeformation({
           surfaceMesh: resultSurfaceMesh,
           resultFields,
