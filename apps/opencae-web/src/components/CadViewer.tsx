@@ -29,7 +29,7 @@ import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } fr
 import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
 export { finalVisualScaleForDisplacementField } from "../resultDeformation";
-import { RESULT_DEFORMATION_CAP_FRACTION as SHARED_DEFORMATION_CAP_FRACTION, RESULT_DEFORMATION_TARGET_FRACTION, finalVisualScaleForDisplacementField, isSolverSurfaceNodeField, maxDisplacementMagnitude, resolvedDeformation, transientDisplacementPeakMagnitude } from "../resultDeformation";
+import { RESULT_DEFORMATION_CAP_FRACTION as SHARED_DEFORMATION_CAP_FRACTION, finalVisualScaleForDisplacementField, isSolverSurfaceNodeField, maxDisplacementMagnitude, resolvedDeformation, transientDisplacementPeakMagnitude } from "../resultDeformation";
 import { resultColorAtNormalized, resultColorForValue as colorForScaleValue, resultScaleCssGradient, type ResolvedResultColorScale } from "../resultColorScale";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
