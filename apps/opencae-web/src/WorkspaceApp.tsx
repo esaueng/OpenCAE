@@ -66,6 +66,7 @@ import {
 } from "./resultPlaybackTimeline";
 import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
 import type { WorkspaceInitialAction } from "./App";
+import { resolvedDeformation } from "./resultDeformation";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type PrintLayerOrientation, type ProjectionMode, type ResultMode, type ResultPlaybackFrameController, type SectionPlaneState, type StressComponent, type ThemeMode, type ViewerLoadMarker, type ViewerSupportMarker, type ViewMode } from "./workspaceViewTypes";
 import { defaultRecentProjectService, isRecentProjectsSupported } from "./recentProjects";
 import { useFocusTrap } from "./hooks/useFocusTrap";
@@ -1721,6 +1722,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         captures,
         generatedAt,
         exaggeration: stressExaggeration,
+        // The slider is an emphasis multiplier on an auto-fit, so the report caption needs
+        // the factor the viewport actually applied, not the control's value.
+        resolvedDeformation: resolvedDeformation({
+          surfaceMesh: resultSurfaceMesh,
+          resultFields,
+          resultMode,
+          deformationScale: stressExaggeration,
+          showDeformed
+        }),
         showDeformed,
         targetSafetyFactor: options?.targetSafetyFactor
       });

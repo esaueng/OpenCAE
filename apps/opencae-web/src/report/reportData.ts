@@ -10,6 +10,7 @@ import {
 } from "@opencae/materials";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { SolverMeshSummary } from "../resultFields";
+import { formatDeformationFactor, type ResolvedDeformation } from "../resultDeformation";
 import { fieldWithOwnValueRange, formatResultValue } from "../resultFields";
 import { unitsForLoadType } from "../loadPreview";
 import type { CapturedBoundaryView, CapturedResultView, ResultViewCaptures } from "./captureResultViews";
@@ -114,7 +115,17 @@ export interface BuildReportDataInput {
   unitSystem: UnitSystem;
   captures: ResultViewCaptures;
   generatedAt: Date;
+  /**
+   * The emphasis multiplier from the results panel — NOT the exaggeration. Kept so the
+   * caption can name it alongside the factor it produced.
+   */
   exaggeration: number;
+  /**
+   * The exaggeration the viewport actually applied, from `resolvedDeformation`. The panel's
+   * slider is a multiplier on an auto-fit, so this is routinely two to four orders of
+   * magnitude larger. Absent when the figure is undeformed or the factor is unresolvable.
+   */
+  resolvedDeformation?: ResolvedDeformation | null;
   showDeformed?: boolean;
   /** Reverse-check target from the results panel; defaults to 1.5 like the panel. */
   targetSafetyFactor?: number;
@@ -656,9 +667,7 @@ function figureData(
   const frameCaption = capture?.selection === "peak" && capture.frameIndex !== undefined
     ? ` Automatically selected peak ${lowercaseFirst(title)} frame (${framePositionLabel(fields, capture.frameIndex)}${capture.timeSeconds === undefined ? "" : `, ${capture.timeSeconds.toFixed(4)} s`}).`
     : "";
-  const deformationCaption = input.showDeformed
-    ? `Deformed shape, ×${formatResultValue(input.exaggeration)} exaggeration (display only)`
-    : "Undeformed shape";
+  const deformationCaption = deformationCaptionFor(input);
   return {
     title,
     ...(capture?.png ? { png: capture.png } : {}),
@@ -686,6 +695,22 @@ function collectDiagnostics(input: BuildReportDataInput, summary: ResultSummary,
   }
   for (const warning of input.solverMeshSummary?.warnings ?? []) entries.add(warning);
   return [...entries];
+}
+
+/**
+ * The caption used to print the panel's slider value and call it the exaggeration. The
+ * slider only multiplies an auto-fit, so for a typical part that read "×1.8" under a shape
+ * exaggerated by a factor in the hundreds or thousands.
+ */
+export function deformationCaptionFor(input: Pick<BuildReportDataInput, "showDeformed" | "exaggeration" | "resolvedDeformation">): string {
+  if (!input.showDeformed) return "Undeformed shape";
+  const resolved = input.resolvedDeformation;
+  if (!resolved) return "Deformed shape (display only)";
+  if (resolved.kind === "mode_shape") {
+    // Mode shapes have no physical amplitude; the number is emphasis, not exaggeration.
+    return `Mode shape, ×${formatDeformationFactor(resolved.factor)} visual emphasis (unscaled amplitude)`;
+  }
+  return `Deformed shape, ×${formatDeformationFactor(resolved.factor)} exaggeration at ×${formatResultValue(input.exaggeration)} emphasis (display only)`;
 }
 
 function fieldForReport(fields: ResultField[], type: ResultField["type"], capture?: CapturedResultView): ResultField | undefined {
