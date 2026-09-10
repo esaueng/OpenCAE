@@ -11,7 +11,14 @@ const KG_PER_LB = 0.45359237;
 const CUBIC_MM_PER_CUBIC_INCH = MM_PER_INCH ** 3;
 const CUBIC_CM_PER_CUBIC_METER = 1_000_000;
 const CUBIC_IN_PER_CUBIC_METER = 61_023.7440947323;
-const LB_PER_KG_PER_CUBIC_METER = 0.0624279605761;
+/**
+ * Mass density, US display. Exported because the custom-material editor converts
+ * the same quantity in the other direction; it previously kept a private copy of
+ * this number while this module converted to lb/ft^3, so the panel asked for
+ * lb/in^3 and echoed lb/ft^3 back — the two constants were 1728x apart and
+ * nothing tied them together. One constant, one unit.
+ */
+export const KG_PER_M3_PER_LB_PER_IN3 = 27_679.9047102;
 const NEWTONS_PER_CUBIC_METER_PER_LBF_PER_CUBIC_INCH = 271_447.14116097;
 
 export function formatUnitSystemLabel(unitSystem: UnitSystem): string {
@@ -45,7 +52,26 @@ export function formatMass(value: number, units: string, unitSystem: UnitSystem)
 
 export function formatDensity(value: number, units: string, unitSystem: UnitSystem): string {
   const converted = densityForUnits(value, units, unitSystem);
-  return `${formatDisplayNumber(converted.value)} ${converted.units}`.trim();
+  return `${formatDensityNumber(converted.value)} ${converted.units}`.trim();
+}
+
+/**
+ * Density carries significant figures rather than `formatDisplayNumber`'s fixed
+ * decimals below magnitude 10.
+ *
+ * In lb/in^3 the whole material catalogue lands in 0.001-0.5, which is exactly the
+ * band where that function switches to three fixed decimals. Polymers would collapse
+ * to two significant figures and distinct materials would render identically —
+ * 1180 and 1200 kg/m^3 both reach "0.043" — while the FDM effective-density row
+ * moves one digit for a 14% change in infill. `formatDisplayNumber` is shared by
+ * every other readout in the app and the PDF and is pinned byte-for-byte by its own
+ * tests, so the density-specific rule lives here instead. At and above 10 it defers,
+ * which leaves every SI reading unchanged.
+ */
+function formatDensityNumber(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return formatDisplayNumber(value);
+  if (Math.abs(value) >= 10) return formatDisplayNumber(value);
+  return value.toLocaleString(undefined, { maximumSignificantDigits: SIGNIFICANT_DIGITS });
 }
 
 export function formatMaterialStress(valuePa: number, unitSystem: UnitSystem): string {
@@ -301,9 +327,15 @@ export function volumeForUnits(value: number, units: string, unitSystem: UnitSys
   return { value, units };
 }
 
+/**
+ * US density is per cubic INCH, not per cubic foot. Every other US readout in this
+ * module is inch-based — in, in^3, ksi, psi, lbf/in^3 — and the gravity card renders
+ * payload volume (in^3), density and calculated mass (lb) as adjacent rows where mass
+ * is literally density x volume. Under lb/ft^3 that identity was off by 1728 on screen.
+ */
 export function densityForUnits(value: number, units: string, unitSystem: UnitSystem): { value: number; units: string } {
-  if (unitSystem === "US" && units === "kg/m^3") return { value: value * LB_PER_KG_PER_CUBIC_METER, units: "lb/ft^3" };
-  if (unitSystem === "SI" && units === "lb/ft^3") return { value: value / LB_PER_KG_PER_CUBIC_METER, units: "kg/m^3" };
+  if (unitSystem === "US" && units === "kg/m^3") return { value: value / KG_PER_M3_PER_LB_PER_IN3, units: "lb/in^3" };
+  if (unitSystem === "SI" && units === "lb/in^3") return { value: value * KG_PER_M3_PER_LB_PER_IN3, units: "kg/m^3" };
   return { value, units };
 }
 

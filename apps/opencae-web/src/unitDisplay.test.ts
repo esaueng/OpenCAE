@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { defaultSolverMethodForStudy, displayModelForUnits, formatDensity, formatDisplayNumber, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits } from "./unitDisplay";
+import { KG_PER_M3_PER_LB_PER_IN3, defaultSolverMethodForStudy, densityForUnits, displayModelForUnits, formatDensity, formatDisplayNumber, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, massForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, volumeForUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
   test("uses one canonical solver method for each study type", () => {
@@ -31,10 +31,52 @@ describe("unit display formatting", () => {
     expect(formatForce(500, "N", "US")).toBe("112.4 lbf");
     expect(formatVolume(41_280, "mm^3", "US")).toBe("2.519 in^3");
     expect(formatMass(111, "g", "US")).toBe("0.245 lb");
-    expect(formatDensity(2700, "kg/m^3", "US")).toBe("168.6 lb/ft^3");
+    expect(formatDensity(2700, "kg/m^3", "US")).toBe("0.09754 lb/in^3");
     expect(formatMaterialStress(68_900_000_000, "US")).toBe("9,993.1 ksi");
     expect(loadValueForUnits(6.894757293168361, "kPa", "US")).toEqual({ value: 1, units: "psi" });
     expect(loadValueForUnits(0.45359237, "kg", "US")).toEqual({ value: 1, units: "lb" });
+  });
+
+  test("reads density back in the same unit the material editor asks for", () => {
+    // The reported defect: the custom-material editor took density in lb/in^3 while
+    // the preview row beside it rendered lb/ft^3. Both conversions were individually
+    // correct and 1728x apart, so typing steel as 0.284 echoed back 490.
+    const steelKgPerM3 = 7850;
+    const shown = formatDensity(steelKgPerM3, "kg/m^3", "US");
+    expect(shown).toContain("lb/in^3");
+    expect(shown).not.toContain("lb/ft^3");
+    // The editor converts with this same exported constant (SimulationWorkflow's
+    // densityForEditor/densityFromEditor). Pinning the display path to it is what
+    // stops the two sides drifting apart again.
+    expect(densityForUnits(steelKgPerM3, "kg/m^3", "US").value).toBeCloseTo(steelKgPerM3 / KG_PER_M3_PER_LB_PER_IN3, 12);
+    expect(densityForUnits(steelKgPerM3, "kg/m^3", "US").value).toBeCloseTo(0.2836, 4);
+  });
+
+  test("keeps the gravity card's mass = density x volume identity readable", () => {
+    // Payload volume, density and calculated mass render as adjacent rows. Under
+    // lb/ft^3 the arithmetic a user checks by eye was off by exactly 1728.
+    const volumeM3 = 0.0000682;
+    const densityKgPerM3 = 2700;
+    const volume = volumeForUnits(volumeM3, "m^3", "US");
+    const density = densityForUnits(densityKgPerM3, "kg/m^3", "US");
+    const mass = massForUnits(volumeM3 * densityKgPerM3, "kg", "US");
+    expect(volume.units).toBe("in^3");
+    expect(density.units).toBe("lb/in^3");
+    expect(mass.units).toBe("lb");
+    expect(density.value * volume.value).toBeCloseTo(mass.value, 6);
+  });
+
+  test("keeps distinct materials distinguishable in US density", () => {
+    // In lb/in^3 the whole catalogue sits in formatDisplayNumber's fixed-decimal
+    // band, where 1180 and 1200 kg/m^3 would both render "0.043".
+    const carbonNylon = formatDensity(1180, "kg/m^3", "US");
+    const polycarbonate = formatDensity(1200, "kg/m^3", "US");
+    expect(carbonNylon).not.toBe(polycarbonate);
+    // A light foam must not collapse to a one-significant-figure floor value.
+    expect(formatDensity(30, "kg/m^3", "US")).toBe("0.001084 lb/in^3");
+    // SI readings are unchanged: at and above magnitude 10 the shared formatter still owns it.
+    expect(formatDensity(7850, "kg/m^3", "SI")).toBe("7,850 kg/m^3");
+    expect(formatDensity(1180, "kg/m^3", "SI")).toBe("1,180 kg/m^3");
   });
 
   test("formats small payload volumes without rounding to zero", () => {
