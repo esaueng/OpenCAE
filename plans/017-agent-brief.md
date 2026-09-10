@@ -12,15 +12,12 @@ of open-cae builds, tests, and deploys with **no sibling checkout, no
 `OPENCAE_CORE_REF` pin file, and no bootstrap scripts**. Then archive the Core
 repo without losing any work.
 
-## Environment map
+## Portable checkout references
 
-| Thing | Location |
-| - | - |
-| Main repo (you work here) | `/Users/userzero/claude/open-cae` → `github.com/esaueng/OpenCAE` |
-| Live Core sibling (pinned checkout) | `/Users/userzero/claude/opencae-core` → `github.com/esaueng/OpenCAE-Core` |
-| OLD Core checkout with unpushed work | `/Users/userzero/claude/open-cae-core` (note the hyphens — different dir!) |
-| Stale open-cae clones (retire last) | `/Users/userzero/claude/open-cae-{dup,gradient,tierwork}` |
-| Core pin | root file `OPENCAE_CORE_REF` = `bc6c305272bd2789634f5e4c9006e0eae21e116b` |
+This historical plan uses `<repository-root>`, `<core-checkout>`, and
+`<legacy-core-checkout>` as placeholders. Resolve them to your own checkouts
+before adapting any commands. The current project builds entirely from this
+repository; these migration steps are retained only as historical context.
 
 Toolchain: pnpm 9 (`packageManager` pinned), Node 22, TypeScript, Vitest.
 Deploys go to Cloudflare via wrangler; production is `cae.esau.app`.
@@ -36,9 +33,7 @@ Deploys go to Cloudflare via wrangler; production is `cae.esau.app`.
    `apps/opencae-web/src/workers/localCantileverAccuracy.test.ts` from earlier
    WIP. This is NOT yours to fix and NOT a regression gate — compare failures
    against a baseline run you take before changing anything.
-4. Commit messages end with:
-   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
-5. Work on branches; never commit directly to `main` of either repo.
+4. Work on branches; never commit directly to `main` of either repo.
 
 ## Stop points (require maintainer sign-off before proceeding)
 
@@ -60,9 +55,8 @@ Pre-verified facts (2026-07-09; re-verify, they may have moved):
 - All other Core branches (`audit-fixes`, `improvement-plans`,
   `fix/bracket-tet10-inverted-jacobian`, `solver-accuracy-0.1.5`) are fully
   merged.
-- The OLD checkout `~/claude/open-cae-core` (branch `improvement-plans`) has an
-  **uncommitted** `plans/README.md` edit and **untracked** files
-  `plans/006-*.md` through `plans/009-*.md` (Core advisor plans).
+- Inspect any legacy Core checkout for uncommitted or untracked work before
+  consolidation; preserve useful plans in `docs/core/plans/`.
 
 Steps:
 
@@ -70,7 +64,7 @@ Steps:
    base. If plan-016 WIP (mesh worker files) or the unmerged
    `sync/reconcile-origin-main` branch are still outstanding, report and stop —
    those land first, not by you.
-2. Rescue the old checkout: in `~/claude/open-cae-core`, commit the
+2. Rescue the old checkout: in `<legacy-core-checkout>`, commit the
    `plans/README.md` edit + plans 006–009 to `improvement-plans` and push.
    Also copy the four plan files into open-cae at `docs/core/plans/` so they
    survive the archive regardless.
@@ -132,7 +126,7 @@ Branch: `feat/017-sunset-core-repo` in open-cae.
 
 14. Take the pre-change baseline FIRST (before Phase 1) so you can tell
     pre-existing failures from regressions.
-15. Park the sibling: `mv ~/claude/opencae-core ~/claude/opencae-core.parked`.
+15. Park the sibling: `mv <core-checkout> <core-checkout>.parked`.
     Then, from a state with `node_modules` removed:
     ```sh
     pnpm install --frozen-lockfile
@@ -160,9 +154,8 @@ Branch: `feat/017-sunset-core-repo` in open-cae.
 20. Push a tombstone commit to Core `main`: README top says "Merged into
     esaueng/OpenCAE at <SHA>; this repo is archived read-only." Archive the
     GitHub repo via `gh repo archive esaueng/OpenCAE-Core`.
-21. Delete `~/claude/opencae-core.parked` and `~/claude/open-cae-core` (only
-    after step 2's rescue is verified pushed). For each of `open-cae-dup`,
-    `open-cae-gradient`, `open-cae-tierwork`: run
+21. Delete `<core-checkout>.parked` and `<legacy-core-checkout>` (only
+    after step 2's rescue is verified pushed). For each additional local checkout: run
     `git log --branches --not --remotes --oneline` and
     `git status --porcelain`; report anything unpushed before deleting.
 

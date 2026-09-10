@@ -67,7 +67,7 @@ Fallback: custom Emscripten Netgen build, LGPL-2.1, fed by watertight OCCT tesse
 ## Verification Gates
 
 ```sh
-PATH=/Users/userzero/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH node_modules/.bin/vitest run <new meshing tests>
+pnpm exec vitest run <new meshing tests>
 pnpm typecheck
 pnpm test
 ```
