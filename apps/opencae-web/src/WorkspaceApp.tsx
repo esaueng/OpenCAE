@@ -891,7 +891,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }, [activeStep, displayModel, draftLoadDirection, draftLoadType, draftLoadValue, draftPayloadPreview, selectedFace, selectedLoadPoint, selectedPayloadObject, study]);
 
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview, displayModel: displayModel ?? undefined });
+    // Modal analysis ignores loads and hides the Loads step; drawing their
+    // arrows anyway implied they mattered (2026-09 review D17).
+    const markerStudy: Study | null = study?.type === "modal_analysis" ? { ...study, loads: [] } as Study : study;
+    const markers = createViewerLoadMarkers({ study: markerStudy, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview, displayModel: displayModel ?? undefined });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
@@ -951,7 +954,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       handleFitDefaultView();
       return;
     }
-    const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started" });
+    const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started", studyType: study?.type });
     if (!shortcutStep) return;
     event.preventDefault();
     navigateToStep(shortcutStep);
@@ -1950,10 +1953,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
       setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
     }
-    if (activeStep === "supports") {
-      void addFixedSupportForFace(face);
-      return;
-    }
+    // Select, then act: a viewer pick only chooses the face. The panel's Add
+    // button commits it, the same way loads already work. Picking used to
+    // create a support on the spot, so orbit misfires and exploratory clicks
+    // placed constraints (2026-09 review F1).
     pushMessage(`${face.label} selected.`);
   }
 
@@ -1961,29 +1964,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (!shouldClearPayloadSelectionOnViewerMiss({ activeStep, draftLoadType })) return;
     setSelectedPayloadObject(null);
     setSelectedLoadPoint(null);
-  }
-
-  async function addFixedSupportForFace(face: DisplayFace) {
-    if (!study) return;
-    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
-    const selection = existingSelection ?? namedSelectionForFace(study, face);
-    if (study.constraints.some((support) => support.selectionRef === selection.id)) {
-      pushMessage(`${study.type === "steady_state_thermal" ? "Temperature boundary" : "Fixed support"} already exists on ${selection.name}.`);
-      return;
-    }
-    const nextSelections = existingSelection ? study.namedSelections : [...study.namedSelections, selection];
-    const nextSupport: Constraint = {
-      id: `constraint-${crypto.randomUUID()}`,
-      type: study.type === "steady_state_thermal" ? "prescribed_temperature" : "fixed",
-      selectionRef: selection.id,
-      // Use the temperature typed in the panel; a pick used to hard-code 20 °C
-      // and silently discard the entered value (2026-09 review D12).
-      parameters: study.type === "steady_state_thermal" ? { value: Number.isFinite(draftSupportTemperature) ? draftSupportTemperature : 20, units: "°C" } : {},
-      status: "complete"
-    };
-    await updateStudy(
-      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, study.type === "steady_state_thermal" ? "Temperature boundary added." : "Fixed support added.", study)
-    );
   }
 
   async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null, payloadObject?: PayloadObjectSelection | null, payloadMetadata: PayloadLoadMetadata = {}) {
@@ -2041,6 +2021,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       pushMessage("Generate the mesh before going to Run.");
       return;
     }
+    // A face picked for one step is not a target for the next: the last face
+    // clicked while placing supports used to arrive pre-selected on Loads
+    // (2026-09 review F1).
+    setSelectedFaceId(null);
+    setSelectedLoadPoint(null);
+    setSelectedPayloadObject(null);
     applyStep(step);
   }
 
@@ -2205,8 +2191,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "prescribed_temperature" | LoadType) {
     setShowBoundaryConditionMenu(false);
     if (type === "fixed" || type === "prescribed_displacement" || type === "prescribed_temperature") {
+      // The face stays selected; the Supports panel's Add button commits it.
       applyStep("supports");
-      if ((type === "fixed" || type === "prescribed_temperature") && selectedFace) void addFixedSupportForFace(selectedFace);
       return;
     }
     setDraftLoadType(type);
@@ -2775,16 +2761,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             }
             updateStudy(addSupport(study.id, selectionRef, study));
           }}
-          onUpdateSupport={(support: Constraint) =>
-            updateStudy(
+          onUpdateSupport={(support: Constraint, targetFace?: DisplayFace) => {
+            const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
+            const nextSupport = retarget ? { ...support, selectionRef: retarget.selection.id } : support;
+            void updateStudy(
               saveStudyPatch(
                 study.id,
-                { constraints: study.constraints.map((item) => (item.id === support.id ? support : item)) },
-                "Support updated.",
+                {
+                  ...(retarget ? { namedSelections: retarget.namedSelections } : {}),
+                  constraints: study.constraints.map((item) => (item.id === support.id ? nextSupport : item))
+                },
+                retarget ? `Support moved to ${targetFace!.label}.` : "Support updated.",
                 study
               )
-            )
-          }
+            );
+          }}
           onRemoveSupport={(supportId) =>
             updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed.", study))
           }
@@ -2818,11 +2809,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             if (type === "gravity") setSelectedPayloadObject(null);
           }}
           onDraftPayloadPreviewChange={setDraftPayloadPreview}
-          onUpdateLoad={(load: Load) =>
-            updateStudy(
-              saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.", study)
-            )
-          }
+          onUpdateLoad={(load: Load, targetFace?: DisplayFace) => {
+            const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
+            const nextLoad = retarget ? { ...load, selectionRef: retarget.selection.id } : load;
+            void updateStudy(
+              saveStudyPatch(
+                study.id,
+                {
+                  ...(retarget ? { namedSelections: retarget.namedSelections } : {}),
+                  loads: study.loads.map((item) => (item.id === load.id ? nextLoad : item))
+                },
+                retarget ? `Load moved to ${targetFace!.label}.` : "Load updated.",
+                study
+              )
+            );
+          }}
           onPreviewLoadEdit={setPreviewLoadEdit}
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, {
@@ -3147,6 +3148,14 @@ function debugResultField(field: ResultField | undefined) {
     sampleValues: field.samples?.slice(0, 5).map((sample) => sample.value) ?? [],
     sampleVectors: field.samples?.slice(0, 5).map((sample) => sample.vector ?? null) ?? []
   };
+}
+
+/** The named selection for a picked face, creating it when the study has none yet (re-targeting, 2026-09 review D3). */
+function selectionPatchForFace(study: Study, face: DisplayFace): { selection: NamedSelection; namedSelections: NamedSelection[] } {
+  const existing = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+  if (existing) return { selection: existing, namedSelections: study.namedSelections };
+  const selection = namedSelectionForFace(study, face);
+  return { selection, namedSelections: [...study.namedSelections, selection] };
 }
 
 function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Atom, Boxes, Check, ChevronDown, ChevronRight, CircleHelp, Eye, Factory, FileCode2, FileDown, FileImage, FolderDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Table2, Upload, Weight, Wrench, X } from "lucide-react";
+import { AlertTriangle, Anchor, ArrowDown, Atom, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Eye, Factory, FileCode2, FileDown, FileImage, FolderDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Table2, Upload, Weight, Wrench, X } from "lucide-react";
 import { finiteExtrema } from "@opencae/core";
 import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
 import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
@@ -137,7 +137,8 @@ interface RightPanelProps {
   /** null suppresses the preview while editing; undefined clears the preview so the assigned orientation shows again. */
   onPreviewPrintLayerOrientation?: (orientation: "x" | "y" | "z" | null | undefined) => void;
   onAddSupport: (selectionRef?: string, options?: { type: "fixed" | "prescribed_temperature"; value?: number }) => void;
-  onUpdateSupport: (support: Constraint) => void;
+  /** `targetFace` moves the support to a newly picked face (2026-09 review D3). */
+  onUpdateSupport: (support: Constraint, targetFace?: DisplayFace) => void;
   onRemoveSupport: (supportId: string) => void;
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
@@ -145,7 +146,8 @@ interface RightPanelProps {
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
   onDraftPayloadPreviewChange?: (preview: { value: number; metadata: PayloadLoadMetadata } | null) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel, payloadMetadata?: PayloadLoadMetadata) => void;
-  onUpdateLoad: (load: Load) => void;
+  /** `targetFace` moves the load to a newly picked face (2026-09 review D3). */
+  onUpdateLoad: (load: Load, targetFace?: DisplayFace) => void;
   onPreviewLoadEdit: (load: Load | null) => void;
   onRemoveLoad: (loadId: string) => void;
   onLoadCasesChange?: (loadCases: LoadCase[], loadCombinations: LoadCombination[]) => void;
@@ -168,6 +170,8 @@ interface RightPanelProps {
   notice?: WorkspaceNotice | null;
   onDismissNotice?: () => void;
   onNoticeStep?: (step: StepId) => void;
+  /** Lets a panel commit pending work when the user presses Next (Material applies the previewed selection, 2026-09 review F3). */
+  registerBeforeNext?: (handler: (() => void) | null) => void;
   resultFrameIndex?: number;
   resultFramePosition?: number;
   resultFrameOrdinalPosition?: number;
@@ -196,17 +200,28 @@ function stressComponentLabel(component: StressComponent): string {
 }
 
 export function RightPanel(props: RightPanelProps) {
+  // A panel may register work to commit when Next is pressed (Material applies
+  // the previewed selection). The N shortcut and the rail bypass it on purpose:
+  // only the in-panel Next reads as "finish this step".
+  const beforeNextRef = useRef<(() => void) | null>(null);
+  const registerBeforeNext = useCallback((handler: (() => void) | null) => {
+    beforeNextRef.current = handler;
+  }, []);
+  const handleStepSelect = useCallback((step: StepId) => {
+    beforeNextRef.current?.();
+    props.onStepSelect(step);
+  }, [props.onStepSelect]);
   return (
     <aside className="side-panel">
       {props.notice && <WorkspaceNoticeBanner notice={props.notice} activeStep={props.activeStep} onDismiss={props.onDismissNotice} onGoToStep={props.onNoticeStep} />}
       {props.activeStep === "model" && <ModelPanel {...props} />}
-      {props.activeStep === "material" && <MaterialPanel {...props} />}
+      {props.activeStep === "material" && <MaterialPanel {...props} registerBeforeNext={registerBeforeNext} />}
       {props.activeStep === "supports" && <SupportsPanel {...props} />}
       {props.activeStep === "loads" && <LoadsPanel {...props} />}
       {props.activeStep === "mesh" && <MeshPanel {...props} />}
       {props.activeStep === "run" && <RunPanel {...props} />}
       {props.activeStep === "results" && <ResultsPanel {...props} />}
-      <WorkflowNav activeStep={props.activeStep} study={props.study} onStepSelect={props.onStepSelect} />
+      <WorkflowNav activeStep={props.activeStep} study={props.study} onStepSelect={handleStepSelect} />
     </aside>
   );
 }
@@ -493,7 +508,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
   );
 }
 
-function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveCustomMaterial, onDeleteCustomMaterial, onPreviewPrintLayerOrientation }: RightPanelProps) {
+function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveCustomMaterial, onDeleteCustomMaterial, onPreviewPrintLayerOrientation, registerBeforeNext }: RightPanelProps) {
   const materials = useMemo(() => materialCatalog(project.customMaterials), [project.customMaterials]);
   const defaultMaterial = materials[0]!;
   const currentAssignment = study.materialAssignments[0];
@@ -552,6 +567,13 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
       : currentAssignment
         ? `Not applied yet · assigned material “${currentAssignment.materialId}” is unknown`
         : "Not applied yet · no material assigned";
+
+  // Next commits the previewed material (2026-09 review F3): leaving without
+  // Apply used to be silent and only surfaced at Run as "Material assigned".
+  useEffect(() => {
+    registerBeforeNext?.(selectionMatchesAssignment ? null : () => onAssignMaterial(selectedMaterialId, pendingParameters));
+    return () => registerBeforeNext?.(null);
+  }, [onAssignMaterial, pendingParameters, registerBeforeNext, selectedMaterialId, selectionMatchesAssignment]);
 
   useEffect(() => {
     onPreviewPrintLayerOrientation?.(processUsesBuildDirection ? manufacturingParameters.layerOrientation ?? "z" : null);
@@ -772,7 +794,7 @@ function SupportsPanel({ selectedFace, study, draftSupportTemperature, onDraftSu
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
       {duplicateSupportError && <p className="field-error" role="alert">{duplicateSupportError}</p>}
       <button className="outline-action wide" disabled={!selectedFromViewport || Boolean(duplicateSupportError) || (thermal && !Number.isFinite(temperature))} title={duplicateSupportError ?? undefined} onClick={() => selectedFromViewport && !duplicateSupportError && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : { type: "fixed" })}><Plus size={18} />{addLabel}</button>
-      <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
+      <SupportEditorList study={study} retargetFace={selectedFace} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
       <Callout>{thermal ? "At least one prescribed temperature is required to make the conduction system unique." : "Fixed supports prevent any motion of the selected face."}</Callout>
     </Panel>
   );
@@ -1011,7 +1033,7 @@ function LoadsPanel({
           />
         </Collapsible>
       )}
-      <LoadEditorList editingId={editingLoadId} onEditingIdChange={setEditingLoadId} study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
+      <LoadEditorList editingId={editingLoadId} onEditingIdChange={setEditingLoadId} study={study} displayModel={displayModel} unitSystem={project.unitSystem} loadCases={loadCases} retargetFace={selectedFace} onAssignLoadToCase={assignLoadToCase} onUpdateLoad={onUpdateLoad} onPreviewLoadEdit={onPreviewLoadEdit} onRemoveLoad={onRemoveLoad} />
     </Panel>
   );
 }
@@ -1185,7 +1207,7 @@ function structuralLoadCasesForPanel(study: Extract<Study, { type: "static_stres
     : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
 }
 
-function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, unitSystem, loadCases, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { editingId: string | null; onEditingIdChange: (loadId: string | null) => void; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
+function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, unitSystem, loadCases, retargetFace, onAssignLoadToCase, onUpdateLoad, onPreviewLoadEdit, onRemoveLoad }: { editingId: string | null; onEditingIdChange: (loadId: string | null) => void; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; loadCases: LoadCase[]; retargetFace?: DisplayFace | null; onAssignLoadToCase: (loadId: string, caseId: string) => void; onUpdateLoad: (load: Load, targetFace?: DisplayFace) => void; onPreviewLoadEdit: (load: Load | null) => void; onRemoveLoad: (loadId: string) => void }) {
   const loadItemRefs = useRef(new Map<string, HTMLButtonElement>());
   if (!study.loads.length) return <EmptyEditableList title="Loads" />;
   const loadLabelsById = new Map(createViewerLoadMarkers({ study, displayModel }).map((marker) => [marker.id, loadMarkerOrdinalLabel(marker)]));
@@ -1263,11 +1285,12 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
                 displayModel={displayModel}
                 unitSystem={unitSystem}
                 accessibleName={`${loadLabel ?? loadTypeLabel(load.type)} load editor`}
+                retargetFace={retargetFace}
                 onPreviewChange={onPreviewLoadEdit}
                 onCancel={() => finishEditing(load.id)}
-                onSave={(nextLoad) => {
+                onSave={(nextLoad, targetFace) => {
                   onPreviewLoadEdit(null);
-                  onUpdateLoad(nextLoad);
+                  onUpdateLoad(nextLoad, targetFace);
                   finishEditing(load.id);
                 }}
               />
@@ -1279,8 +1302,11 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
   );
 }
 
-function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; accessibleName: string; onSave: (load: Load) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
+function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, retargetFace, onSave, onCancel, onPreviewChange }: { load: Load; study: Study; displayModel: DisplayModel; unitSystem: UnitSystem; accessibleName: string; retargetFace?: DisplayFace | null; onSave: (load: Load, targetFace?: DisplayFace) => void; onCancel: () => void; onPreviewChange: (load: Load | null) => void }) {
   const [type, setType] = useState<LoadType>(load.type);
+  // Re-targeting (2026-09 review D3): a face picked while editing can become
+  // the new target; the direction preview follows it.
+  const [moveToPicked, setMoveToPicked] = useState(false);
   const [value, setValue] = useState(() => {
     const initialUnits = String(load.parameters.units ?? unitsForLoadType(load.type));
     return formatInputValue(loadValueForUnits(Number(load.parameters.value ?? 500), initialUnits, unitSystem).value);
@@ -1314,14 +1340,16 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
         ? { secondarySelectionRef }
         : {}, [payloadMassMode, payloadMaterialId, payloadVolumeM3, remotePoint, secondarySelectionRef, type]);
   const selectedPayloadMaterial = payloadMaterialForId(payloadMaterialId);
-  const directionFace: DisplayFace = useMemo(() => selectedDisplayFace ?? ({
+  const pickedElsewhere = retargetFace && !selectionIsBody && retargetFace.id !== selectedFace?.entityId ? retargetFace : null;
+  const targetFace = moveToPicked && pickedElsewhere ? pickedElsewhere : undefined;
+  const directionFace: DisplayFace = useMemo(() => targetFace ?? selectedDisplayFace ?? ({
     id: selectedFace?.entityId ?? "selected-face",
     label: selectedFace?.label ?? "selected face",
     color: "#fff",
     center: [0, 0, 0],
     normal: [0, 1, 0],
     stressValue: 0
-  }), [selectedDisplayFace, selectedFace?.entityId, selectedFace?.label]);
+  }), [selectedDisplayFace, selectedFace?.entityId, selectedFace?.label, targetFace]);
   const previewLoad = useMemo(() => editedLoadForForm(load, type, value, displayUnits, units, direction, directionFace, displayModel, payloadMetadata, editedValue), [direction, directionFace, displayModel, displayUnits, editedValue, load, payloadMetadata, type, units, value]);
   const magnitudeError = loadMagnitudeError(editedValue, study.type);
   const opposingFaceError = type === "bolt_preload" && (!secondarySelectionRef || secondarySelectionRef === load.selectionRef)
@@ -1415,13 +1443,19 @@ function LoadEditForm({ load, study, displayModel, unitSystem, accessibleName, o
           ))}
         </select>
       </label>
+      {pickedElsewhere && (
+        <label className="toggle">
+          <input type="checkbox" aria-label={`Move to ${pickedElsewhere.label}`} checked={moveToPicked} onChange={(event) => setMoveToPicked(event.currentTarget.checked)} />
+          <span>Move to {pickedElsewhere.label} (picked in the viewer)</span>
+        </label>
+      )}
       <div className="edit-actions">
         <button
           className="primary"
           type="button"
           disabled={Boolean(saveBlockedBy)}
           title={saveBlockedBy ?? undefined}
-          onClick={() => !saveBlockedBy && onSave(previewLoad)}
+          onClick={() => !saveBlockedBy && onSave(previewLoad, targetFace)}
         >
           Save
         </button>
@@ -1456,7 +1490,7 @@ function finiteVector3(value: unknown): LoadApplicationPoint | null {
     : null;
 }
 
-function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study: Study; onUpdateSupport: (support: Constraint) => void; onRemoveSupport: (supportId: string) => void }) {
+function SupportEditorList({ study, retargetFace, onUpdateSupport, onRemoveSupport }: { study: Study; retargetFace?: DisplayFace | null; onUpdateSupport: (support: Constraint, targetFace?: DisplayFace) => void; onRemoveSupport: (supportId: string) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   // Mirrors the load rows: closing the form must return focus to the control
   // that opened it, or the form's unmount drops focus to <body>.
@@ -1495,9 +1529,10 @@ function SupportEditorList({ study, onUpdateSupport, onRemoveSupport }: { study:
               <SupportEditForm
                 support={support}
                 study={study}
+                retargetFace={retargetFace}
                 onCancel={() => finishEditing(support.id)}
-                onSave={(nextSupport) => {
-                  onUpdateSupport(nextSupport);
+                onSave={(nextSupport, targetFace) => {
+                  onUpdateSupport(nextSupport, targetFace);
                   finishEditing(support.id);
                 }}
               />
@@ -1527,13 +1562,24 @@ function LoadTypeIcon({ type }: { type: LoadType }) {
   return <ScanLine size={16} />;
 }
 
-function SupportEditForm({ support, study, onSave, onCancel }: { support: Constraint; study: Study; onSave: (support: Constraint) => void; onCancel: () => void }) {
+function SupportEditForm({ support, study, retargetFace, onSave, onCancel }: { support: Constraint; study: Study; retargetFace?: DisplayFace | null; onSave: (support: Constraint, targetFace?: DisplayFace) => void; onCancel: () => void }) {
   const thermal = study.type === "steady_state_thermal";
   const [type, setType] = useState<Constraint["type"]>(support.type);
   const [temperature, setTemperature] = useState(Number(support.parameters.value ?? 20));
   const selectedRef = study.namedSelections.find((selection) => selection.id === support.selectionRef);
+  // Re-targeting (2026-09 review D3): a face picked while editing can become
+  // the new target; before, the pick added a second support instead.
+  const [moveToPicked, setMoveToPicked] = useState(false);
+  const pickedElsewhere = retargetFace && !selectedRef?.geometryRefs.some((ref) => ref.entityId === retargetFace.id) ? retargetFace : null;
+  const targetFace = moveToPicked && pickedElsewhere ? pickedElsewhere : undefined;
   return (
     <div className="edit-form">
+      {pickedElsewhere && (
+        <label className="toggle">
+          <input type="checkbox" aria-label={`Move to ${pickedElsewhere.label}`} checked={moveToPicked} onChange={(event) => setMoveToPicked(event.currentTarget.checked)} />
+          <span>Move to {pickedElsewhere.label} (picked in the viewer)</span>
+        </label>
+      )}
       <label className="field">
         <HelpLabel helpId="supportType">Support type</HelpLabel>
         <select value={type} onChange={(event) => setType(event.currentTarget.value as Constraint["type"])}>
@@ -1549,7 +1595,7 @@ function SupportEditForm({ support, study, onSave, onCancel }: { support: Constr
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
       <PlacementReadout selectedRef={selectedRef} />
       <div className="edit-actions">
-        <button className="primary" type="button" disabled={thermal && !Number.isFinite(temperature)} onClick={() => onSave({ ...support, type, parameters: thermal ? { ...support.parameters, value: temperature, units: "°C" } : support.parameters })}>Save</button>
+        <button className="primary" type="button" disabled={thermal && !Number.isFinite(temperature)} onClick={() => onSave({ ...support, type, parameters: thermal ? { ...support.parameters, value: temperature, units: "°C" } : support.parameters }, targetFace)}>Save</button>
         <button className="secondary" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -2801,9 +2847,18 @@ function ResultsPanelContent({
             />
             <span>Reverse loop</span>
           </label>
-          <button className="secondary wide" type="button" onClick={() => {
-            onResultPlaybackToggle?.();
-          }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
+          {/* Frame stepping used to be keyboard-only on the range input (2026-09 review F11). */}
+          <div className="playback-transport">
+            <button className="secondary" type="button" aria-label="Previous frame" title="Previous frame" disabled={resultPlaybackPlaying || currentFrameNumber <= 1} onClick={() => onResultFrameChange?.(frameIndexes[currentFrameNumber - 2] ?? frameIndexes[0]!)}>
+              <ChevronLeft size={16} />
+            </button>
+            <button className="secondary wide" type="button" onClick={() => {
+              onResultPlaybackToggle?.();
+            }}>{resultPlaybackPlaying ? <Pause size={16} /> : <Play size={16} />}{resultPlaybackPlaying ? "Pause" : "Play"}</button>
+            <button className="secondary" type="button" aria-label="Next frame" title="Next frame" disabled={resultPlaybackPlaying || currentFrameNumber >= frames.length} onClick={() => onResultFrameChange?.(frameIndexes[currentFrameNumber] ?? frameIndexes[frameIndexes.length - 1]!)}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
           {resultPlaybackCacheLabel && <small className="playback-cache-status">{resultPlaybackCacheLabel}</small>}
           <Info label="Peak displacement" value={peakDisplacement ? `${Number(peakDisplacement.value.toPrecision(3))} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
         </div>
@@ -2924,6 +2979,8 @@ function ResultsPanelContent({
       {canEstimateLoad && (
         <>
           <SectionTitle helpId="targetSafetyFactor">Reverse Check</SectionTitle>
+          {/* The linearity caveat used to appear only in the PDF (2026-09 review F9). */}
+          <p className="muted">Linear scaling of this result against the material yield limit. Verify with a run at the target load.</p>
           <div className="load-capacity-tool">
             <label className="field">
               <HelpLabel helpId="targetSafetyFactor">Target factor of safety</HelpLabel>

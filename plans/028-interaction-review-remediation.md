@@ -13,6 +13,16 @@ geometry-aware snapshot first), provenance kept across reload (D9), mesh
 preflight (D16), the mesh-not-restored notice (F13), and the start screen busy
 state and Continue action (D23). Still open from Stage 1: keeping the previous
 contours viewable while stale (the fuller D4).
+Stage 2a is executed on `claude/plan-028-stage-2`, stacked on Stage 1: viewer
+picks select and the panel button commits (F1), stale picks are cleared on
+step change (F1), supports and loads can be moved to a newly picked face from
+their edit forms (D3), the in-panel Next applies a previewed material (F3),
+modal studies hide load markers and N/B skip the hidden Loads step (D17),
+frame step buttons (F11) and the reverse-check caveat (F9). Still open from
+Stage 2: assigned-face tinting and stable entry ids (F2), the real solver-surface
+mesh view and size readout (D13, F5), offscreen report capture (D15), one
+deformation control (D25), the legend peak marker (F8) and callout collision
+handling (D20) — all viewer work.
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank

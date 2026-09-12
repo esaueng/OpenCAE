@@ -32,13 +32,16 @@ export type WorkflowShortcutStep = (typeof WORKFLOW_STEP_ORDER)[number];
 export function workflowStepForShortcut(
   shortcut: string,
   activeStep: string,
-  { meshStatus }: { meshStatus: string }
+  { meshStatus, studyType }: { meshStatus: string; studyType?: string }
 ): WorkflowShortcutStep | null {
-  const activeIndex = WORKFLOW_STEP_ORDER.findIndex((step) => step === activeStep);
+  // Modal studies hide the Loads step; N/B must skip it too, or the shortcut
+  // opens a panel that reads "Step 0 of 6" (2026-09 review D17).
+  const order = studyType === "modal_analysis" ? WORKFLOW_STEP_ORDER.filter((step) => step !== "loads") : WORKFLOW_STEP_ORDER;
+  const activeIndex = order.findIndex((step) => step === activeStep);
   if (activeIndex < 0) return null;
   const key = shortcut.toLowerCase();
   const targetIndex = key === "n" ? activeIndex + 1 : key === "b" ? activeIndex - 1 : -1;
-  const target = WORKFLOW_STEP_ORDER[targetIndex];
+  const target = order[targetIndex];
   if (!target || !canNavigateToStep(target, { meshStatus })) return null;
   return target;
 }

@@ -36,6 +36,10 @@ describe("app shell state", () => {
   test("maps workflow keyboard shortcuts to adjacent allowed steps", () => {
     expect(workflowStepForShortcut("n", "model", { meshStatus: "not_started" })).toBe("material");
     expect(workflowStepForShortcut("b", "material", { meshStatus: "not_started" })).toBe("model");
+    // Modal studies have no Loads step; N from Supports must land on Mesh (2026-09 review D17).
+    expect(workflowStepForShortcut("n", "supports", { meshStatus: "not_started", studyType: "modal_analysis" })).toBe("mesh");
+    expect(workflowStepForShortcut("b", "mesh", { meshStatus: "not_started", studyType: "modal_analysis" })).toBe("supports");
+    expect(workflowStepForShortcut("n", "supports", { meshStatus: "not_started", studyType: "static_stress" })).toBe("loads");
     expect(workflowStepForShortcut("n", "mesh", { meshStatus: "complete" })).toBe("run");
     expect(workflowStepForShortcut("n", "mesh", { meshStatus: "ready" })).toBeNull();
     expect(workflowStepForShortcut("b", "model", { meshStatus: "complete" })).toBeNull();
