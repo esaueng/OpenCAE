@@ -5947,3 +5947,25 @@ input[aria-invalid="true"] {
   font-size: var(--fs-xs);
   line-height: var(--lh-snug);
 }
+
+/* 2026-09 review D5: confirm before geometry replacement clears the setup. */
+.geometry-replace-dialog {
+  max-width: 480px;
+}
+
+.geometry-replace-body {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.geometry-replace-body .panel-warning {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.geometry-replace-body .panel-warning > svg {
+  flex: none;
+  margin-top: 2px;
+}

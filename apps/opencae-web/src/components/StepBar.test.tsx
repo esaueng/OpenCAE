@@ -214,8 +214,8 @@ describe("rail states from readiness (2026-09 review D14)", () => {
   });
 
   test("ticks Run and Results only for results the viewer can show", () => {
-    const seeded = { ...study, runs: [{ id: "run-seeded", studyId: study.id, status: "complete" as const, createdAt: "2026-01-01T00:00:00.000Z" }] };
-    const html = renderToStaticMarkup(<StepBar {...baseProps} project={project} study={seeded as typeof study} hasResults={false} />);
+    const seeded = { ...study, runs: [{ id: "run-seeded", studyId: study.id, status: "complete", createdAt: "2026-01-01T00:00:00.000Z" }] } as unknown as typeof study;
+    const html = renderToStaticMarkup(<StepBar {...baseProps} project={project} study={seeded} hasResults={false} />);
     expect(html.match(/step-icon done/g) ?? []).toHaveLength(1); // model only
   });
 

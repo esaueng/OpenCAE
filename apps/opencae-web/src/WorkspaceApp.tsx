@@ -30,6 +30,9 @@ import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { isPreviewOnlyGeometry } from "./geometryFormats";
 import { workspaceNoticeFor, type WorkspaceNoticeTone } from "./workspaceNotice";
+import { geometryReplacementLosses } from "./geometryReplacement";
+import { GeometryReplaceDialog } from "./components/GeometryReplaceDialog";
+import { sampleOptionFor } from "./components/sampleOptions";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -192,6 +195,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // log drawer (2026-09 review D4).
   const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(null);
   const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
+  // Geometry replacement waits for confirmation when it would clear the study
+  // setup (2026-09 review D5).
+  const [pendingGeometryReplacement, setPendingGeometryReplacement] = useState<{ actionLabel: string; losses: string[]; proceed: () => void } | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
@@ -1378,7 +1384,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     return true;
   }
 
-  async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+  function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+    requestGeometryReplacement(`Loading the ${sampleOptionFor(nextSample).title} sample`, () => void performLoadSample(nextSample, nextAnalysisType));
+  }
+
+  async function performLoadSample(nextSample: SampleModelId, nextAnalysisType: SampleAnalysisType) {
     const actionHandle = beginProjectAction(projectRef.current);
     const opened = await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
     if (opened) {
@@ -1400,7 +1410,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     });
   }
 
+  /**
+   * Runs `proceed` immediately when nothing would be lost, otherwise parks it
+   * behind the confirm dialog. Skipped from the start screen, where the user
+   * has already left the workspace.
+   */
+  function requestGeometryReplacement(actionLabel: string, proceed: () => void) {
+    const losses = homeRequested ? [] : geometryReplacementLosses(study, resultFields.length > 0);
+    if (!losses.length) {
+      proceed();
+      return;
+    }
+    setPendingGeometryReplacement({ actionLabel, losses, proceed });
+  }
+
   function handleUploadModel(file: File) {
+    requestGeometryReplacement(`Replacing the model with ${file.name}`, () => performUploadModel(file));
+  }
+
+  function performUploadModel(file: File) {
     if (!project) return;
     const sourceProject = project;
     const actionHandle = beginProjectAction(sourceProject);
@@ -1840,6 +1868,17 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
     setMeshError(null);
+    // The mesh stage builds the whole Core model, so a missing boundary
+    // condition used to surface here as "generated an invalid Core model:
+    // Steady thermal analysis requires…" (2026-09 review D16). Check the same
+    // readiness rows the Run step shows and say it in the user's words.
+    const setupBlockers = runReadiness.filter((item) => !item.done && item.label !== "Mesh generated").flatMap((item) => item.blockers);
+    if (setupBlockers.length) {
+      const message = `Complete the study before meshing: ${setupBlockers.join(" ")}`;
+      setMeshError(message);
+      pushMessage(message);
+      return;
+    }
     setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
     // generateMesh rethrows quality-gate and STEP topology rejections so the
     // primary failure remains visible without starting another heavy CAD job.
@@ -2834,6 +2873,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         onClearLogs={clearLogs}
       />
       {renderStorageRecoveryNotice()}
+      <GeometryReplaceDialog
+        open={pendingGeometryReplacement !== null}
+        actionLabel={pendingGeometryReplacement?.actionLabel ?? ""}
+        losses={pendingGeometryReplacement?.losses ?? []}
+        onCancel={() => {
+          setPendingGeometryReplacement(null);
+          pushMessage("Kept the current model.");
+        }}
+        onConfirm={() => {
+          const pending = pendingGeometryReplacement;
+          setPendingGeometryReplacement(null);
+          pending?.proceed();
+        }}
+      />
       {validationGalleryOpen ? (
         <Suspense fallback={null}>
           <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />
