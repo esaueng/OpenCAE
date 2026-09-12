@@ -5987,3 +5987,16 @@ input[aria-invalid="true"] {
 .start-action.secondary small {
   color: var(--color-text-muted);
 }
+
+/* 2026-09 review F11: frame stepping beside Play. */
+.playback-transport {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+
+.playback-transport > .secondary:not(.wide) {
+  padding-inline: var(--sp-2);
+  min-width: 36px;
+}
