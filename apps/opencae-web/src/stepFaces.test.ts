@@ -247,3 +247,17 @@ describe("STEP face registry (box-with-bore fixture)", () => {
     });
   });
 });
+
+describe("stepRegistryDimensions (2026-09 review D27)", () => {
+  it("measures the bounding size from the registry meshes without the viewer", async () => {
+    const { stepRegistryDimensions } = await import("./stepFaces");
+    const registry = {
+      meshes: [
+        { positions: Float32Array.from([0, 0, 0, 10, 0, 0, 10, 5, 0]) },
+        { positions: Float32Array.from([0, 0, 2, 4, 5, 2]) }
+      ]
+    } as unknown as Parameters<typeof stepRegistryDimensions>[0];
+    expect(stepRegistryDimensions(registry)).toEqual({ x: 10, y: 5, z: 2, units: "mm" });
+    expect(stepRegistryDimensions({ meshes: [] } as unknown as Parameters<typeof stepRegistryDimensions>[0])).toBeUndefined();
+  });
+});

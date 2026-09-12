@@ -42,9 +42,12 @@ that carry a support (teal) or a load (amber) stay tinted on the model (F2,
 tinting only — stable entry ids remain open); every load callout goes through
 `layoutOutsideModelLabels`, so two loads on one face no longer overprint
 (D20); Run explains the missing measurement in plain words instead of
-surfacing the solver refusal (D27, message only — deriving dimensions from
-geometry remains open). Still open in Stage 2: stable entry ids, true
-offscreen capture, geometry-derived dimensions.
+surfacing the solver refusal (D27, message only).
+Stage 2d (`claude/plan-028-stage-2d`, stacked on 2c) closes D27 properly:
+STEP uploads and parametric parts carry their bounding size from the face
+registry measured at upload, so the run gate no longer depends on the viewer's
+first frame. Still open in Stage 2: stable entry ids and true offscreen
+capture.
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank
