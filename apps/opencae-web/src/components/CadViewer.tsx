@@ -60,6 +60,12 @@ interface CadViewerProps {
   resultProbes?: ResultProbePin[];
   onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
   surfaceMesh?: SolverSurfaceMesh;
+  /** Boundary of the generated volume mesh, drawn in the mesh view (2026-09 review D13). */
+  meshPreviewSurface?: SolverSurfaceMesh;
+  /** True while report figures are captured through this viewer (2026-09 review D15). */
+  captureBusy?: boolean;
+  /** Headline peak per result mode for the legend, e.g. `Peak 2.147 MPa` (2026-09 review F8). */
+  resultPeaks?: Partial<Record<ResultMode, string>>;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   meshSummary?: MeshSummary;
@@ -298,6 +304,11 @@ export function CadViewer(props: CadViewerProps) {
     const displayBounds = solverSurfaceDisplayBoundsForDisplayModel(props.displayModel, uploadedPreviewBounds);
     return solverSurfaceDisplayFootprint(props.surfaceMesh, displayBounds, baseModelRotation);
   }, [baseModelRotation, props.displayModel, props.surfaceMesh, solverSurfaceResult, uploadedPreviewBounds]);
+  const meshPreviewFootprint = useMemo(() => {
+    if (!props.meshPreviewSurface || effectiveViewMode !== "mesh") return null;
+    const displayBounds = solverSurfaceDisplayBoundsForDisplayModel(props.displayModel, uploadedPreviewBounds);
+    return solverSurfaceDisplayFootprint(props.meshPreviewSurface, displayBounds, baseModelRotation);
+  }, [baseModelRotation, effectiveViewMode, props.displayModel, props.meshPreviewSurface, uploadedPreviewBounds]);
   const resultColorScale = props.resultColorScale ?? resultColorScaleForField(solverSurfaceResult?.scalarField ?? selectedResultField(resultFields, props.resultMode), props.resultMode, stressComponent);
   const viewerContentFitKey = [
     props.activeStep,
@@ -374,6 +385,11 @@ export function CadViewer(props: CadViewerProps) {
                 The footprint group scales/recenters them into the display model's visual
                 footprint without mutating geometry, so the displacement visual-scale math
                 (which self-normalizes against mesh extent) keeps working unchanged. */}
+            {effectiveViewMode === "mesh" && props.meshPreviewSurface && meshPreviewFootprint && (
+              <group scale={meshPreviewFootprint.scale} position={meshPreviewFootprint.position}>
+                <MeshPreviewSurface surfaceMesh={props.meshPreviewSurface} />
+              </group>
+            )}
             {effectiveViewMode === "results" && solverSurfaceResult && (
               <group scale={solverSurfaceFootprint?.scale ?? 1} position={solverSurfaceFootprint?.position ?? [0, 0, 0]}>
                 <SolverSurfaceResultMesh
@@ -445,6 +461,12 @@ export function CadViewer(props: CadViewerProps) {
           </div>
         </div>
       ) : null}
+      {props.captureBusy && !props.importingModelFilename ? (
+        <div className="viewer-capture-overlay" role="status" aria-live="polite" aria-atomic="true">
+          <span className="viewer-import-spinner" aria-hidden="true" />
+          <span>Preparing report figures… the view switches briefly.</span>
+        </div>
+      ) : null}
       {props.displayModel.faces.length > 0 && (
         <div className="viewer-a11y-faces" role="group" aria-label="Select a face with the keyboard">
           <span>Select a face to place supports or loads.</span>
@@ -470,7 +492,7 @@ export function CadViewer(props: CadViewerProps) {
         <button type="button" aria-pressed={projectionMode === "perspective"} onClick={() => props.onProjectionModeChange?.("perspective")}>Perspective</button>
         <button type="button" aria-pressed={projectionMode === "orthographic"} onClick={() => props.onProjectionModeChange?.("orthographic")}>Orthographic</button>
       </div>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} peakLabel={props.resultPeaks?.[props.resultMode]} />}
     </section>
       </StressComponentContext.Provider>
       </SceneThemeContext.Provider>
@@ -1850,7 +1872,9 @@ function BracketModel({
         />
       )}
       {!suppressProceduralResultSolid && <group userData={{ opencaeSectionClippable: true }}><HoleRims kind={modelKind} /></group>}
-      {viewMode === "mesh" && <group userData={{ opencaeSectionClippable: true }}><MeshOverlay kind={modelKind} /></group>}
+      {/* The mesh view draws the generated boundary surface from the top-level
+          scene (MeshPreviewSurface); the decorative wireframe boxes that used to
+          stand in for it were removed (2026-09 review D13). */}
       {placementMode && !isResultView && <SnapVisualization result={snapResult} mode={activeStep === "supports" ? "supports" : "loads"} />}
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
@@ -4033,6 +4057,49 @@ function assertSolverSurfaceMeshTopology(surfaceMesh: SolverSurfaceMesh): void {
       }
     }
   }
+}
+
+/**
+ * The generated volume mesh's boundary, shown in the Mesh step's viewer: a
+ * faint shaded surface with its element edges. Before this the mesh view drew
+ * nothing for uploaded geometry and a decorative box for samples
+ * (2026-09 review D13).
+ */
+function MeshPreviewSurface({ surfaceMesh }: { surfaceMesh: SolverSurfaceMesh }) {
+  const geometry = useMemo(() => {
+    const positions = new Float32Array(surfaceMesh.nodes.length * 3);
+    surfaceMesh.nodes.forEach((node, index) => {
+      positions[index * 3] = node[0];
+      positions[index * 3 + 1] = node[1];
+      positions[index * 3 + 2] = node[2];
+    });
+    const indices = new Uint32Array(surfaceMesh.triangles.length * 3);
+    surfaceMesh.triangles.forEach((triangle, index) => {
+      indices[index * 3] = triangle[0];
+      indices[index * 3 + 1] = triangle[1];
+      indices[index * 3 + 2] = triangle[2];
+    });
+    const built = new THREE.BufferGeometry();
+    built.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    built.setIndex(new THREE.BufferAttribute(indices, 1));
+    built.computeVertexNormals();
+    return built;
+  }, [surfaceMesh]);
+  const edgeGeometry = useMemo(() => new THREE.EdgesGeometry(geometry, 1), [geometry]);
+  useEffect(() => () => {
+    geometry.dispose();
+    edgeGeometry.dispose();
+  }, [edgeGeometry, geometry]);
+  return (
+    <group userData={{ opencaeSectionClippable: true, opencaeMeshPreview: true }}>
+      <mesh geometry={geometry} renderOrder={5}>
+        <meshStandardMaterial color="#9ad1ff" transparent opacity={0.28} depthWrite={false} side={THREE.DoubleSide} metalness={0.1} roughness={0.7} />
+      </mesh>
+      <lineSegments geometry={edgeGeometry} renderOrder={6}>
+        <lineBasicMaterial color="#9ad1ff" transparent opacity={0.85} toneMapped={false} />
+      </lineSegments>
+    </group>
+  );
 }
 
 function UndeformedGeometryOutline({ geometry, position }: { geometry: THREE.BufferGeometry; position?: [number, number, number] }) {
@@ -6605,7 +6672,7 @@ export function resultLegendContentScale(size: ResultLegendSize) {
   ).toFixed(2));
 }
 
-function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
+function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale, peakLabel }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number; peakLabel?: string }) {
   const stressComponent = useContext(StressComponentContext);
   const contextColorScale = useContext(ResultColorScaleContext);
   const legendRef = useRef<HTMLDivElement | null>(null);
@@ -6730,6 +6797,8 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
         <span>Min</span>
         <span>Max</span>
       </div>
+      {/* The bar shows the averaged surface field; the summary peak is the unaveraged element value (2026-09 review F8). */}
+      {peakLabel && <span className="legend-peak">{peakLabel} (element, unaveraged)</span>}
     </div>
   );
 }
@@ -6973,49 +7042,6 @@ function SupportBurst({ radius, active = false, scale = 1 }: { radius: number; a
   );
 }
 
-function MeshOverlay({ kind }: { kind: SampleModelKind }) {
-  const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
-  const ribGeometry = useMemo(() => createRibGeometry(), []);
-  const beamGeometry = useMemo(() => createBeamGeometry(), []);
-  const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
-  if (kind === "blank") return null;
-
-  if (kind === "plate") {
-    return (
-      <group>
-        {[beamGeometry, beamPayloadGeometry].map((geometry, index) => (
-          <mesh key={index} geometry={geometry}>
-            <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-          </mesh>
-        ))}
-      </group>
-    );
-  }
-
-  if (kind === "cantilever") {
-    return (
-      <mesh position={[0, 0.18, 0]}>
-        <boxGeometry args={[3.8, 0.5, 0.72, 18, 4, 4]} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-      </mesh>
-    );
-  }
-
-  if (kind === "uploaded") return null;
-
-  return (
-    <group>
-      <mesh>
-        <primitive attach="geometry" object={bodyGeometry} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.26} />
-      </mesh>
-      <mesh>
-        <primitive attach="geometry" object={ribGeometry} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-      </mesh>
-    </group>
-  );
-}
 
 function BoundsCameraReset({ contentFitKey, signal, viewAxis, viewAxisSignal, controlsRef }: { contentFitKey: string; signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();
