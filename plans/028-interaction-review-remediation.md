@@ -23,6 +23,23 @@ Stage 2: assigned-face tinting and stable entry ids (F2), the real solver-surfac
 mesh view and size readout (D13, F5), offscreen report capture (D15), one
 deformation control (D25), the legend peak marker (F8) and callout collision
 handling (D20) — all viewer work.
+Stage 2b is executed on `claude/plan-028-stage-2b`, stacked on 2a: the Mesh
+step draws the generated volume mesh's boundary (`solverSurfaceMeshFromModel`
+over the stored Core model, rendered through the same footprint transform the
+results use) with a Show/Hide mesh toggle, and the decorative wireframe boxes
+are gone (D13); the panel states the target element size instead of the
+heuristic sample count (F5); report-figure capture announces itself in the
+viewer and holds the result-mode controls while it runs (D15, an honest
+interim — the capture still uses the live viewer); the deformation slider
+appears in every structural mode and says it multiplies the legend factor
+(D25); the legend prints the unaveraged element peak beside the averaged range
+(F8). Still open: assigned-face tinting and stable ids (F2), callout collisions
+for loads sharing a face (D20 — only gravity loads and supports go through
+`layoutOutsideModelLabels`), true offscreen capture, and a new item found while
+verifying: **D27** run eligibility depends on `displayModel.dimensions`, which
+the viewer measures after its first frame, so a run started before the 3D view
+has painted is refused with "requires usable block-like display dimensions" —
+derive dimensions from geometry or say "wait for the 3D view".
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank

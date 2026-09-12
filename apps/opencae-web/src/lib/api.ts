@@ -873,6 +873,11 @@ function messageFromUnknownError(error: unknown): string {
 // Gmsh characteristic length (mm) per mesh preset for procedural sample
 // geometry (bracket). Shared by the mesh step and the run flow's mesh-first
 // path; STEP uploads use the same map as a characteristic-length hint.
+/** The target element size a preset asks the browser mesher for (2026-09 review F5: shown in the Mesh panel). */
+export function meshTargetSizeMmForPreset(preset: MeshQuality): number {
+  return PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium;
+}
+
 const PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
   coarse: 18,
   medium: 12,

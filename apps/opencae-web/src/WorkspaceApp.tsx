@@ -33,6 +33,7 @@ import { workspaceNoticeFor, type WorkspaceNoticeTone } from "./workspaceNotice"
 import { geometryReplacementLosses } from "./geometryReplacement";
 import { GeometryReplaceDialog } from "./components/GeometryReplaceDialog";
 import { sampleOptionFor } from "./components/sampleOptions";
+import { solverSurfaceMeshFromModel } from "@opencae/core";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -50,7 +51,7 @@ import {
   shouldShowStartScreen,
   workflowStepForShortcut
 } from "./appShellState";
-import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
+import { displayModelForUnits, formatResultMetric, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
 import { supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
@@ -200,6 +201,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [pendingGeometryReplacement, setPendingGeometryReplacement] = useState<{ actionLabel: string; losses: string[]; proceed: () => void } | null>(null);
   // A consequence of opening a file (mesh not restored) that needs an action (2026-09 review F13).
   const [openNote, setOpenNote] = useState<string | null>(null);
+  // Report figures are captured through the live viewer, which flips modes
+  // for a moment after every solve; say so and hold the mode controls while
+  // it happens (2026-09 review D15).
+  const [reportCaptureBusy, setReportCaptureBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
@@ -327,6 +332,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const displayUnitSystem = project?.unitSystem ?? "SI";
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummary ? resultSummaryForUnits(resultSummary, displayUnitSystem) : null, [displayUnitSystem, resultSummary]);
+  // The legend's max is the averaged surface field; the headline peak is the
+  // unaveraged element value. Show both on the legend (2026-09 review F8).
+  const resultPeaks = useMemo<Partial<Record<ResultMode, string>>>(() => {
+    if (!resultSummaryForUi || !isStructuralResultSummary(resultSummaryForUi)) return {};
+    return {
+      stress: `Peak ${formatResultMetric(resultSummaryForUi.maxStress, resultSummaryForUi.maxStressUnits)}`,
+      displacement: `Peak ${formatResultMetric(resultSummaryForUi.maxDisplacement, resultSummaryForUi.maxDisplacementUnits)}`
+    };
+  }, [resultSummaryForUi]);
   const resultFieldsForUi = useMemo(() => {
     const converted = resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem));
     return resultSummary && isModalResultSummary(resultSummary)
@@ -549,6 +563,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // where it happened and as a footer pill.
   const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, openNote, dismissedKey: dismissedNoticeKey });
   const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
+  // The generated volume mesh's boundary, for the Mesh step's viewer. "Toggle
+  // mesh" used to draw nothing for uploads and a decorative box for samples
+  // (2026-09 review D13).
+  const meshArtifactModel = (study?.meshSettings.summary?.artifacts as { actualCoreModel?: { model?: unknown } } | undefined)?.actualCoreModel?.model;
+  const meshPreviewSurface = useMemo(() => {
+    if (!meshArtifactModel) return undefined;
+    try {
+      return solverSurfaceMeshFromModel(meshArtifactModel as Parameters<typeof solverSurfaceMeshFromModel>[0], "mesh-preview");
+    } catch {
+      return undefined;
+    }
+  }, [meshArtifactModel]);
 
   useEffect(() => {
     setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
@@ -1689,6 +1715,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const capture = viewerCaptureRef.current;
     let cancelled = false;
     reportCaptureInFlightRef.current = runId;
+    setReportCaptureBusy(true);
     void captureQueueRef.current!.enqueue(() => captureResultViews({
       getViewMode: () => reportStateRef.current.viewMode,
       getResultMode: () => reportStateRef.current.resultMode,
@@ -1730,6 +1757,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       pushMessage(message);
     }).finally(() => {
       if (reportCaptureInFlightRef.current === runId) reportCaptureInFlightRef.current = null;
+      setReportCaptureBusy(false);
     });
     return () => {
       cancelled = true;
@@ -2646,6 +2674,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             resultProbes={resultProbes}
             onAddResultProbe={handleAddResultProbe}
             surfaceMesh={resultSurfaceMesh}
+            meshPreviewSurface={meshPreviewSurface}
+            captureBusy={reportCaptureBusy}
+            resultPeaks={resultPeaks}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying && resultPlaybackCacheState.status === "ready" && resultPlaybackCacheState.cache.packed ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={solverMeshSummary ?? study.meshSettings.summary}
@@ -2668,6 +2699,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         <RightPanel
           activeStep={activeStep}
           notice={workspaceNotice}
+          resultControlsBusy={reportCaptureBusy}
           onDismissNotice={() => workspaceNotice && setDismissedNoticeKey(workspaceNotice.key)}
           onNoticeStep={(step) => navigateToStep(step)}
           project={project}

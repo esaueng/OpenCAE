@@ -14,7 +14,7 @@ import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
 import { availableStressComponents, type ResolvedResultProbe } from "../resultSelection";
-import type { SampleAnalysisType, SampleModelId } from "../lib/api";
+import { meshTargetSizeMmForPreset, type SampleAnalysisType, type SampleModelId } from "../lib/api";
 import type { WasmMeshPhaseProgress } from "../lib/wasmMeshing";
 import { defaultConvergenceProbe, type ConvergenceProbe } from "../meshConvergence";
 import { stepGeometryMetadataForProject } from "../stepGeometryState";
@@ -170,6 +170,8 @@ interface RightPanelProps {
   notice?: WorkspaceNotice | null;
   onDismissNotice?: () => void;
   onNoticeStep?: (step: StepId) => void;
+  /** True while report figures are captured through the viewer; result-mode controls hold (2026-09 review D15). */
+  resultControlsBusy?: boolean;
   /** Lets a panel commit pending work when the user presses Next (Material applies the previewed selection, 2026-09 review F3). */
   registerBeforeNext?: (handler: (() => void) | null) => void;
   resultFrameIndex?: number;
@@ -1638,7 +1640,7 @@ function selectionLabelForPanel(study: Study, selectionRef: string): string {
   return study.namedSelections.find((selection) => selection.id === selectionRef)?.name ?? selectionRef;
 }
 
-function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, meshError, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
+function MeshPanel({ project, displayModel, study, viewMode, onViewModeChange, onGenerateMesh, onConnectionsChange, onCancelMesh, meshPhaseProgress, meshError, onRepairModel, isRepairingModel = false, onRunMeshConvergence, convergenceBusy = false, convergenceProgress = "" }: RightPanelProps) {
   const [preset, setPreset] = useState<MeshQuality>(study.meshSettings.preset);
   const meshing = Boolean(meshPhaseProgress);
   const meshSummary = study.meshSettings.summary;
@@ -1771,7 +1773,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
           <p className="panel-copy mesh-progress-message" aria-live="polite">{meshPhaseProgress.message}</p>
         </>
       )}
-      <Callout>{capitalize(preset)} creates {meshPresetDescription(preset)}.</Callout>
+      <Callout>{capitalize(preset)} creates {meshPresetDescription(preset)} (target element size {formatDisplayNumber(meshTargetSizeMmForPreset(preset))} mm).</Callout>
       {meshSummary && (
         <div className="summary-box">
           {hasVerifiedMeshSummary ? (
@@ -1787,9 +1789,23 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
               <Info label="Elements" value="--" />
             </>
           )}
-          <Info label="Analysis samples" value={(meshSummary.analysisSampleCount ?? 0).toLocaleString()} />
+          {/* "Analysis samples" meant nothing to a user; the element size does (2026-09 review F5). */}
+          <Info label="Target element size" value={`${formatDisplayNumber(typeof meshSummary.density?.requestedMeshSizeMm === "number" ? meshSummary.density.requestedMeshSizeMm : meshTargetSizeMmForPreset(preset))} mm`} />
+          {typeof meshSummary.density?.actualMeshSizeMm === "number" && meshSummary.density.actualMeshSizeMm !== meshSummary.density.requestedMeshSizeMm && (
+            <Info label="Meshed at" value={`${formatDisplayNumber(meshSummary.density.actualMeshSizeMm)} mm`} />
+          )}
           <Info label="Warnings" value={String(meshSummary.warnings.length)} />
         </div>
+      )}
+      {meshSummary && stepGeometryResolvedByMesh && (
+        <button
+          type="button"
+          className={viewMode === "mesh" ? "primary wide" : "secondary wide"}
+          aria-pressed={viewMode === "mesh"}
+          onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}
+        >
+          <Eye size={16} />{viewMode === "mesh" ? "Hide mesh" : "Show mesh in viewer"}
+        </button>
       )}
       {meshSummary && meshSummary.warnings.length > 0 && (
         <ul className="mesh-warning-list" aria-label="Mesh warnings">
@@ -2583,6 +2599,7 @@ function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
 
 function ResultsPanelContent({
   displayModel,
+  resultControlsBusy = false,
   resultMode,
   stressComponent = "von_mises",
   showDeformed,
@@ -2864,9 +2881,9 @@ function ResultsPanelContent({
         </div>
       )}
       <SectionTitle helpId="resultMode">Result mode</SectionTitle>
-      <div className="segmented result-mode" role="group" aria-label="Result mode">
-        <button type="button" className={resultMode === "stress" ? "active" : ""} aria-pressed={resultMode === "stress"} onClick={() => onResultModeChange("stress")}>Stress</button>
-        <button type="button" className={resultMode === "displacement" ? "active" : ""} aria-pressed={resultMode === "displacement"} onClick={() => onResultModeChange("displacement")}>Displacement</button>
+      <div className="segmented result-mode" role="group" aria-label="Result mode" aria-busy={resultControlsBusy || undefined} title={resultControlsBusy ? "Preparing report figures; the view switches briefly." : undefined}>
+        <button type="button" className={resultMode === "stress" ? "active" : ""} aria-pressed={resultMode === "stress"} disabled={resultControlsBusy} onClick={() => onResultModeChange("stress")}>Stress</button>
+        <button type="button" className={resultMode === "displacement" ? "active" : ""} aria-pressed={resultMode === "displacement"} disabled={resultControlsBusy} onClick={() => onResultModeChange("displacement")}>Displacement</button>
         {resultFields.some((field) => field.type === "velocity") && <button type="button" className={resultMode === "velocity" ? "active" : ""} aria-pressed={resultMode === "velocity"} onClick={() => onResultModeChange("velocity")}>Velocity</button>}
         {resultFields.some((field) => field.type === "acceleration") && <button type="button" className={resultMode === "acceleration" ? "active" : ""} aria-pressed={resultMode === "acceleration"} onClick={() => onResultModeChange("acceleration")}>Acceleration</button>}
         <button type="button" className={resultMode === "safety_factor" ? "active" : ""} aria-pressed={resultMode === "safety_factor"} onClick={() => onResultModeChange("safety_factor")}>Safety factor</button>
@@ -2947,9 +2964,10 @@ function ResultsPanelContent({
           )}
         </section>
       )}
-      {resultMode === "stress" && (
+      {/* One deformation control in every structural mode; it used to render only in Stress (2026-09 review D25). */}
+      {(
         <label className="field range-field">
-          <span className="range-label"><HelpLabel helpId="stressExaggeration">Deformation scale</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x</strong></span>
+          <span className="range-label"><HelpLabel helpId="stressExaggeration">Deformation scale</HelpLabel><strong>{draftStressExaggeration.toFixed(1)}x · multiplies the legend factor</strong></span>
           <input
             type="range"
             min="1"
