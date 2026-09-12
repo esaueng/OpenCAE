@@ -33,13 +33,18 @@ viewer and holds the result-mode controls while it runs (D15, an honest
 interim — the capture still uses the live viewer); the deformation slider
 appears in every structural mode and says it multiplies the legend factor
 (D25); the legend prints the unaveraged element peak beside the averaged range
-(F8). Still open: assigned-face tinting and stable ids (F2), callout collisions
-for loads sharing a face (D20 — only gravity loads and supports go through
-`layoutOutsideModelLabels`), true offscreen capture, and a new item found while
-verifying: **D27** run eligibility depends on `displayModel.dimensions`, which
-the viewer measures after its first frame, so a run started before the 3D view
-has painted is refused with "requires usable block-like display dimensions" —
-derive dimensions from geometry or say "wait for the 3D view".
+(F8). A new item found while verifying: **D27** run eligibility depends on
+`displayModel.dimensions`, which the viewer measures after its first frame, so
+a run started before the 3D view has painted was refused with "requires usable
+block-like display dimensions".
+Stage 2c is executed on `claude/plan-028-stage-2c`, stacked on 2b: STEP faces
+that carry a support (teal) or a load (amber) stay tinted on the model (F2,
+tinting only — stable entry ids remain open); every load callout goes through
+`layoutOutsideModelLabels`, so two loads on one face no longer overprint
+(D20); Run explains the missing measurement in plain words instead of
+surfacing the solver refusal (D27, message only — deriving dimensions from
+geometry remains open). Still open in Stage 2: stable entry ids, true
+offscreen capture, geometry-derived dimensions.
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank
