@@ -6027,3 +6027,14 @@ input[aria-invalid="true"] {
   color: var(--color-warning);
   font-size: var(--fs-xs);
 }
+
+/* 2026-09 review D4: outdated results stay viewable, and say so. */
+.legend-stale {
+  display: block;
+  margin-bottom: var(--sp-1);
+  padding: 2px var(--sp-1);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+}

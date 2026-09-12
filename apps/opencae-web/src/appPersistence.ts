@@ -66,6 +66,8 @@ export interface WorkspaceUiSnapshot {
   activeRunId: string;
   completedRunId: string;
   runProgress: number;
+  /** The edit that made the current results outdated, kept across reloads so stale contours never restore as fresh (2026-09 review D4). */
+  resultsOutdatedBy?: string | null;
   undoStack: Project[];
   redoStack: Project[];
   status: string;
