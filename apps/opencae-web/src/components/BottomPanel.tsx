@@ -61,7 +61,7 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
   const copyFeedbackTimeoutRef = useRef(0);
   const expanded = tab !== null;
   const displayStatus = statusForDisplay(status, solverStatus);
-  const healthy = solverStatus === "Running" ? "running" : displayStatus.endsWith("error") || displayStatus === "Needs attention" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
+  const healthy = solverStatus === "Running" ? "running" : displayStatus === "Solve failed" || displayStatus === "Needs attention" || displayStatus === "Results outdated" ? "warning" : meshStatus === "Ready" ? "ready" : "warning";
   const formattedLogs = logs.map(formatLogEntry);
   // 43 guides is more than anyone scans. Filter across title and body so a user who knows
   // roughly what they are looking for can get to it.
@@ -373,17 +373,23 @@ export function KeyboardShortcutGuide() {
  * had just been refused. Any future message phrased outside the list would do
  * the same, which is why `solverStatus` is consulted first.
  */
+/**
+ * Pill labels speak to the user, not about the runtime: "OpenCAE Core error"
+ * and "OpenCAE Core active" named the solver product instead of the state the
+ * user is in (2026-09 review F12). "Results outdated" is new: an edit cleared
+ * the last results and a re-run is needed.
+ */
 export function statusForDisplay(status: string, solverStatus: string) {
-  if (solverStatus === "Error") return "OpenCAE Core error";
+  if (solverStatus === "Error") return "Solve failed";
   const normalized = status.toLowerCase();
-  if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "OpenCAE Core error";
+  if (normalized.includes("opencae core") && /(error|fail|failed|unavailable|not configured|not enabled|not ready)/.test(normalized)) return "Solve failed";
   if (/(could not|failed)/.test(normalized)) return "Needs attention";
   if (solverStatus === "Running") return "Simulating";
+  if (solverStatus === "Outdated") return "Results outdated";
   // Keyed off the solver, not the words in the message: any status containing "complete"
   // used to light the pill green, including "Mesh-convergence study complete" (which
   // leaves the working mesh and results untouched) and "Completed results were ignored".
   if (solverStatus === "Complete") return "Results ready";
-  if (normalized.includes("opencae core")) return "OpenCAE Core active";
   return "Ready";
 }
 

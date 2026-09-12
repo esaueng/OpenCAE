@@ -5856,3 +5856,134 @@ input[aria-invalid="true"] {
   color: var(--color-text-subtle);
   font-size: var(--fs-xs);
 }
+
+/* 2026-09 review: workspace-wide notice (D7) and rail step states (D14). */
+.workspace-notice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-2);
+  align-items: start;
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-25);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-snug);
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
+
+.workspace-notice > svg {
+  margin-top: 2px;
+  color: var(--color-warning);
+}
+
+.workspace-notice.error {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+}
+
+.workspace-notice.error > svg {
+  color: var(--color-error);
+}
+
+.workspace-notice-body {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.workspace-notice-body p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-notice-body .text-button {
+  justify-self: start;
+  padding: 0;
+  min-height: 0;
+  text-decoration: underline;
+}
+
+.step-icon.blocked {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+
+.step-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-warning);
+  border: 2px solid var(--color-surface);
+}
+
+.step-badge.error {
+  background: var(--color-error);
+}
+
+.check {
+  align-items: flex-start;
+}
+
+/* Override the 18px tick box that `.check > span` gives every child. */
+.check > .check-copy {
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  place-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.check-blockers {
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-snug);
+}
+
+/* 2026-09 review D5: confirm before geometry replacement clears the setup. */
+.geometry-replace-dialog {
+  max-width: 480px;
+}
+
+.geometry-replace-body {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.geometry-replace-body .panel-warning {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.geometry-replace-body .panel-warning > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* 2026-09 review D23: the start screen shows the workspace loading. */
+.start-busy {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.start-actions[aria-busy="true"] .start-action {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* The Continue action takes the primary slot, so the sample action can be secondary; its subtitle needs readable ink there. */
+.start-action.secondary small {
+  color: var(--color-text-muted);
+}

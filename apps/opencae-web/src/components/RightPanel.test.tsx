@@ -2327,3 +2327,25 @@ describe("2026-09 interaction review stage 0 guards", () => {
     expect(html).not.toContain("direction");
   });
 });
+
+describe("workspace notice and readiness text (2026-09 review D7, F7)", () => {
+  test("renders the workspace notice on any step with a link to the step that can fix it", () => {
+    const notice = { key: "outdated:Load updated.", tone: "warning" as const, title: "Results cleared", message: "Load updated. Re-run to update them.", step: "run" as const, stepLabel: "Run" };
+    const html = renderPanel("material", { notice, onDismissNotice: vi.fn(), onNoticeStep: vi.fn() });
+
+    expect(html).toContain('class="workspace-notice warning"');
+    expect(html).toContain("Results cleared");
+    expect(html).toContain("Go to Run");
+    expect(html).toContain('aria-label="Dismiss notice"');
+    // On the step itself the link is redundant.
+    expect(renderPanel("run", { notice })).not.toContain("Go to Run");
+    expect(renderPanel("run", { notice: { ...notice, tone: "error" } })).toContain('role="alert"');
+  });
+
+  test("prints readiness blockers as text instead of a tooltip", () => {
+    const html = renderPanel("run");
+
+    expect(html).toContain('class="check-blockers"');
+    expect(html).toContain("Choose what the part is made of.");
+  });
+});

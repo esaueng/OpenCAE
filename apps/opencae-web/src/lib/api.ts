@@ -18,6 +18,8 @@ import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConverge
 
 export interface SampleProjectResponse {
   message?: string;
+  /** A consequence the user must act on (e.g. a saved mesh that was not restored); shown as a workspace notice, not only logged. */
+  notice?: string;
   project: Project;
   displayModel: DisplayModel;
   results?: LocalResultBundle;

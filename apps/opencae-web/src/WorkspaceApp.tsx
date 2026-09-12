@@ -29,6 +29,10 @@ import type { ConvergenceProbe } from "./meshConvergence";
 import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { isPreviewOnlyGeometry } from "./geometryFormats";
+import { workspaceNoticeFor, type WorkspaceNoticeTone } from "./workspaceNotice";
+import { geometryReplacementLosses } from "./geometryReplacement";
+import { GeometryReplaceDialog } from "./components/GeometryReplaceDialog";
+import { sampleOptionFor } from "./components/sampleOptions";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -186,6 +190,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // the results it describes, never outliving them.
   const [solveElapsedMs, setSolveElapsedMs] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // Set when a study edit clears the last results (with the edit named), so
+  // the loss is announced on every step instead of one line in the collapsed
+  // log drawer (2026-09 review D4).
+  const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(null);
+  const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
+  // Geometry replacement waits for confirmation when it would clear the study
+  // setup (2026-09 review D5).
+  const [pendingGeometryReplacement, setPendingGeometryReplacement] = useState<{ actionLabel: string; losses: string[]; proceed: () => void } | null>(null);
+  // A consequence of opening a file (mesh not restored) that needs an action (2026-09 review F13).
+  const [openNote, setOpenNote] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
@@ -530,6 +544,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair && !previewOnlyGeometry;
   const canUndoAction = undoStack.length > 0 && !solverRunning && !convergenceBusy;
   const canRedoAction = redoStack.length > 0 && !solverRunning && !convergenceBusy;
+  // One notice for the whole workspace (2026-09 review D7): a failed mesh or
+  // run, or results cleared by an edit, used to be visible only on the panel
+  // where it happened and as a footer pill.
+  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, openNote, dismissedKey: dismissedNoticeKey });
+  const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
 
   useEffect(() => {
     setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
@@ -1296,10 +1315,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   ]);
 
   async function openProjectResponse(
-    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>,
+    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle }>,
     options: { actionHandle: ProjectActionHandle; nextStep?: StepId; staleMessage?: string }
   ) {
-    let response: { project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle };
+    let response: { project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle };
     try {
       response = await action;
     } catch (error) {
@@ -1364,10 +1383,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setCompletedRunId(nextCompletedRunId);
     }
     pushMessage(response.message ?? "Project opened.");
+    setOpenNote(response.notice ?? null);
     return true;
   }
 
-  async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+  function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+    requestGeometryReplacement(`Loading the ${sampleOptionFor(nextSample).title} sample`, () => void performLoadSample(nextSample, nextAnalysisType));
+  }
+
+  async function performLoadSample(nextSample: SampleModelId, nextAnalysisType: SampleAnalysisType) {
     const actionHandle = beginProjectAction(projectRef.current);
     const opened = await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
     if (opened) {
@@ -1389,7 +1413,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     });
   }
 
+  /**
+   * Runs `proceed` immediately when nothing would be lost, otherwise parks it
+   * behind the confirm dialog. Skipped from the start screen, where the user
+   * has already left the workspace.
+   */
+  function requestGeometryReplacement(actionLabel: string, proceed: () => void) {
+    const losses = homeRequested ? [] : geometryReplacementLosses(study, resultFields.length > 0);
+    if (!losses.length) {
+      proceed();
+      return;
+    }
+    setPendingGeometryReplacement({ actionLabel, losses, proceed });
+  }
+
   function handleUploadModel(file: File) {
+    requestGeometryReplacement(`Replacing the model with ${file.name}`, () => performUploadModel(file));
+  }
+
+  function performUploadModel(file: File) {
     if (!project) return;
     const sourceProject = project;
     const actionHandle = beginProjectAction(sourceProject);
@@ -1784,6 +1826,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (resultFields.length) {
       invalidateCompletedRunState();
       pushMessage("Previous results cleared: the study changed since the last run.");
+      setResultsOutdatedBy(response.message);
     }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
@@ -1828,6 +1871,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
     setMeshError(null);
+    setOpenNote(null);
+    // The mesh stage builds the whole Core model, so a missing boundary
+    // condition used to surface here as "generated an invalid Core model:
+    // Steady thermal analysis requires…" (2026-09 review D16). Check the same
+    // readiness rows the Run step shows and say it in the user's words.
+    const setupBlockers = runReadiness.filter((item) => !item.done && item.label !== "Mesh generated").flatMap((item) => item.blockers);
+    if (setupBlockers.length) {
+      const message = `Complete the study before meshing: ${setupBlockers.join(" ")}`;
+      setMeshError(message);
+      pushMessage(message);
+      return;
+    }
     setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
     // generateMesh rethrows quality-gate and STEP topology rejections so the
     // primary failure remains visible without starting another heavy CAD job.
@@ -2035,6 +2090,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function invalidateCompletedRunState() {
     resultVariantLoadGenerationRef.current += 1;
+    setResultsOutdatedBy(null);
     setResultSummary(null);
     setSolveElapsedMs(null);
     setCompletedRunId("");
@@ -2522,7 +2578,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
-    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
+    // "Back to start" keeps the project in memory and autosave; offer the way
+    // back so Create/Load do not read as the only options (2026-09 review D23).
+    const continueProject = project && displayModel && study
+      ? { name: project.name, onContinue: () => setHomeRequested(false) }
+      : undefined;
+    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} continueProject={continueProject} />;
   }
 
   if (project && displayModel && displayModelForUi && !study) {
@@ -2561,6 +2622,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onUnitSystemChange={handleUnitSystemChange}
           study={study}
           hasResults={resultDisplayEligible}
+          readiness={runReadiness}
+          notices={stepNotices}
         />
         <Suspense fallback={(
           <section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">
@@ -2618,6 +2681,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         </Suspense>
         <RightPanel
           activeStep={activeStep}
+          notice={workspaceNotice}
+          onDismissNotice={() => workspaceNotice && setDismissedNoticeKey(workspaceNotice.key)}
+          onNoticeStep={(step) => navigateToStep(step)}
           project={project}
           displayModel={displayModelForUi}
           study={study}
@@ -2812,10 +2878,24 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         status={status}
         logs={logs}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
-        solverStatus={solverRunning ? "Running" : runError ? "Error" : runProgress >= 100 ? "Complete" : "Idle"}
+        solverStatus={solverRunning ? "Running" : runError ? "Error" : resultsOutdatedBy ? "Outdated" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
       {renderStorageRecoveryNotice()}
+      <GeometryReplaceDialog
+        open={pendingGeometryReplacement !== null}
+        actionLabel={pendingGeometryReplacement?.actionLabel ?? ""}
+        losses={pendingGeometryReplacement?.losses ?? []}
+        onCancel={() => {
+          setPendingGeometryReplacement(null);
+          pushMessage("Kept the current model.");
+        }}
+        onConfirm={() => {
+          const pending = pendingGeometryReplacement;
+          setPendingGeometryReplacement(null);
+          pending?.proceed();
+        }}
+      />
       {validationGalleryOpen ? (
         <Suspense fallback={null}>
           <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />
