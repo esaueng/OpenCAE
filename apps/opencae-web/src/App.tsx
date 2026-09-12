@@ -72,8 +72,11 @@ function WorkspaceRoute() {
     setWorkspaceRequested(true);
   }
 
+  // While the workspace chunk loads this same element is the Suspense
+  // fallback, so the click must read as busy rather than dead (2026-09 review D23).
   const startScreen = (
     <StartScreen
+      busy={initialAction !== null}
       onLoadSample={(sample, analysisType) => openWorkspace({ type: "loadSample", sample, analysisType })}
       onCreateProject={() => openWorkspace({ type: "createProject" })}
       onOpenProject={(file) => openWorkspace({ type: "openProject", file })}

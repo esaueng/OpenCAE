@@ -3,8 +3,16 @@
 ## Status
 
 Proposed on 2026-09-12 against `origin/main` at `9b32b410` (after PR #119), on
-branch `claude/design-interaction-review-2026-09`. Stage 0 is being executed on
-this branch together with the plan document (the plan 027 precedent).
+branch `claude/design-interaction-review-2026-09`. Stage 0 is executed on that
+branch together with the plan document (the plan 027 precedent, PR #120).
+Stage 1 is executed on `claude/plan-028-stage-1`, stacked on Stage 0: the
+workspace notice and rail states (D7, D14, F7, F12, D4 as a named cleared-results
+state), confirm-before-replace (D5, without the undo snapshot — undo holds the
+project but not the display model, so restoring across a replacement needs a
+geometry-aware snapshot first), provenance kept across reload (D9), mesh
+preflight (D16), the mesh-not-restored notice (F13), and the start screen busy
+state and Continue action (D23). Still open from Stage 1: keeping the previous
+contours viewable while stale (the fuller D4).
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank

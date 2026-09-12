@@ -365,13 +365,19 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   const importedProject = discardImportedCoreMeshArtifacts(parsed.data);
   const bracket = refreshBracketSampleGeometry(importedProject, displayModel);
   const bracketNote = bracket.migrated ? ` ${BRACKET_GEOMETRY_MIGRATION_NOTE}` : "";
+  const meshDiscarded = importedProject !== parsed.data;
   return {
     project: bracket.project,
     displayModel: bracket.displayModel ?? displayModel,
     ...(results ? { results } : {}),
-    message: `${parsed.data.name} opened from local file.${migrationNote}${bracketNote}`
+    message: `${parsed.data.name} opened from local file.${migrationNote}${bracketNote}${meshDiscarded ? ` ${IMPORTED_MESH_DISCARDED_NOTE}` : ""}`,
+    ...(meshDiscarded ? { notice: IMPORTED_MESH_DISCARDED_NOTE } : {})
   };
 }
+
+/** Surfaced as a workspace notice on open (2026-09 review F13); it used to be silent. */
+export const IMPORTED_MESH_DISCARDED_NOTE =
+  "The saved mesh was not restored: meshes from files are regenerated here so results are always solved from this browser's mesher. Generate the mesh again before running.";
 
 function discardImportedCoreMeshArtifacts(project: Project): Project {
   const studies = project.studies.map((study) => {

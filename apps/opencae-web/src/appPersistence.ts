@@ -359,7 +359,9 @@ function parseProjectFile(value: unknown): LocalProjectFile | null {
   const project = ProjectSchema.safeParse(value.project);
   const displayModel = parseDisplayModel(value.displayModel);
   if (!project.success || !displayModel) return null;
-  const results = parseResultBundle(value.results);
+  // This is the browser's own autosave, not a foreign file: the results were
+  // computed here, so their provenance stands.
+  const results = parseResultBundle(value.results, { provenance: "keep" });
   return {
     format: "opencae-local-project",
     version: 2,
@@ -370,8 +372,20 @@ function parseProjectFile(value: unknown): LocalProjectFile | null {
   };
 }
 
-export function parseResultBundle(value: unknown): LocalResultBundle | undefined {
+export interface ParseResultBundleOptions {
+  /**
+   * `imported` (default) rewrites provenance to the unverified imported tier —
+   * right for a project file from disk, whose solver we cannot vouch for.
+   * `keep` is for this browser's own autosave: the same computed results were
+   * being relabelled "Estimate (not FEA)" after a plain page reload
+   * (2026-09 review D9).
+   */
+  provenance?: "imported" | "keep";
+}
+
+export function parseResultBundle(value: unknown, options: ParseResultBundleOptions = {}): LocalResultBundle | undefined {
   if (!isRecord(value)) return undefined;
+  const normalizeSummary = options.provenance === "keep" ? (summary: ResultSummary) => summary : normalizeImportedResultSummary;
   const summary = ResultSummarySchema.safeParse(value.summary);
   const fields = ResultFieldSchema.array().max(MAX_RESULT_FIELDS).safeParse(value.fields);
   const surfaceMesh = parseSolverSurfaceMesh(value.surfaceMesh);
@@ -384,7 +398,7 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   const parsedVariants = variants.success
     ? variants.data.map((variant) => ({
         ...variant,
-        summary: normalizeImportedResultSummary(variant.summary),
+        summary: normalizeSummary(variant.summary),
         fields: variant.fields.map(normalizeImportedResultField)
       }))
     : [];
@@ -403,7 +417,7 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
           kind: activeExplicitRef.kind,
           ...(activeExplicitRef.caseId ? { caseId: activeExplicitRef.caseId } : {}),
           ...(activeExplicitRef.combinationId ? { combinationId: activeExplicitRef.combinationId } : {}),
-          summary: normalizeImportedResultSummary(summary.data),
+          summary: normalizeSummary(summary.data),
           fields: normalizedFields.map((field) => ({ ...field, variantId: field.variantId ?? activeExplicitRef.id }))
         }
         : {
@@ -411,7 +425,7 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
           name: "Default",
           kind: "case" as const,
           caseId: "case-default",
-          summary: normalizeImportedResultSummary(summary.data),
+          summary: normalizeSummary(summary.data),
           fields: normalizedFields.map((field) => ({ ...field, variantId: field.variantId ?? "case:default" }))
         }];
   const parsedVariantRefs = explicitVariantRefs.length
@@ -423,7 +437,7 @@ export function parseResultBundle(value: unknown): LocalResultBundle | undefined
   return {
     activeRunId: typeof value.activeRunId === "string" ? value.activeRunId : undefined,
     completedRunId: typeof value.completedRunId === "string" ? value.completedRunId : undefined,
-    summary: normalizeImportedResultSummary(summary.data),
+    summary: normalizeSummary(summary.data),
     fields: normalizedFields,
     ...(structuralVariants.length ? { variants: structuralVariants } : {}),
     ...(parsedVariantRefs.length ? { variantRefs: parsedVariantRefs } : {}),

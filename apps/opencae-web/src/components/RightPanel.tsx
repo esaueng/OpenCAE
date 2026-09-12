@@ -7,6 +7,7 @@ import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResul
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { RunReadinessItem } from "../runReadiness";
+import type { WorkspaceNotice } from "../workspaceNotice";
 import { STUDY_TYPE_LABELS, studyTypeSwitchConsequence } from "../studyTypeSwitch";
 import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, SUPPORTED_GEOMETRY_FORMAT_LABEL, isPreviewOnlyGeometry } from "../geometryFormats";
 import type { StepId } from "./StepBar";
@@ -163,6 +164,10 @@ interface RightPanelProps {
   canRunSimulation: boolean;
   missingRunItems: string[];
   runReadiness: RunReadinessItem[];
+  /** Workspace-wide notice rendered at the top of every step's panel. */
+  notice?: WorkspaceNotice | null;
+  onDismissNotice?: () => void;
+  onNoticeStep?: (step: StepId) => void;
   resultFrameIndex?: number;
   resultFramePosition?: number;
   resultFrameOrdinalPosition?: number;
@@ -193,6 +198,7 @@ function stressComponentLabel(component: StressComponent): string {
 export function RightPanel(props: RightPanelProps) {
   return (
     <aside className="side-panel">
+      {props.notice && <WorkspaceNoticeBanner notice={props.notice} activeStep={props.activeStep} onDismiss={props.onDismissNotice} onGoToStep={props.onNoticeStep} />}
       {props.activeStep === "model" && <ModelPanel {...props} />}
       {props.activeStep === "material" && <MaterialPanel {...props} />}
       {props.activeStep === "supports" && <SupportsPanel {...props} />}
@@ -1550,6 +1556,25 @@ function SupportEditForm({ support, study, onSave, onCancel }: { support: Constr
   );
 }
 
+function WorkspaceNoticeBanner({ notice, activeStep, onDismiss, onGoToStep }: { notice: WorkspaceNotice; activeStep: StepId; onDismiss?: () => void; onGoToStep?: (step: StepId) => void }) {
+  const showStepLink = Boolean(notice.step && notice.step !== activeStep && onGoToStep);
+  return (
+    <div className={`workspace-notice ${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
+      <AlertTriangle size={16} aria-hidden="true" />
+      <div className="workspace-notice-body">
+        <strong>{notice.title}</strong>
+        <p>{notice.message}</p>
+        {showStepLink && (
+          <button type="button" className="text-button" onClick={() => notice.step && onGoToStep?.(notice.step)}>
+            Go to {notice.stepLabel ?? notice.step}
+          </button>
+        )}
+      </div>
+      {onDismiss && <button type="button" className="remove-glyph" aria-label="Dismiss notice" onClick={onDismiss}><X size={16} /></button>}
+    </div>
+  );
+}
+
 function EmptyEditableList({ title }: { title: string }) {
   return (
     <div className="editable-list">
@@ -1904,9 +1929,14 @@ function RunPanel({ study, displayModel, runProgress, runError, runTiming, solve
       <SectionTitle helpId="runReadiness">Readiness</SectionTitle>
       <div className="checklist">
         {runReadiness.map(({ label, done, blockers }) => (
-          <span key={label} className={done ? "check done" : "check"} title={blockers.join(" ")}>
-            <span>{done ? <Check size={18} /> : null}</span>{label}
-          </span>
+          <div key={label} className={done ? "check done" : "check"}>
+            <span>{done ? <Check size={18} /> : null}</span>
+            <span className="check-copy">
+              {label}
+              {/* Blockers used to live only in a title tooltip (2026-09 review F7). */}
+              {!done && blockers.length > 0 && <small className="check-blockers">{blockers.join(" ")}</small>}
+            </span>
+          </div>
         ))}
       </div>
       {/* B5: the backend picker is gone — every simulation runs locally in the

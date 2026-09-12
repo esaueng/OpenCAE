@@ -11,9 +11,13 @@ interface StartScreenProps {
   onLoadSample: (sample?: SampleModelId, analysisType?: SampleAnalysisType) => void;
   onCreateProject: () => void;
   onOpenProject: (file: File, handle?: RecentProjectFileHandle) => void | Promise<void>;
+  /** True while the workspace chunk loads after a click; the pressed action reads as busy instead of dead (2026-09 review D23). */
+  busy?: boolean;
+  /** The project still held in memory after "Back to start", so it can be resumed rather than silently replaced. */
+  continueProject?: { name: string; onContinue: () => void };
 }
 
-export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: StartScreenProps) {
+export function StartScreen({ onLoadSample, onCreateProject, onOpenProject, busy = false, continueProject }: StartScreenProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Truthful cache state (see lib/offlineStatus.ts): "Offline-ready" only
   // once the service worker reports every precached asset (wasm included) in
@@ -152,16 +156,26 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject }: St
           />
         ) : (
           <>
-            <div className="start-actions">
-              <button className="start-action secondary" onClick={() => onCreateProject()}>
+            <div className="start-actions" aria-busy={busy}>
+              {busy && <p className="start-busy" role="status" aria-live="polite">Opening the workspace…</p>}
+              {continueProject && (
+                <button className="start-action primary" disabled={busy} onClick={() => continueProject.onContinue()}>
+                  <span>
+                    <strong>Continue {continueProject.name}</strong>
+                    <small>Your last project is still open in this browser</small>
+                  </span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              )}
+              <button className="start-action secondary" disabled={busy} onClick={() => onCreateProject()}>
                 <span>Create new project</span>
                 <kbd>N</kbd>
               </button>
-              <button className="start-action secondary" disabled={recentBusyId === "picker"} onClick={() => void chooseLocalProject()}>
+              <button className="start-action secondary" disabled={busy || recentBusyId === "picker"} onClick={() => void chooseLocalProject()}>
                 <span>Open local project</span>
                 <kbd>O</kbd>
               </button>
-              <button className="start-action primary sample-action" aria-label="Open sample menu" onClick={() => setSampleMenuOpen(true)}>
+              <button className={`start-action ${continueProject ? "secondary" : "primary"} sample-action`} disabled={busy} aria-label="Open sample menu" onClick={() => setSampleMenuOpen(true)}>
                 <span>
                   <strong>Load sample project</strong>
                   <small>Choose a sample model and analysis type</small>

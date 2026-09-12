@@ -201,6 +201,21 @@ describe("app persistence", () => {
     expect(bundle?.summary.transient?.frameCount).toBe(21);
   });
 
+  test("keeps computed provenance for this browser's own autosave but downgrades foreign files", async () => {
+    // 2026-09 review D9: a plain page reload relabelled the same computed FEA
+    // results "Estimate (not FEA)" because the autosave restore ran the
+    // project-file import downgrade.
+    const { parseResultBundle } = await import("./appPersistence");
+
+    const restored = parseResultBundle({ completedRunId: "run-1", summary, fields }, { provenance: "keep" });
+    const imported = parseResultBundle({ completedRunId: "run-1", summary, fields });
+
+    expect(restored?.summary.resultTier).toBeUndefined();
+    expect(restored?.summary.diagnostics?.some((item) => item.id === "imported-result-provenance-unverified")).toBeFalsy();
+    expect(imported?.summary.resultTier).toBe("imported_legacy");
+    expect(imported?.summary.diagnostics?.some((item) => /Imported result provenance is unverified/.test(item.message))).toBe(true);
+  });
+
   test("migrates a legacy structural result bundle to one Default run variant", async () => {
     const { parseResultBundle } = await import("./appPersistence");
 
