@@ -25,6 +25,8 @@ export interface WorkspaceNoticeInputs {
   solverRunning: boolean;
   /** The edit message that cleared the last results, e.g. `Load updated.` */
   resultsOutdatedBy: string | null;
+  /** A consequence of opening a file the user must act on, e.g. a mesh that was not restored. */
+  openNote?: string | null;
   dismissedKey: string | null;
 }
 
@@ -34,12 +36,15 @@ export function workspaceNoticeFor(inputs: WorkspaceNoticeInputs): WorkspaceNoti
   return notice;
 }
 
-function rawNoticeFor({ meshError, meshing, runError, solverRunning, resultsOutdatedBy }: WorkspaceNoticeInputs): WorkspaceNotice | null {
+function rawNoticeFor({ meshError, meshing, runError, solverRunning, resultsOutdatedBy, openNote }: WorkspaceNoticeInputs): WorkspaceNotice | null {
   if (meshError && !meshing) {
     return { key: `mesh:${meshError}`, tone: "error", title: "Mesh generation failed", message: meshError, step: "mesh", stepLabel: "Mesh" };
   }
   if (runError && !solverRunning) {
     return { key: `run:${runError}`, tone: "error", title: "Simulation did not complete", message: runError, step: "run", stepLabel: "Run" };
+  }
+  if (openNote) {
+    return { key: `open:${openNote}`, tone: "warning", title: "Opened from file", message: openNote, step: "mesh", stepLabel: "Mesh" };
   }
   if (resultsOutdatedBy) {
     return {

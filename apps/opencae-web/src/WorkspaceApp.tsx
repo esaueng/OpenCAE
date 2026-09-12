@@ -198,6 +198,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // Geometry replacement waits for confirmation when it would clear the study
   // setup (2026-09 review D5).
   const [pendingGeometryReplacement, setPendingGeometryReplacement] = useState<{ actionLabel: string; losses: string[]; proceed: () => void } | null>(null);
+  // A consequence of opening a file (mesh not restored) that needs an action (2026-09 review F13).
+  const [openNote, setOpenNote] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
@@ -545,7 +547,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // One notice for the whole workspace (2026-09 review D7): a failed mesh or
   // run, or results cleared by an edit, used to be visible only on the panel
   // where it happened and as a footer pill.
-  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, dismissedKey: dismissedNoticeKey });
+  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, openNote, dismissedKey: dismissedNoticeKey });
   const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
 
   useEffect(() => {
@@ -1313,10 +1315,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   ]);
 
   async function openProjectResponse(
-    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>,
+    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle }>,
     options: { actionHandle: ProjectActionHandle; nextStep?: StepId; staleMessage?: string }
   ) {
-    let response: { project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle };
+    let response: { project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle };
     try {
       response = await action;
     } catch (error) {
@@ -1381,6 +1383,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setCompletedRunId(nextCompletedRunId);
     }
     pushMessage(response.message ?? "Project opened.");
+    setOpenNote(response.notice ?? null);
     return true;
   }
 
@@ -1868,6 +1871,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
     setMeshError(null);
+    setOpenNote(null);
     // The mesh stage builds the whole Core model, so a missing boundary
     // condition used to surface here as "generated an invalid Core model:
     // Steady thermal analysis requires…" (2026-09 review D16). Check the same
@@ -2574,7 +2578,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
-    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
+    // "Back to start" keeps the project in memory and autosave; offer the way
+    // back so Create/Load do not read as the only options (2026-09 review D23).
+    const continueProject = project && displayModel && study
+      ? { name: project.name, onContinue: () => setHomeRequested(false) }
+      : undefined;
+    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} continueProject={continueProject} />;
   }
 
   if (project && displayModel && displayModelForUi && !study) {

@@ -5969,3 +5969,21 @@ input[aria-invalid="true"] {
   flex: none;
   margin-top: 2px;
 }
+
+/* 2026-09 review D23: the start screen shows the workspace loading. */
+.start-busy {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.start-actions[aria-busy="true"] .start-action {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* The Continue action takes the primary slot, so the sample action can be secondary; its subtitle needs readable ink there. */
+.start-action.secondary small {
+  color: var(--color-text-muted);
+}
