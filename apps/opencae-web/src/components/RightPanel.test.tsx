@@ -2349,3 +2349,21 @@ describe("workspace notice and readiness text (2026-09 review D7, F7)", () => {
     expect(html).toContain("Choose what the part is made of.");
   });
 });
+
+describe("select-then-act and re-targeting (2026-09 review F1, D3, F3)", () => {
+  test("edit forms offer to move an entry to the face picked in the viewer", () => {
+    expect(rightPanelSource).toContain("Move to {pickedElsewhere.label} (picked in the viewer)");
+    expect(rightPanelSource).toContain("onSave(previewLoad, targetFace)");
+    expect(rightPanelSource).toContain("support.parameters }, targetFace)");
+  });
+
+  test("the in-panel Next commits a previewed material selection", () => {
+    expect(rightPanelSource).toContain("registerBeforeNext?.(selectionMatchesAssignment ? null : () => onAssignMaterial(selectedMaterialId, pendingParameters))");
+    expect(rightPanelSource).toContain("beforeNextRef.current?.();");
+  });
+
+  test("dynamic playback has frame step controls", () => {
+    expect(rightPanelSource).toContain('aria-label="Previous frame"');
+    expect(rightPanelSource).toContain('aria-label="Next frame"');
+  });
+});
