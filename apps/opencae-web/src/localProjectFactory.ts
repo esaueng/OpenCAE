@@ -406,6 +406,12 @@ function carriesRetiredCloudBackend(candidate: unknown): boolean {
 
 export type UploadDisplayOptions = {
   /**
+   * Bounding size of a STEP import measured from its face registry at upload,
+   * so the run gate never waits on the viewer's first frame to learn the
+   * model's dimensions (2026-09 review D27).
+   */
+  stepDimensions?: NonNullable<DisplayModel["dimensions"]>;
+  /**
    * Real B-rep faces derived from the STEP face registry (plan A-M3). When
    * present for a native CAD upload they replace the generic box-face
    * placeholders, so supports/loads target real faces.
@@ -513,7 +519,7 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
       id: "display-uploaded",
       name: faces.length ? `${modelName} imported body` : `${modelName} uploaded model`,
       bodyCount: faces.length ? 1 : 0,
-      dimensions,
+      dimensions: options.stepDimensions ?? dimensions,
       faces,
       nativeCad: {
         format: nativeFormat,

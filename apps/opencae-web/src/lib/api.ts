@@ -314,13 +314,13 @@ async function uploadModelWithGeometry(
     size: file.size,
     contentBase64
   };
-  const stepDisplayFaces = await stepDisplayFacesForUpload(file.name, contentBase64);
+  const { faces: stepDisplayFaces, dimensions: stepDimensions } = await stepDisplayFacesForUpload(file.name, contentBase64);
   assertCurrentModelMutation(mutationOptions);
   const stepGeometry = knownStepGeometry ?? await inspectStepGeometryForUpload(file.name, contentBase64);
   assertCurrentModelMutation(mutationOptions);
   void projectId;
   if (!currentProject) throw new Error("Could not upload model without an open project.");
-  const data = createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
+  const data = createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces, stepDimensions });
   let nextProject = embedUploadedModelFile(data.project, embeddedModel);
   if (stepGeometry) nextProject = attachStepGeometryMetadata(nextProject, embeddedModel.filename, stepGeometry);
   const notice = stepGeometryUploadNotice(stepGeometry);
@@ -448,19 +448,24 @@ function embeddedStepModel(project: Pick<Project, "geometryFiles">): EmbeddedMod
  * opt-out builds tree-shake the whole path; any registry failure falls back
  * to the legacy generic faces.
  */
-async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<DisplayModel["faces"] | undefined> {
+async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<{ faces?: DisplayModel["faces"]; dimensions?: NonNullable<DisplayModel["dimensions"]> }> {
   if (import.meta.env.VITE_WASM_MESHING !== "0") {
     const extension = filename.trim().split(".").pop()?.toLowerCase();
-    if (extension !== "step" && extension !== "stp") return undefined;
+    if (extension !== "step" && extension !== "stp") return {};
     try {
       const stepFaces = await import("../stepFaces");
       const registry = await stepFaces.stepFaceRegistryFromBase64(contentBase64);
-      return registry.displayFaces.length ? registry.displayFaces : undefined;
+      return {
+        faces: registry.displayFaces.length ? registry.displayFaces : undefined,
+        // Measured here, not by the viewer, so a run can start before the
+        // 3D view has painted (2026-09 review D27).
+        dimensions: stepFaces.stepRegistryDimensions(registry)
+      };
     } catch {
-      return undefined;
+      return {};
     }
   }
-  return undefined;
+  return {};
 }
 
 export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {

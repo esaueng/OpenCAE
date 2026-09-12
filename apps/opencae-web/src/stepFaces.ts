@@ -104,6 +104,31 @@ export function isStepFaceId(value: string | null | undefined): value is string 
  * Meshes without positions/indices/brep_faces are kept as empty placeholders
  * so meshIndex still lines up with the viewer's preview children.
  */
+/**
+ * Bounding size of the tessellated STEP body in its own units (mm). Measured
+ * at upload from the face registry so the run gate does not depend on the
+ * viewer having painted a first frame (2026-09 review D27).
+ */
+export function stepRegistryDimensions(registry: Pick<StepFaceRegistry, "meshes">): { x: number; y: number; z: number; units: "mm" } | undefined {
+  const min = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
+  const max = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
+  for (const mesh of registry.meshes) {
+    const positions = mesh.positions;
+    for (let index = 0; index + 2 < positions.length; index += 3) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        const value = positions[index + axis]!;
+        if (!Number.isFinite(value)) continue;
+        if (value < min[axis]!) min[axis] = value;
+        if (value > max[axis]!) max[axis] = value;
+      }
+    }
+  }
+  if (!min.every(Number.isFinite) || !max.every(Number.isFinite)) return undefined;
+  const size = max.map((value, axis) => value - min[axis]!);
+  if (!size.some((value) => value > 0)) return undefined;
+  return { x: size[0]!, y: size[1]!, z: size[2]!, units: "mm" };
+}
+
 export function buildStepFaceRegistry(meshes: OcctMesh[]): StepFaceRegistry {
   const positionComponents = meshes.reduce((total, mesh) => total + (mesh.attributes?.position?.array?.length ?? 0), 0);
   const indexCount = meshes.reduce((total, mesh) => total + (mesh.index?.array?.length ?? 0), 0);
