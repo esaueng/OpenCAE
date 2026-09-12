@@ -46,8 +46,17 @@ surfacing the solver refusal (D27, message only).
 Stage 2d (`claude/plan-028-stage-2d`, stacked on 2c) closes D27 properly:
 STEP uploads and parametric parts carry their bounding size from the face
 registry measured at upload, so the run gate no longer depends on the viewer's
-first frame. Still open in Stage 2: stable entry ids and true offscreen
-capture.
+first frame. Still open in Stage 2: true offscreen capture.
+Stage 3a (`claude/plan-028-stage-3a`, stacked on 2d): support and load labels
+are assigned once at creation and stored in `parameters.label`, so they never
+renumber (stable ids); an edit after a solve keeps the previous contours
+viewable and marks them outdated on the legend, the pill, the rail and the
+notice, and report/PNG/HTML/CSV/VTU refuse them until the next run (the
+fuller D4; the flag persists across reload); wheel zoom targets the cursor
+(F18 quick win). Still open: undo across geometry replacement, true offscreen
+capture, and the Stage 3 product decisions (multi-face and named selections
+next, then the study summary drawer; analysis-type placement and per-body
+materials await a call).
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank

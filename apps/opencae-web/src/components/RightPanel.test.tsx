@@ -2333,11 +2333,11 @@ describe("2026-09 interaction review stage 0 guards", () => {
 
 describe("workspace notice and readiness text (2026-09 review D7, F7)", () => {
   test("renders the workspace notice on any step with a link to the step that can fix it", () => {
-    const notice = { key: "outdated:Load updated.", tone: "warning" as const, title: "Results cleared", message: "Load updated. Re-run to update them.", step: "run" as const, stepLabel: "Run" };
+    const notice = { key: "outdated:Load updated.", tone: "warning" as const, title: "Results outdated", message: "Load updated. Re-run to update them.", step: "run" as const, stepLabel: "Run" };
     const html = renderPanel("material", { notice, onDismissNotice: vi.fn(), onNoticeStep: vi.fn() });
 
     expect(html).toContain('class="workspace-notice warning"');
-    expect(html).toContain("Results cleared");
+    expect(html).toContain("Results outdated");
     expect(html).toContain("Go to Run");
     expect(html).toContain('aria-label="Dismiss notice"');
     // On the step itself the link is redundant.

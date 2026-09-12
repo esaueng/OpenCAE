@@ -4,6 +4,7 @@ import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings,
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import { unitsForLoadType, type LoadApplicationPoint, type LoadDirection, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata } from "../loadPreview";
+import { nextLoadLabel, nextSupportLabel } from "../supportLabels";
 import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -625,7 +626,7 @@ export async function addSupport(studyId: string, selectionRef: string | undefin
           id: `constraint-${crypto.randomUUID()}`,
           type: "fixed" as const,
           selectionRef: selectionRef ?? currentStudy.namedSelections.find((selection) => selection.entityType === "face")?.id ?? "selection-fixed-face",
-          parameters: {},
+          parameters: { label: nextSupportLabel(currentStudy.constraints, "fixed") },
           status: "complete" as const
         }
       ]
@@ -655,7 +656,7 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
           id: loadId,
           type,
           selectionRef,
-          parameters: { value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+          parameters: { label: nextLoadLabel(currentStudy.loads), value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
           status: "complete" as const
         }
       ],

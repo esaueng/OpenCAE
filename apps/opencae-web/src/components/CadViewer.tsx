@@ -65,6 +65,8 @@ interface CadViewerProps {
   meshPreviewSurface?: SolverSurfaceMesh;
   /** True while report figures are captured through this viewer (2026-09 review D15). */
   captureBusy?: boolean;
+  /** Results are from before a study edit; drawn read-only with an outdated note (2026-09 review D4). */
+  resultsStale?: boolean;
   /** Headline peak per result mode for the legend, e.g. `Peak 2.147 MPa` (2026-09 review F8). */
   resultPeaks?: Partial<Record<ResultMode, string>>;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
@@ -499,7 +501,7 @@ export function CadViewer(props: CadViewerProps) {
         <button type="button" aria-pressed={projectionMode === "perspective"} onClick={() => props.onProjectionModeChange?.("perspective")}>Perspective</button>
         <button type="button" aria-pressed={projectionMode === "orthographic"} onClick={() => props.onProjectionModeChange?.("orthographic")}>Orthographic</button>
       </div>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} peakLabel={props.resultPeaks?.[props.resultMode]} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} peakLabel={props.resultPeaks?.[props.resultMode]} stale={props.resultsStale} />}
     </section>
       </StressComponentContext.Provider>
       </SceneThemeContext.Provider>
@@ -1132,6 +1134,8 @@ function DemandOrbitControls({ controlsRef, onInteractionChange }: { controlsRef
       makeDefault
       enableDamping
       dampingFactor={0.08}
+      // Wheel zoom towards the cursor rather than the view centre (2026-09 review F18).
+      zoomToCursor
       target={[0, 0, 0.75]}
       onChange={invalidateViewer}
       onStart={() => onInteractionChange?.(true)}
@@ -6722,7 +6726,7 @@ export function resultLegendContentScale(size: ResultLegendSize) {
   ).toFixed(2));
 }
 
-function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale, peakLabel }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number; peakLabel?: string }) {
+function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale, peakLabel, stale = false }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number; peakLabel?: string; stale?: boolean }) {
   const stressComponent = useContext(StressComponentContext);
   const contextColorScale = useContext(ResultColorScaleContext);
   const legendRef = useRef<HTMLDivElement | null>(null);
@@ -6832,6 +6836,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
         onPointerCancel={handleResizePointerEnd}
         onLostPointerCapture={handleResizePointerEnd}
       />
+      {stale && <span className="legend-stale">Outdated: the study changed since this run. Re-run to update.</span>}
       <strong>Nodes: {meshStats.nodes}</strong>
       <strong>Elements: {meshStats.elements}</strong>
       <span>Type: {title}</span>
