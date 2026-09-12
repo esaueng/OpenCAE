@@ -53,7 +53,7 @@ import {
   workflowStepForShortcut
 } from "./appShellState";
 import { displayModelForUnits, formatResultMetric, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
-import { supportDisplayLabel } from "./supportLabels";
+import { nextLoadLabel, nextSupportLabel, supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { stepGeometryNeedsRepair } from "./stepGeometryState";
@@ -111,6 +111,8 @@ const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 const PLAYBACK_CACHE_PREP_FPS = 30;
 const PLAYBACK_ENDPOINT_EPSILON = 0.0001;
 const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
+/** Outdated results stay viewable but never leave the app as a report or export (2026-09 review D4). */
+const STALE_RESULTS_EXPORT_MESSAGE = "These results are outdated: the study changed since the last run. Re-run the simulation before generating a report or export.";
 const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
 const MODEL_IMPORT_INDICATOR_MIN_MS = 500;
 
@@ -195,7 +197,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // Set when a study edit clears the last results (with the edit named), so
   // the loss is announced on every step instead of one line in the collapsed
   // log drawer (2026-09 review D4).
-  const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(null);
+  const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(restoredUi?.resultsOutdatedBy ?? null);
   const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
   // Geometry replacement waits for confirmation when it would clear the study
   // setup (2026-09 review D5).
@@ -1054,6 +1056,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     activeRunId,
     completedRunId,
     runProgress,
+    resultsOutdatedBy,
     undoStack,
     redoStack,
     status,
@@ -1598,6 +1601,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setPngExportError("Open a rendered result field before exporting a PNG.");
       return;
     }
+    if (resultsOutdatedBy) {
+      setPngExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
     const suggestedName = suggestedResultPngFilename({
       projectName: project.name,
       resultMode,
@@ -1635,6 +1642,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setHtmlExportError("Run a result with a solver surface mesh before exporting the offline viewer.");
       return;
     }
+    if (resultsOutdatedBy) {
+      setHtmlExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
     const suggestedName = suggestedResultHtmlFilename(project.name);
     setHtmlExportBusy(true);
     setHtmlExportError(null);
@@ -1668,6 +1679,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function handleExportResultData(format: SelectedResultExportFormat) {
     if (!project || !study || !displayModel || !resultSummary || !resultFields.length || !resultSurfaceMesh) {
       setDataExportError("Run an analysis with a canonical solver mesh before exporting raw result data.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setDataExportError(STALE_RESULTS_EXPORT_MESSAGE);
       return;
     }
     setDataExportBusy(format);
@@ -1785,6 +1800,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setReportError("Wait for the active solve to finish before generating a report.");
       return;
     }
+    if (resultsOutdatedBy) {
+      setReportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
 
     const sourceSummary = resultSummary;
     const sourceRunId = completedRunId;
@@ -1865,11 +1884,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     // Any study change (loads, supports, materials, mesh, solver settings)
     // makes the previous run's results stale; never keep showing them.
-    if (resultFields.length) {
-      invalidateCompletedRunState();
-      pushMessage("Previous results cleared: the study changed since the last run.");
-      setResultsOutdatedBy(response.message);
+    // The previous results stay viewable but are marked outdated (rail,
+    // legend, pill, notice) and are refused by report and export until the
+    // next run; they used to be destroyed on the spot (2026-09 review D4).
+    if (resultFields.length && !resultsOutdatedBy) {
+      pushMessage("Results are now outdated: the study changed since the last run.");
     }
+    if (resultFields.length) setResultsOutdatedBy(response.message);
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
   }
@@ -2014,7 +2035,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+      parameters: { label: nextLoadLabel(study.loads), value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
       status: "complete"
     };
     const structuralStudy = study.type === "static_stress" || study.type === "dynamic_structural" ? study : null;
@@ -2656,7 +2677,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
           onUnitSystemChange={handleUnitSystemChange}
           study={study}
-          hasResults={resultDisplayEligible}
+          hasResults={resultDisplayEligible && !resultsOutdatedBy}
           readiness={runReadiness}
           notices={stepNotices}
         />
@@ -2697,6 +2718,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             surfaceMesh={resultSurfaceMesh}
             meshPreviewSurface={meshPreviewSurface}
             captureBusy={reportCaptureBusy}
+            resultsStale={Boolean(resultsOutdatedBy)}
             resultPeaks={resultPeaks}
             assignedFaceTints={assignedFaceTints}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
@@ -2759,7 +2781,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onSaveProject={handleSaveProject}
           reportBusy={reportBusy}
           reportError={reportError}
-          reportDisabled={solverRunning || convergenceBusy}
+          reportDisabled={solverRunning || convergenceBusy || Boolean(resultsOutdatedBy)}
           pngExportBusy={pngExportBusy}
           pngExportError={pngExportError}
           htmlExportBusy={htmlExportBusy}
@@ -2807,7 +2829,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
                 id: `constraint-${crypto.randomUUID()}`,
                 type: "prescribed_temperature",
                 selectionRef: selectionRef ?? "",
-                parameters: { value: options.value ?? 20, units: "°C" },
+                parameters: { label: nextSupportLabel(study.constraints, "prescribed_temperature"), value: options.value ?? 20, units: "°C" },
                 status: "complete"
               };
               updateStudy(saveStudyPatch(study.id, { constraints: [...study.constraints, constraint] }, "Temperature boundary added.", study));

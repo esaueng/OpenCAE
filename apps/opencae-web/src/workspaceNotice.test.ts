@@ -10,8 +10,8 @@ describe("workspaceNoticeFor", () => {
 
   test("names the edit that cleared the results and points at Run", () => {
     const notice = workspaceNoticeFor({ ...quiet, resultsOutdatedBy: "Load updated." });
-    expect(notice).toMatchObject({ tone: "warning", title: "Results cleared", step: "run" });
-    expect(notice?.message).toBe("Load updated. The previous results no longer match the study. Re-run to update them.");
+    expect(notice).toMatchObject({ tone: "warning", title: "Results outdated", step: "run" });
+    expect(notice?.message).toBe("Load updated. The results shown are from before this change and cannot be reported or exported. Re-run to update them.");
   });
 
   test("surfaces a failed run everywhere, but not while a new run is in flight", () => {

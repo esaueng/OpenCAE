@@ -50,8 +50,8 @@ function rawNoticeFor({ meshError, meshing, runError, solverRunning, resultsOutd
     return {
       key: `outdated:${resultsOutdatedBy}`,
       tone: "warning",
-      title: "Results cleared",
-      message: `${resultsOutdatedBy.replace(/\.?$/, ".")} The previous results no longer match the study. Re-run to update them.`,
+      title: "Results outdated",
+      message: `${resultsOutdatedBy.replace(/\.?$/, ".")} The results shown are from before this change and cannot be reported or exported. Re-run to update them.`,
       step: "run",
       stepLabel: "Run"
     };
