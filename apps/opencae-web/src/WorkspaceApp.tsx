@@ -29,6 +29,12 @@ import type { ConvergenceProbe } from "./meshConvergence";
 import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { isPreviewOnlyGeometry } from "./geometryFormats";
+import { workspaceNoticeFor, type WorkspaceNoticeTone } from "./workspaceNotice";
+import { geometryReplacementLosses } from "./geometryReplacement";
+import { GeometryReplaceDialog } from "./components/GeometryReplaceDialog";
+import { sampleOptionFor } from "./components/sampleOptions";
+import { solverSurfaceMeshFromModel } from "@opencae/core";
+import type { ViewerFaceTint } from "./components/CadViewer";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -46,8 +52,8 @@ import {
   shouldShowStartScreen,
   workflowStepForShortcut
 } from "./appShellState";
-import { displayModelForUnits, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
-import { supportDisplayLabel } from "./supportLabels";
+import { displayModelForUnits, formatResultMetric, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
+import { nextLoadLabel, nextSupportLabel, supportDisplayLabel } from "./supportLabels";
 import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
 import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
 import { stepGeometryNeedsRepair } from "./stepGeometryState";
@@ -105,6 +111,8 @@ const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
 const PLAYBACK_CACHE_PREP_FPS = 30;
 const PLAYBACK_ENDPOINT_EPSILON = 0.0001;
 const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
+/** Outdated results stay viewable but never leave the app as a report or export (2026-09 review D4). */
+const STALE_RESULTS_EXPORT_MESSAGE = "These results are outdated: the study changed since the last run. Re-run the simulation before generating a report or export.";
 const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
 const MODEL_IMPORT_INDICATOR_MIN_MS = 500;
 
@@ -186,6 +194,20 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // the results it describes, never outliving them.
   const [solveElapsedMs, setSolveElapsedMs] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // Set when a study edit clears the last results (with the edit named), so
+  // the loss is announced on every step instead of one line in the collapsed
+  // log drawer (2026-09 review D4).
+  const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(restoredUi?.resultsOutdatedBy ?? null);
+  const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
+  // Geometry replacement waits for confirmation when it would clear the study
+  // setup (2026-09 review D5).
+  const [pendingGeometryReplacement, setPendingGeometryReplacement] = useState<{ actionLabel: string; losses: string[]; proceed: () => void } | null>(null);
+  // A consequence of opening a file (mesh not restored) that needs an action (2026-09 review F13).
+  const [openNote, setOpenNote] = useState<string | null>(null);
+  // Report figures are captured through the live viewer, which flips modes
+  // for a moment after every solve; say so and hold the mode controls while
+  // it happens (2026-09 review D15).
+  const [reportCaptureBusy, setReportCaptureBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
@@ -313,6 +335,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const displayUnitSystem = project?.unitSystem ?? "SI";
   const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
   const resultSummaryForUi = useMemo(() => resultSummary ? resultSummaryForUnits(resultSummary, displayUnitSystem) : null, [displayUnitSystem, resultSummary]);
+  // The legend's max is the averaged surface field; the headline peak is the
+  // unaveraged element value. Show both on the legend (2026-09 review F8).
+  const resultPeaks = useMemo<Partial<Record<ResultMode, string>>>(() => {
+    if (!resultSummaryForUi || !isStructuralResultSummary(resultSummaryForUi)) return {};
+    return {
+      stress: `Peak ${formatResultMetric(resultSummaryForUi.maxStress, resultSummaryForUi.maxStressUnits)}`,
+      displacement: `Peak ${formatResultMetric(resultSummaryForUi.maxDisplacement, resultSummaryForUi.maxDisplacementUnits)}`
+    };
+  }, [resultSummaryForUi]);
   const resultFieldsForUi = useMemo(() => {
     const converted = resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem));
     return resultSummary && isModalResultSummary(resultSummary)
@@ -530,6 +561,33 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair && !previewOnlyGeometry;
   const canUndoAction = undoStack.length > 0 && !solverRunning && !convergenceBusy;
   const canRedoAction = redoStack.length > 0 && !solverRunning && !convergenceBusy;
+  // One notice for the whole workspace (2026-09 review D7): a failed mesh or
+  // run, or results cleared by an edit, used to be visible only on the panel
+  // where it happened and as a footer pill.
+  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, openNote, dismissedKey: dismissedNoticeKey });
+  const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
+  // The generated volume mesh's boundary, for the Mesh step's viewer. "Toggle
+  // mesh" used to draw nothing for uploads and a decorative box for samples
+  // (2026-09 review D13).
+  // Faces carrying a support (teal) or a load (amber), tinted on the model so
+  // an assignment is visible where it lives, not only as a callout (2026-09 review F2).
+  const assignedFaceTints = useMemo<ViewerFaceTint[]>(() => {
+    if (!study) return [];
+    const faceIdsFor = (selectionRef: string) => study.namedSelections.find((item) => item.id === selectionRef)?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? [];
+    const tints = new Map<string, string>();
+    for (const load of study.loads) for (const faceId of faceIdsFor(load.selectionRef)) tints.set(faceId, "#f59e0b");
+    for (const support of study.constraints) for (const faceId of faceIdsFor(support.selectionRef)) tints.set(faceId, "#2dd4bf");
+    return [...tints].map(([faceId, color]) => ({ faceId, color }));
+  }, [study]);
+  const meshArtifactModel = (study?.meshSettings.summary?.artifacts as { actualCoreModel?: { model?: unknown } } | undefined)?.actualCoreModel?.model;
+  const meshPreviewSurface = useMemo(() => {
+    if (!meshArtifactModel) return undefined;
+    try {
+      return solverSurfaceMeshFromModel(meshArtifactModel as Parameters<typeof solverSurfaceMeshFromModel>[0], "mesh-preview");
+    } catch {
+      return undefined;
+    }
+  }, [meshArtifactModel]);
 
   useEffect(() => {
     setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
@@ -872,7 +930,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }, [activeStep, displayModel, draftLoadDirection, draftLoadType, draftLoadValue, draftPayloadPreview, selectedFace, selectedLoadPoint, selectedPayloadObject, study]);
 
   const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
-    const markers = createViewerLoadMarkers({ study, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview, displayModel: displayModel ?? undefined });
+    // Modal analysis ignores loads and hides the Loads step; drawing their
+    // arrows anyway implied they mattered (2026-09 review D17).
+    const markerStudy: Study | null = study?.type === "modal_analysis" ? { ...study, loads: [] } as Study : study;
+    const markers = createViewerLoadMarkers({ study: markerStudy, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview, displayModel: displayModel ?? undefined });
     return markers.map((marker) => {
       const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
       return { ...marker, value: converted.value, units: converted.units };
@@ -932,7 +993,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       handleFitDefaultView();
       return;
     }
-    const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started" });
+    const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started", studyType: study?.type });
     if (!shortcutStep) return;
     event.preventDefault();
     navigateToStep(shortcutStep);
@@ -995,6 +1056,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     activeRunId,
     completedRunId,
     runProgress,
+    resultsOutdatedBy,
     undoStack,
     redoStack,
     status,
@@ -1296,10 +1358,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   ]);
 
   async function openProjectResponse(
-    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle }>,
+    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle }>,
     options: { actionHandle: ProjectActionHandle; nextStep?: StepId; staleMessage?: string }
   ) {
-    let response: { project: Project; displayModel: DisplayModel; message?: string; results?: LocalResultBundle };
+    let response: { project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle };
     try {
       response = await action;
     } catch (error) {
@@ -1364,10 +1426,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setCompletedRunId(nextCompletedRunId);
     }
     pushMessage(response.message ?? "Project opened.");
+    setOpenNote(response.notice ?? null);
     return true;
   }
 
-  async function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+  function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+    requestGeometryReplacement(`Loading the ${sampleOptionFor(nextSample).title} sample`, () => void performLoadSample(nextSample, nextAnalysisType));
+  }
+
+  async function performLoadSample(nextSample: SampleModelId, nextAnalysisType: SampleAnalysisType) {
     const actionHandle = beginProjectAction(projectRef.current);
     const opened = await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
     if (opened) {
@@ -1389,7 +1456,25 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     });
   }
 
+  /**
+   * Runs `proceed` immediately when nothing would be lost, otherwise parks it
+   * behind the confirm dialog. Skipped from the start screen, where the user
+   * has already left the workspace.
+   */
+  function requestGeometryReplacement(actionLabel: string, proceed: () => void) {
+    const losses = homeRequested ? [] : geometryReplacementLosses(study, resultFields.length > 0);
+    if (!losses.length) {
+      proceed();
+      return;
+    }
+    setPendingGeometryReplacement({ actionLabel, losses, proceed });
+  }
+
   function handleUploadModel(file: File) {
+    requestGeometryReplacement(`Replacing the model with ${file.name}`, () => performUploadModel(file));
+  }
+
+  function performUploadModel(file: File) {
     if (!project) return;
     const sourceProject = project;
     const actionHandle = beginProjectAction(sourceProject);
@@ -1516,6 +1601,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setPngExportError("Open a rendered result field before exporting a PNG.");
       return;
     }
+    if (resultsOutdatedBy) {
+      setPngExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
     const suggestedName = suggestedResultPngFilename({
       projectName: project.name,
       resultMode,
@@ -1553,6 +1642,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       setHtmlExportError("Run a result with a solver surface mesh before exporting the offline viewer.");
       return;
     }
+    if (resultsOutdatedBy) {
+      setHtmlExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
     const suggestedName = suggestedResultHtmlFilename(project.name);
     setHtmlExportBusy(true);
     setHtmlExportError(null);
@@ -1586,6 +1679,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   async function handleExportResultData(format: SelectedResultExportFormat) {
     if (!project || !study || !displayModel || !resultSummary || !resultFields.length || !resultSurfaceMesh) {
       setDataExportError("Run an analysis with a canonical solver mesh before exporting raw result data.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setDataExportError(STALE_RESULTS_EXPORT_MESSAGE);
       return;
     }
     setDataExportBusy(format);
@@ -1644,6 +1741,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     const capture = viewerCaptureRef.current;
     let cancelled = false;
     reportCaptureInFlightRef.current = runId;
+    setReportCaptureBusy(true);
     void captureQueueRef.current!.enqueue(() => captureResultViews({
       getViewMode: () => reportStateRef.current.viewMode,
       getResultMode: () => reportStateRef.current.resultMode,
@@ -1685,6 +1783,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       pushMessage(message);
     }).finally(() => {
       if (reportCaptureInFlightRef.current === runId) reportCaptureInFlightRef.current = null;
+      setReportCaptureBusy(false);
     });
     return () => {
       cancelled = true;
@@ -1699,6 +1798,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     if (solverRunning) {
       setReportError("Wait for the active solve to finish before generating a report.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setReportError(STALE_RESULTS_EXPORT_MESSAGE);
       return;
     }
 
@@ -1781,10 +1884,13 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     }
     // Any study change (loads, supports, materials, mesh, solver settings)
     // makes the previous run's results stale; never keep showing them.
-    if (resultFields.length) {
-      invalidateCompletedRunState();
-      pushMessage("Previous results cleared: the study changed since the last run.");
+    // The previous results stay viewable but are marked outdated (rail,
+    // legend, pill, notice) and are refused by report and export until the
+    // next run; they used to be destroyed on the spot (2026-09 review D4).
+    if (resultFields.length && !resultsOutdatedBy) {
+      pushMessage("Results are now outdated: the study changed since the last run.");
     }
+    if (resultFields.length) setResultsOutdatedBy(response.message);
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
   }
@@ -1828,6 +1934,18 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function handleGenerateMesh(preset: MeshQuality) {
     if (!project || !study) return;
     setMeshError(null);
+    setOpenNote(null);
+    // The mesh stage builds the whole Core model, so a missing boundary
+    // condition used to surface here as "generated an invalid Core model:
+    // Steady thermal analysis requires…" (2026-09 review D16). Check the same
+    // readiness rows the Run step shows and say it in the user's words.
+    const setupBlockers = runReadiness.filter((item) => !item.done && item.label !== "Mesh generated").flatMap((item) => item.blockers);
+    if (setupBlockers.length) {
+      const message = `Complete the study before meshing: ${setupBlockers.join(" ")}`;
+      setMeshError(message);
+      pushMessage(message);
+      return;
+    }
     setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
     // generateMesh rethrows quality-gate and STEP topology rejections so the
     // primary failure remains visible without starting another heavy CAD job.
@@ -1895,10 +2013,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
       setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
     }
-    if (activeStep === "supports") {
-      void addFixedSupportForFace(face);
-      return;
-    }
+    // Select, then act: a viewer pick only chooses the face. The panel's Add
+    // button commits it, the same way loads already work. Picking used to
+    // create a support on the spot, so orbit misfires and exploratory clicks
+    // placed constraints (2026-09 review F1).
     pushMessage(`${face.label} selected.`);
   }
 
@@ -1906,29 +2024,6 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (!shouldClearPayloadSelectionOnViewerMiss({ activeStep, draftLoadType })) return;
     setSelectedPayloadObject(null);
     setSelectedLoadPoint(null);
-  }
-
-  async function addFixedSupportForFace(face: DisplayFace) {
-    if (!study) return;
-    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
-    const selection = existingSelection ?? namedSelectionForFace(study, face);
-    if (study.constraints.some((support) => support.selectionRef === selection.id)) {
-      pushMessage(`${study.type === "steady_state_thermal" ? "Temperature boundary" : "Fixed support"} already exists on ${selection.name}.`);
-      return;
-    }
-    const nextSelections = existingSelection ? study.namedSelections : [...study.namedSelections, selection];
-    const nextSupport: Constraint = {
-      id: `constraint-${crypto.randomUUID()}`,
-      type: study.type === "steady_state_thermal" ? "prescribed_temperature" : "fixed",
-      selectionRef: selection.id,
-      // Use the temperature typed in the panel; a pick used to hard-code 20 °C
-      // and silently discard the entered value (2026-09 review D12).
-      parameters: study.type === "steady_state_thermal" ? { value: Number.isFinite(draftSupportTemperature) ? draftSupportTemperature : 20, units: "°C" } : {},
-      status: "complete"
-    };
-    await updateStudy(
-      saveStudyPatch(study.id, { namedSelections: nextSelections, constraints: [...study.constraints, nextSupport] }, study.type === "steady_state_thermal" ? "Temperature boundary added." : "Fixed support added.", study)
-    );
   }
 
   async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null, payloadObject?: PayloadObjectSelection | null, payloadMetadata: PayloadLoadMetadata = {}) {
@@ -1940,7 +2035,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `load-${crypto.randomUUID()}`,
       type,
       selectionRef: selection.id,
-      parameters: { value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+      parameters: { label: nextLoadLabel(study.loads), value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
       status: "complete"
     };
     const structuralStudy = study.type === "static_stress" || study.type === "dynamic_structural" ? study : null;
@@ -1986,6 +2081,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       pushMessage("Generate the mesh before going to Run.");
       return;
     }
+    // A face picked for one step is not a target for the next: the last face
+    // clicked while placing supports used to arrive pre-selected on Loads
+    // (2026-09 review F1).
+    setSelectedFaceId(null);
+    setSelectedLoadPoint(null);
+    setSelectedPayloadObject(null);
     applyStep(step);
   }
 
@@ -2035,6 +2136,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function invalidateCompletedRunState() {
     resultVariantLoadGenerationRef.current += 1;
+    setResultsOutdatedBy(null);
     setResultSummary(null);
     setSolveElapsedMs(null);
     setCompletedRunId("");
@@ -2149,8 +2251,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "prescribed_temperature" | LoadType) {
     setShowBoundaryConditionMenu(false);
     if (type === "fixed" || type === "prescribed_displacement" || type === "prescribed_temperature") {
+      // The face stays selected; the Supports panel's Add button commits it.
       applyStep("supports");
-      if ((type === "fixed" || type === "prescribed_temperature") && selectedFace) void addFixedSupportForFace(selectedFace);
       return;
     }
     setDraftLoadType(type);
@@ -2251,6 +2353,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (!study) return;
     if (!effectiveCanRunSimulation) {
       pushMessage(effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}.` : "Simulation is already running.");
+      return;
+    }
+    // Solver eligibility needs the model's display dimensions, which the
+    // viewer measures after its first frame. Say so instead of letting the
+    // solver refuse with "requires usable block-like display dimensions"
+    // (2026-09 review D27).
+    if (!displayModel?.dimensions) {
+      const message = "The 3D view has not finished measuring the model yet. Wait for the model to appear in the viewer, then run again.";
+      setRunError(message);
+      pushMessage(message);
       return;
     }
     setResultPlaybackPlaying(false);
@@ -2522,7 +2634,12 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   }
 
   if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
-    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />;
+    // "Back to start" keeps the project in memory and autosave; offer the way
+    // back so Create/Load do not read as the only options (2026-09 review D23).
+    const continueProject = project && displayModel && study
+      ? { name: project.name, onContinue: () => setHomeRequested(false) }
+      : undefined;
+    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} continueProject={continueProject} />;
   }
 
   if (project && displayModel && displayModelForUi && !study) {
@@ -2560,7 +2677,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
           onUnitSystemChange={handleUnitSystemChange}
           study={study}
-          hasResults={resultDisplayEligible}
+          hasResults={resultDisplayEligible && !resultsOutdatedBy}
+          readiness={runReadiness}
+          notices={stepNotices}
         />
         <Suspense fallback={(
           <section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">
@@ -2597,6 +2716,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             resultProbes={resultProbes}
             onAddResultProbe={handleAddResultProbe}
             surfaceMesh={resultSurfaceMesh}
+            meshPreviewSurface={meshPreviewSurface}
+            captureBusy={reportCaptureBusy}
+            resultsStale={Boolean(resultsOutdatedBy)}
+            resultPeaks={resultPeaks}
+            assignedFaceTints={assignedFaceTints}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying && resultPlaybackCacheState.status === "ready" && resultPlaybackCacheState.cache.packed ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={solverMeshSummary ?? study.meshSettings.summary}
@@ -2618,6 +2742,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         </Suspense>
         <RightPanel
           activeStep={activeStep}
+          notice={workspaceNotice}
+          resultControlsBusy={reportCaptureBusy}
+          onDismissNotice={() => workspaceNotice && setDismissedNoticeKey(workspaceNotice.key)}
+          onNoticeStep={(step) => navigateToStep(step)}
           project={project}
           displayModel={displayModelForUi}
           study={study}
@@ -2653,7 +2781,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onSaveProject={handleSaveProject}
           reportBusy={reportBusy}
           reportError={reportError}
-          reportDisabled={solverRunning || convergenceBusy}
+          reportDisabled={solverRunning || convergenceBusy || Boolean(resultsOutdatedBy)}
           pngExportBusy={pngExportBusy}
           pngExportError={pngExportError}
           htmlExportBusy={htmlExportBusy}
@@ -2701,7 +2829,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
                 id: `constraint-${crypto.randomUUID()}`,
                 type: "prescribed_temperature",
                 selectionRef: selectionRef ?? "",
-                parameters: { value: options.value ?? 20, units: "°C" },
+                parameters: { label: nextSupportLabel(study.constraints, "prescribed_temperature"), value: options.value ?? 20, units: "°C" },
                 status: "complete"
               };
               updateStudy(saveStudyPatch(study.id, { constraints: [...study.constraints, constraint] }, "Temperature boundary added.", study));
@@ -2709,16 +2837,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             }
             updateStudy(addSupport(study.id, selectionRef, study));
           }}
-          onUpdateSupport={(support: Constraint) =>
-            updateStudy(
+          onUpdateSupport={(support: Constraint, targetFace?: DisplayFace) => {
+            const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
+            const nextSupport = retarget ? { ...support, selectionRef: retarget.selection.id } : support;
+            void updateStudy(
               saveStudyPatch(
                 study.id,
-                { constraints: study.constraints.map((item) => (item.id === support.id ? support : item)) },
-                "Support updated.",
+                {
+                  ...(retarget ? { namedSelections: retarget.namedSelections } : {}),
+                  constraints: study.constraints.map((item) => (item.id === support.id ? nextSupport : item))
+                },
+                retarget ? `Support moved to ${targetFace!.label}.` : "Support updated.",
                 study
               )
-            )
-          }
+            );
+          }}
           onRemoveSupport={(supportId) =>
             updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed.", study))
           }
@@ -2752,11 +2885,21 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             if (type === "gravity") setSelectedPayloadObject(null);
           }}
           onDraftPayloadPreviewChange={setDraftPayloadPreview}
-          onUpdateLoad={(load: Load) =>
-            updateStudy(
-              saveStudyPatch(study.id, { loads: study.loads.map((item) => (item.id === load.id ? load : item)) }, "Load updated.", study)
-            )
-          }
+          onUpdateLoad={(load: Load, targetFace?: DisplayFace) => {
+            const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
+            const nextLoad = retarget ? { ...load, selectionRef: retarget.selection.id } : load;
+            void updateStudy(
+              saveStudyPatch(
+                study.id,
+                {
+                  ...(retarget ? { namedSelections: retarget.namedSelections } : {}),
+                  loads: study.loads.map((item) => (item.id === load.id ? nextLoad : item))
+                },
+                retarget ? `Load moved to ${targetFace!.label}.` : "Load updated.",
+                study
+              )
+            );
+          }}
           onPreviewLoadEdit={setPreviewLoadEdit}
           onRemoveLoad={(loadId) =>
             updateStudy(saveStudyPatch(study.id, {
@@ -2812,10 +2955,24 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         status={status}
         logs={logs}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
-        solverStatus={solverRunning ? "Running" : runError ? "Error" : runProgress >= 100 ? "Complete" : "Idle"}
+        solverStatus={solverRunning ? "Running" : runError ? "Error" : resultsOutdatedBy ? "Outdated" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
       {renderStorageRecoveryNotice()}
+      <GeometryReplaceDialog
+        open={pendingGeometryReplacement !== null}
+        actionLabel={pendingGeometryReplacement?.actionLabel ?? ""}
+        losses={pendingGeometryReplacement?.losses ?? []}
+        onCancel={() => {
+          setPendingGeometryReplacement(null);
+          pushMessage("Kept the current model.");
+        }}
+        onConfirm={() => {
+          const pending = pendingGeometryReplacement;
+          setPendingGeometryReplacement(null);
+          pending?.proceed();
+        }}
+      />
       {validationGalleryOpen ? (
         <Suspense fallback={null}>
           <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />
@@ -3067,6 +3224,14 @@ function debugResultField(field: ResultField | undefined) {
     sampleValues: field.samples?.slice(0, 5).map((sample) => sample.value) ?? [],
     sampleVectors: field.samples?.slice(0, 5).map((sample) => sample.vector ?? null) ?? []
   };
+}
+
+/** The named selection for a picked face, creating it when the study has none yet (re-targeting, 2026-09 review D3). */
+function selectionPatchForFace(study: Study, face: DisplayFace): { selection: NamedSelection; namedSelections: NamedSelection[] } {
+  const existing = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+  if (existing) return { selection: existing, namedSelections: study.namedSelections };
+  const selection = namedSelectionForFace(study, face);
+  return { selection, namedSelections: [...study.namedSelections, selection] };
 }
 
 function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection {

@@ -365,13 +365,19 @@ export function openLocalProjectPayload(payload: unknown): SampleProjectResponse
   const importedProject = discardImportedCoreMeshArtifacts(parsed.data);
   const bracket = refreshBracketSampleGeometry(importedProject, displayModel);
   const bracketNote = bracket.migrated ? ` ${BRACKET_GEOMETRY_MIGRATION_NOTE}` : "";
+  const meshDiscarded = importedProject !== parsed.data;
   return {
     project: bracket.project,
     displayModel: bracket.displayModel ?? displayModel,
     ...(results ? { results } : {}),
-    message: `${parsed.data.name} opened from local file.${migrationNote}${bracketNote}`
+    message: `${parsed.data.name} opened from local file.${migrationNote}${bracketNote}${meshDiscarded ? ` ${IMPORTED_MESH_DISCARDED_NOTE}` : ""}`,
+    ...(meshDiscarded ? { notice: IMPORTED_MESH_DISCARDED_NOTE } : {})
   };
 }
+
+/** Surfaced as a workspace notice on open (2026-09 review F13); it used to be silent. */
+export const IMPORTED_MESH_DISCARDED_NOTE =
+  "The saved mesh was not restored: meshes from files are regenerated here so results are always solved from this browser's mesher. Generate the mesh again before running.";
 
 function discardImportedCoreMeshArtifacts(project: Project): Project {
   const studies = project.studies.map((study) => {
@@ -399,6 +405,12 @@ function carriesRetiredCloudBackend(candidate: unknown): boolean {
 }
 
 export type UploadDisplayOptions = {
+  /**
+   * Bounding size of a STEP import measured from its face registry at upload,
+   * so the run gate never waits on the viewer's first frame to learn the
+   * model's dimensions (2026-09 review D27).
+   */
+  stepDimensions?: NonNullable<DisplayModel["dimensions"]>;
   /**
    * Real B-rep faces derived from the STEP face registry (plan A-M3). When
    * present for a native CAD upload they replace the generic box-face
@@ -507,7 +519,7 @@ export function uploadedDisplayModelFor(filename: string, contentBase64?: string
       id: "display-uploaded",
       name: faces.length ? `${modelName} imported body` : `${modelName} uploaded model`,
       bodyCount: faces.length ? 1 : 0,
-      dimensions,
+      dimensions: options.stepDimensions ?? dimensions,
       faces,
       nativeCad: {
         format: nativeFormat,

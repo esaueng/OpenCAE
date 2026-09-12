@@ -129,7 +129,7 @@ describe("BottomPanel", () => {
       />
     );
 
-    expect(html).toContain(">OpenCAE Core error</span>");
+    expect(html).toContain(">Solve failed</span>");
     expect(html).not.toContain('class="status-state ready"');
   });
 
@@ -249,9 +249,11 @@ describe("BottomPanel", () => {
     // the error words, so the footer read "OpenCAE Core active" while the run
     // had just been refused.
     const rejection = "OpenCAE Core requires a load with a finite positive value and direction";
-    expect(statusForDisplay(rejection, "Error")).toBe("OpenCAE Core error");
-    expect(statusForDisplay(rejection, "Idle")).toBe("OpenCAE Core active");
-    expect(statusForDisplay("Simulation complete.", "Error")).toBe("OpenCAE Core error");
+    expect(statusForDisplay(rejection, "Error")).toBe("Solve failed");
+    // A rejection message with no run failure is just a log line; the pill
+    // no longer names the solver product for it (2026-09 review F12).
+    expect(statusForDisplay(rejection, "Idle")).toBe("Ready");
+    expect(statusForDisplay("Simulation complete.", "Error")).toBe("Solve failed");
   });
 
   test("keeps the existing status wording when no run has failed", () => {
@@ -259,6 +261,11 @@ describe("BottomPanel", () => {
     expect(statusForDisplay("Simulation complete.", "Complete")).toBe("Results ready");
     expect(statusForDisplay("Could not update study.", "Idle")).toBe("Needs attention");
     expect(statusForDisplay("OpenCAE Core solving.", "Running")).toBe("Simulating");
-    expect(statusForDisplay("OpenCAE Core is not configured.", "Idle")).toBe("OpenCAE Core error");
+    expect(statusForDisplay("OpenCAE Core is not configured.", "Idle")).toBe("Solve failed");
+  });
+
+  test("reports cleared results as outdated until the next run", () => {
+    expect(statusForDisplay("Load updated.", "Outdated")).toBe("Results outdated");
+    expect(statusForDisplay("Load updated.", "Running")).toBe("Simulating");
   });
 });

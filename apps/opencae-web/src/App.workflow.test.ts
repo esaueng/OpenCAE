@@ -248,3 +248,16 @@ describe("App workflow layout", () => {
     expect(appSource).toContain('id="project-name-hint"');
   });
 });
+
+describe("viewer picks select rather than act (2026-09 review F1)", () => {
+  test("a supports-step pick no longer creates the support on the spot", () => {
+    expect(appSource).not.toContain("addFixedSupportForFace");
+    expect(appSource).toContain("setSelectedFaceId(null);\n    setSelectedLoadPoint(null);\n    setSelectedPayloadObject(null);\n    applyStep(step);");
+  });
+});
+
+describe("run waits for the viewer's measurement (2026-09 review D27)", () => {
+  test("explains the missing display dimensions instead of surfacing the solver refusal", () => {
+    expect(appSource).toContain("The 3D view has not finished measuring the model yet. Wait for the model to appear in the viewer, then run again.");
+  });
+});

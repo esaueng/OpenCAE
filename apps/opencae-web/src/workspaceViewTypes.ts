@@ -43,6 +43,8 @@ export interface ViewerLoadMarker {
   direction: [number, number, number];
   directionLabel: string;
   labelIndex: number;
+  /** Label stored at creation (`L3`); absent on loads created before labels were persisted. */
+  label?: string;
   stackIndex: number;
   preview?: boolean;
 }

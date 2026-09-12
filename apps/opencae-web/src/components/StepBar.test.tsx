@@ -187,3 +187,41 @@ describe("StepBar", () => {
     expect(html).not.toContain("<strong>core</strong>");
   });
 });
+
+describe("rail states from readiness (2026-09 review D14)", () => {
+  const baseProps = {
+    activeStep: "model" as const,
+    collapsed: false,
+    themeMode: "dark" as const,
+    onSelect: () => undefined,
+    onToggleCollapsed: () => undefined,
+    onToggleTheme: () => undefined,
+    onUnitSystemChange: () => undefined
+  };
+
+  test("shows a step as blocked, not done, when its readiness row has a blocker", () => {
+    const blockedStudy = {
+      ...study,
+      loads: [{ id: "load-1", type: "force" as const, selectionRef: "face", parameters: { value: 500 }, status: "complete" as const }]
+    };
+    const html = renderToStaticMarkup(
+      <StepBar {...baseProps} project={project} study={blockedStudy} hasResults={false} readiness={[
+        { label: "Load added", done: false, blockers: ["Load case Case 2 is enabled but has no loads. Add a load to it or disable it."] }
+      ]} />
+    );
+    expect(html).toContain('class="step-icon blocked"');
+    expect(html).toContain('aria-label="Loads: Load case Case 2 is enabled but has no loads. Add a load to it or disable it."');
+  });
+
+  test("ticks Run and Results only for results the viewer can show", () => {
+    const seeded = { ...study, runs: [{ id: "run-seeded", studyId: study.id, status: "complete", createdAt: "2026-01-01T00:00:00.000Z" }] } as unknown as typeof study;
+    const html = renderToStaticMarkup(<StepBar {...baseProps} project={project} study={seeded} hasResults={false} />);
+    expect(html.match(/step-icon done/g) ?? []).toHaveLength(1); // model only
+  });
+
+  test("badges the step that carries the workspace notice", () => {
+    const html = renderToStaticMarkup(<StepBar {...baseProps} project={project} study={study} hasResults={false} notices={{ run: "error" }} />);
+    expect(html).toContain('class="step-badge error"');
+    expect(html).toContain('aria-label="Run: needs attention"');
+  });
+});

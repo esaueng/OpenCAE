@@ -3,8 +3,60 @@
 ## Status
 
 Proposed on 2026-09-12 against `origin/main` at `9b32b410` (after PR #119), on
-branch `claude/design-interaction-review-2026-09`. Stage 0 is being executed on
-this branch together with the plan document (the plan 027 precedent).
+branch `claude/design-interaction-review-2026-09`. Stage 0 is executed on that
+branch together with the plan document (the plan 027 precedent, PR #120).
+Stage 1 is executed on `claude/plan-028-stage-1`, stacked on Stage 0: the
+workspace notice and rail states (D7, D14, F7, F12, D4 as a named cleared-results
+state), confirm-before-replace (D5, without the undo snapshot — undo holds the
+project but not the display model, so restoring across a replacement needs a
+geometry-aware snapshot first), provenance kept across reload (D9), mesh
+preflight (D16), the mesh-not-restored notice (F13), and the start screen busy
+state and Continue action (D23). Still open from Stage 1: keeping the previous
+contours viewable while stale (the fuller D4).
+Stage 2a is executed on `claude/plan-028-stage-2`, stacked on Stage 1: viewer
+picks select and the panel button commits (F1), stale picks are cleared on
+step change (F1), supports and loads can be moved to a newly picked face from
+their edit forms (D3), the in-panel Next applies a previewed material (F3),
+modal studies hide load markers and N/B skip the hidden Loads step (D17),
+frame step buttons (F11) and the reverse-check caveat (F9). Still open from
+Stage 2: assigned-face tinting and stable entry ids (F2), the real solver-surface
+mesh view and size readout (D13, F5), offscreen report capture (D15), one
+deformation control (D25), the legend peak marker (F8) and callout collision
+handling (D20) — all viewer work.
+Stage 2b is executed on `claude/plan-028-stage-2b`, stacked on 2a: the Mesh
+step draws the generated volume mesh's boundary (`solverSurfaceMeshFromModel`
+over the stored Core model, rendered through the same footprint transform the
+results use) with a Show/Hide mesh toggle, and the decorative wireframe boxes
+are gone (D13); the panel states the target element size instead of the
+heuristic sample count (F5); report-figure capture announces itself in the
+viewer and holds the result-mode controls while it runs (D15, an honest
+interim — the capture still uses the live viewer); the deformation slider
+appears in every structural mode and says it multiplies the legend factor
+(D25); the legend prints the unaveraged element peak beside the averaged range
+(F8). A new item found while verifying: **D27** run eligibility depends on
+`displayModel.dimensions`, which the viewer measures after its first frame, so
+a run started before the 3D view has painted was refused with "requires usable
+block-like display dimensions".
+Stage 2c is executed on `claude/plan-028-stage-2c`, stacked on 2b: STEP faces
+that carry a support (teal) or a load (amber) stay tinted on the model (F2,
+tinting only — stable entry ids remain open); every load callout goes through
+`layoutOutsideModelLabels`, so two loads on one face no longer overprint
+(D20); Run explains the missing measurement in plain words instead of
+surfacing the solver refusal (D27, message only).
+Stage 2d (`claude/plan-028-stage-2d`, stacked on 2c) closes D27 properly:
+STEP uploads and parametric parts carry their bounding size from the face
+registry measured at upload, so the run gate no longer depends on the viewer's
+first frame. Still open in Stage 2: true offscreen capture.
+Stage 3a (`claude/plan-028-stage-3a`, stacked on 2d): support and load labels
+are assigned once at creation and stored in `parameters.label`, so they never
+renumber (stable ids); an edit after a solve keeps the previous contours
+viewable and marks them outdated on the legend, the pill, the rail and the
+notice, and report/PNG/HTML/CSV/VTU refuse them until the next run (the
+fuller D4; the flag persists across reload); wheel zoom targets the cursor
+(F18 quick win). Still open: undo across geometry replacement, true offscreen
+capture, and the Stage 3 product decisions (multi-face and named selections
+next, then the study summary drawer; analysis-type placement and per-body
+materials await a call).
 
 Source: the design and interaction review of 2026-09-12, driven in the running
 app (dev server, 1440×900, 1024×700, 375×812, both themes) across a blank

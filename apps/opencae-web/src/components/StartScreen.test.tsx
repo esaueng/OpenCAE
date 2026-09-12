@@ -139,3 +139,19 @@ describe("SampleProjectMenu", () => {
     expect(guardIndex).toBeLessThan(source.indexOf('event.key.toLowerCase() === "o"'));
   });
 });
+
+describe("start screen busy and continue states (2026-09 review D23)", () => {
+  test("reads as busy while the workspace chunk loads", () => {
+    const html = renderToStaticMarkup(<StartScreen busy onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />);
+    expect(html).toContain("Opening the workspace…");
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toMatch(/<button class="start-action secondary" disabled=""[^>]*><span>Create new project<\/span>/);
+  });
+
+  test("offers to continue the project still held after Back to start", () => {
+    const html = renderToStaticMarkup(<StartScreen continueProject={{ name: "Bracket Demo", onContinue: vi.fn() }} onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />);
+    expect(html).toContain("Continue Bracket Demo");
+    expect(html).toContain("Your last project is still open in this browser");
+    expect(renderToStaticMarkup(<StartScreen onLoadSample={vi.fn()} onCreateProject={vi.fn()} onOpenProject={vi.fn()} />)).not.toContain("Continue ");
+  });
+});

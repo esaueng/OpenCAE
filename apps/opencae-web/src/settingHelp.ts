@@ -181,7 +181,7 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
   },
   supportType: {
     title: "Support type",
-    body: "Fixed support locks the selected face. Prescribed displacement is reserved for setups where a face is intentionally moved by a known amount.",
+    body: "Fixed support locks the selected face. Prescribed displacement (moving a face by a known amount) is not available in this solver yet, so it is not offered.",
     visual: "support"
   },
   loadPlacement: {

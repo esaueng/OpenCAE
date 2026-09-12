@@ -42,6 +42,7 @@ interface CadViewerProps {
   importingModelFilename?: string;
   activeStep: StepId;
   selectedFaceId: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   payloadObjectSelectionMode: boolean;
   selectedPayloadObject: PayloadObjectSelection | null;
   onViewerMiss: () => void;
@@ -60,6 +61,14 @@ interface CadViewerProps {
   resultProbes?: ResultProbePin[];
   onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
   surfaceMesh?: SolverSurfaceMesh;
+  /** Boundary of the generated volume mesh, drawn in the mesh view (2026-09 review D13). */
+  meshPreviewSurface?: SolverSurfaceMesh;
+  /** True while report figures are captured through this viewer (2026-09 review D15). */
+  captureBusy?: boolean;
+  /** Results are from before a study edit; drawn read-only with an outdated note (2026-09 review D4). */
+  resultsStale?: boolean;
+  /** Headline peak per result mode for the legend, e.g. `Peak 2.147 MPa` (2026-09 review F8). */
+  resultPeaks?: Partial<Record<ResultMode, string>>;
   resultPlaybackBufferCache?: PackedPreparedPlaybackCache | null;
   resultPlaybackFrameController?: ResultPlaybackFrameController;
   meshSummary?: MeshSummary;
@@ -126,6 +135,11 @@ type ModelPickHandlers = {
   onPointerOut?: () => void;
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
+/** A face that carries a support or load, tinted in its marker colour (2026-09 review F2). */
+export interface ViewerFaceTint {
+  faceId: string;
+  color: string;
+}
 const MAX_A11Y_FACE_BUTTONS = 256;
 /** Pointer travel (px) between down and up beyond which a viewer click is an orbit drag, not a pick. */
 export const VIEWER_CLICK_DRAG_THRESHOLD_PX = 4;
@@ -298,6 +312,11 @@ export function CadViewer(props: CadViewerProps) {
     const displayBounds = solverSurfaceDisplayBoundsForDisplayModel(props.displayModel, uploadedPreviewBounds);
     return solverSurfaceDisplayFootprint(props.surfaceMesh, displayBounds, baseModelRotation);
   }, [baseModelRotation, props.displayModel, props.surfaceMesh, solverSurfaceResult, uploadedPreviewBounds]);
+  const meshPreviewFootprint = useMemo(() => {
+    if (!props.meshPreviewSurface || effectiveViewMode !== "mesh") return null;
+    const displayBounds = solverSurfaceDisplayBoundsForDisplayModel(props.displayModel, uploadedPreviewBounds);
+    return solverSurfaceDisplayFootprint(props.meshPreviewSurface, displayBounds, baseModelRotation);
+  }, [baseModelRotation, effectiveViewMode, props.displayModel, props.meshPreviewSurface, uploadedPreviewBounds]);
   const resultColorScale = props.resultColorScale ?? resultColorScaleForField(solverSurfaceResult?.scalarField ?? selectedResultField(resultFields, props.resultMode), props.resultMode, stressComponent);
   const viewerContentFitKey = [
     props.activeStep,
@@ -351,6 +370,7 @@ export function CadViewer(props: CadViewerProps) {
           resultMode={props.resultMode}
           resultPlaybackPlaying={props.resultPlaybackPlaying}
           selectedFaceId={props.selectedFaceId}
+          assignedFaceTints={props.assignedFaceTints}
           selectedPayloadObject={props.selectedPayloadObject}
           sectionPlane={props.sectionPlane}
           showDeformed={effectiveShowDeformed}
@@ -374,6 +394,11 @@ export function CadViewer(props: CadViewerProps) {
                 The footprint group scales/recenters them into the display model's visual
                 footprint without mutating geometry, so the displacement visual-scale math
                 (which self-normalizes against mesh extent) keeps working unchanged. */}
+            {effectiveViewMode === "mesh" && props.meshPreviewSurface && meshPreviewFootprint && (
+              <group scale={meshPreviewFootprint.scale} position={meshPreviewFootprint.position}>
+                <MeshPreviewSurface surfaceMesh={props.meshPreviewSurface} />
+              </group>
+            )}
             {effectiveViewMode === "results" && solverSurfaceResult && (
               <group scale={solverSurfaceFootprint?.scale ?? 1} position={solverSurfaceFootprint?.position ?? [0, 0, 0]}>
                 <SolverSurfaceResultMesh
@@ -445,6 +470,12 @@ export function CadViewer(props: CadViewerProps) {
           </div>
         </div>
       ) : null}
+      {props.captureBusy && !props.importingModelFilename ? (
+        <div className="viewer-capture-overlay" role="status" aria-live="polite" aria-atomic="true">
+          <span className="viewer-import-spinner" aria-hidden="true" />
+          <span>Preparing report figures… the view switches briefly.</span>
+        </div>
+      ) : null}
       {props.displayModel.faces.length > 0 && (
         <div className="viewer-a11y-faces" role="group" aria-label="Select a face with the keyboard">
           <span>Select a face to place supports or loads.</span>
@@ -470,7 +501,7 @@ export function CadViewer(props: CadViewerProps) {
         <button type="button" aria-pressed={projectionMode === "perspective"} onClick={() => props.onProjectionModeChange?.("perspective")}>Perspective</button>
         <button type="button" aria-pressed={projectionMode === "orthographic"} onClick={() => props.onProjectionModeChange?.("orthographic")}>Orthographic</button>
       </div>
-      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} />}
+      {effectiveViewMode === "results" && <ResultLegend resultMode={props.resultMode} resultFields={resultFields} unitSystem={props.unitSystem} meshSummary={props.meshSummary} surfaceMesh={props.surfaceMesh} showDeformed={effectiveShowDeformed} deformationScale={props.stressExaggeration} peakLabel={props.resultPeaks?.[props.resultMode]} stale={props.resultsStale} />}
     </section>
       </StressComponentContext.Provider>
       </SceneThemeContext.Provider>
@@ -557,6 +588,7 @@ function ViewerInvalidator({
   resultMode: ResultMode;
   resultPlaybackPlaying: boolean;
   selectedFaceId: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   selectedPayloadObject: PayloadObjectSelection | null;
   sectionPlane: SectionPlaneState;
   showDeformed: boolean;
@@ -1102,6 +1134,8 @@ function DemandOrbitControls({ controlsRef, onInteractionChange }: { controlsRef
       makeDefault
       enableDamping
       dampingFactor={0.08}
+      // Wheel zoom towards the cursor rather than the view centre (2026-09 review F18).
+      zoomToCursor
       target={[0, 0, 0.75]}
       onChange={invalidateViewer}
       onStart={() => onInteractionChange?.(true)}
@@ -1654,6 +1688,7 @@ function BracketModel({
   displayModel,
   activeStep,
   selectedFaceId,
+  assignedFaceTints,
   payloadObjectSelectionMode,
   selectedPayloadObject,
   onSelectFace,
@@ -1701,7 +1736,10 @@ function BracketModel({
     const bounds = dimensionBoundsForDisplayModel(displayModel);
     if (!bounds) return new Map<string, [number, number, number]>();
     const anchors: LabelAnchor[] = [
-      ...loadMarkers.filter((marker) => marker.type === "gravity").map((marker) => {
+      // Every load takes a laid-out callout, not only payload masses: two
+      // forces on one face used to print their labels on top of each other
+      // (2026-09 review D20).
+      ...loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? { id: boundaryLabelKey("load", marker.id), anchor: loadMarkerAnchor(marker, face) } : null;
       }),
@@ -1838,6 +1876,7 @@ function BracketModel({
             enableHoleWallPicking={activeStep === "supports"}
             activePayloadObjectId={activePayloadObjectId}
             selectedFaceId={selectedFaceId}
+        assignedFaceTints={assignedFaceTints}
             onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
             onUploadedPreviewBounds={onUploadedPreviewBounds}
           /></group>
@@ -1850,7 +1889,9 @@ function BracketModel({
         />
       )}
       {!suppressProceduralResultSolid && <group userData={{ opencaeSectionClippable: true }}><HoleRims kind={modelKind} /></group>}
-      {viewMode === "mesh" && <group userData={{ opencaeSectionClippable: true }}><MeshOverlay kind={modelKind} /></group>}
+      {/* The mesh view draws the generated boundary surface from the top-level
+          scene (MeshPreviewSurface); the decorative wireframe boxes that used to
+          stand in for it were removed (2026-09 review D13). */}
       {placementMode && !isResultView && <SnapVisualization result={snapResult} mode={activeStep === "supports" ? "supports" : "loads"} />}
       {showModelHitLabel && hoveredHit && <ModelHitLabel hit={hoveredHit} active={hoveredHit.face.id === selectedFaceId} />}
       {showBoundaryMarkers && loadMarkers.map((marker) => {
@@ -2551,7 +2592,7 @@ function stepPreviewMeshIndexFor(object: THREE.Object3D): number | null {
   return null;
 }
 
-function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRegistry, record: import("../stepFaces").StepFaceRecord): THREE.Mesh {
+function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRegistry, record: import("../stepFaces").StepFaceRecord, color = "#4da3ff", opacity = 0.42): THREE.Mesh {
   const meshData = registry.meshes[record.meshIndex]!;
   const [first, last] = record.triangleRange;
   const triangleCount = last - first + 1;
@@ -2567,9 +2608,9 @@ function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRe
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const material = new THREE.MeshBasicMaterial({
-    color: "#4da3ff",
+    color,
     transparent: true,
-    opacity: 0.42,
+    opacity,
     depthWrite: false,
     side: THREE.DoubleSide,
     polygonOffset: true,
@@ -2700,6 +2741,7 @@ function SampleSolid({
   enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
+  assignedFaceTints,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -2710,6 +2752,7 @@ function SampleSolid({
   enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -2723,6 +2766,7 @@ function SampleSolid({
         enableHoleWallPicking={enableHoleWallPicking}
         activePayloadObjectId={activePayloadObjectId}
         selectedFaceId={selectedFaceId}
+        assignedFaceTints={assignedFaceTints}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -2798,6 +2842,7 @@ function UploadedSolid({
   enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
+  assignedFaceTints,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -2807,6 +2852,7 @@ function UploadedSolid({
   enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -2819,6 +2865,7 @@ function UploadedSolid({
         enableHoleWallPicking={enableHoleWallPicking}
         activePayloadObjectId={activePayloadObjectId}
         selectedFaceId={selectedFaceId}
+        assignedFaceTints={assignedFaceTints}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -2836,6 +2883,7 @@ function UploadedNativeCadModel({
   enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
+  assignedFaceTints,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -2845,6 +2893,7 @@ function UploadedNativeCadModel({
   enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -2871,6 +2920,35 @@ function UploadedNativeCadModel({
       cancelled = true;
     };
   }, [nativeCadContentBase64]);
+
+  // Faces that carry a support or load stay tinted in the marker colour, so
+  // an assignment is visible on the model itself and not only as a callout
+  // label; before, only the transient selection was highlighted (2026-09 review F2).
+  useEffect(() => {
+    const api = stepFacesApi;
+    const target = preview.object;
+    if (!api || !nativeCadContentBase64 || !target || !assignedFaceTints?.length) return undefined;
+    const registry = api.peekStepFaceRegistryForBase64(nativeCadContentBase64);
+    if (!registry) return undefined;
+    const attached: Array<{ parent: THREE.Mesh; highlight: THREE.Mesh }> = [];
+    for (const tint of assignedFaceTints) {
+      if (!api.isStepFaceId(tint.faceId) || tint.faceId === selectedFaceId) continue;
+      const record = api.stepFaceRecordForId(registry, tint.faceId);
+      if (!record) continue;
+      const parent = target.children[record.meshIndex];
+      if (!(parent instanceof THREE.Mesh)) continue;
+      const highlight = createStepFaceHighlightMesh(registry, record, tint.color, 0.3);
+      parent.add(highlight);
+      attached.push({ parent, highlight });
+    }
+    return () => {
+      for (const { parent, highlight } of attached) {
+        parent.remove(highlight);
+        highlight.geometry.dispose();
+        (highlight.material as THREE.Material).dispose();
+      }
+    };
+  }, [assignedFaceTints, nativeCadContentBase64, preview.object, selectedFaceId, stepRegistryVersion]);
 
   useEffect(() => {
     const api = stepFacesApi;
@@ -4033,6 +4111,49 @@ function assertSolverSurfaceMeshTopology(surfaceMesh: SolverSurfaceMesh): void {
       }
     }
   }
+}
+
+/**
+ * The generated volume mesh's boundary, shown in the Mesh step's viewer: a
+ * faint shaded surface with its element edges. Before this the mesh view drew
+ * nothing for uploaded geometry and a decorative box for samples
+ * (2026-09 review D13).
+ */
+function MeshPreviewSurface({ surfaceMesh }: { surfaceMesh: SolverSurfaceMesh }) {
+  const geometry = useMemo(() => {
+    const positions = new Float32Array(surfaceMesh.nodes.length * 3);
+    surfaceMesh.nodes.forEach((node, index) => {
+      positions[index * 3] = node[0];
+      positions[index * 3 + 1] = node[1];
+      positions[index * 3 + 2] = node[2];
+    });
+    const indices = new Uint32Array(surfaceMesh.triangles.length * 3);
+    surfaceMesh.triangles.forEach((triangle, index) => {
+      indices[index * 3] = triangle[0];
+      indices[index * 3 + 1] = triangle[1];
+      indices[index * 3 + 2] = triangle[2];
+    });
+    const built = new THREE.BufferGeometry();
+    built.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    built.setIndex(new THREE.BufferAttribute(indices, 1));
+    built.computeVertexNormals();
+    return built;
+  }, [surfaceMesh]);
+  const edgeGeometry = useMemo(() => new THREE.EdgesGeometry(geometry, 1), [geometry]);
+  useEffect(() => () => {
+    geometry.dispose();
+    edgeGeometry.dispose();
+  }, [edgeGeometry, geometry]);
+  return (
+    <group userData={{ opencaeSectionClippable: true, opencaeMeshPreview: true }}>
+      <mesh geometry={geometry} renderOrder={5}>
+        <meshStandardMaterial color="#9ad1ff" transparent opacity={0.28} depthWrite={false} side={THREE.DoubleSide} metalness={0.1} roughness={0.7} />
+      </mesh>
+      <lineSegments geometry={edgeGeometry} renderOrder={6}>
+        <lineBasicMaterial color="#9ad1ff" transparent opacity={0.85} toneMapped={false} />
+      </lineSegments>
+    </group>
+  );
 }
 
 function UndeformedGeometryOutline({ geometry, position }: { geometry: THREE.BufferGeometry; position?: [number, number, number] }) {
@@ -6605,7 +6726,7 @@ export function resultLegendContentScale(size: ResultLegendSize) {
   ).toFixed(2));
 }
 
-function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number }) {
+function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfaceMesh, showDeformed, deformationScale, peakLabel, stale = false }: { resultMode: ResultMode; resultFields: ResultField[]; unitSystem: UnitSystem; meshSummary?: MeshSummary; surfaceMesh?: SolverSurfaceMesh; showDeformed?: boolean; deformationScale?: number; peakLabel?: string; stale?: boolean }) {
   const stressComponent = useContext(StressComponentContext);
   const contextColorScale = useContext(ResultColorScaleContext);
   const legendRef = useRef<HTMLDivElement | null>(null);
@@ -6715,6 +6836,7 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
         onPointerCancel={handleResizePointerEnd}
         onLostPointerCapture={handleResizePointerEnd}
       />
+      {stale && <span className="legend-stale">Outdated: the study changed since this run. Re-run to update.</span>}
       <strong>Nodes: {meshStats.nodes}</strong>
       <strong>Elements: {meshStats.elements}</strong>
       <span>Type: {title}</span>
@@ -6730,6 +6852,8 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
         <span>Min</span>
         <span>Max</span>
       </div>
+      {/* The bar shows the averaged surface field; the summary peak is the unaveraged element value (2026-09 review F8). */}
+      {peakLabel && <span className="legend-peak">{peakLabel} (element, unaveraged)</span>}
     </div>
   );
 }
@@ -6973,49 +7097,6 @@ function SupportBurst({ radius, active = false, scale = 1 }: { radius: number; a
   );
 }
 
-function MeshOverlay({ kind }: { kind: SampleModelKind }) {
-  const bodyGeometry = useMemo(() => createBracketBodyGeometry(), []);
-  const ribGeometry = useMemo(() => createRibGeometry(), []);
-  const beamGeometry = useMemo(() => createBeamGeometry(), []);
-  const beamPayloadGeometry = useMemo(() => createBeamPayloadGeometry(), []);
-  if (kind === "blank") return null;
-
-  if (kind === "plate") {
-    return (
-      <group>
-        {[beamGeometry, beamPayloadGeometry].map((geometry, index) => (
-          <mesh key={index} geometry={geometry}>
-            <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-          </mesh>
-        ))}
-      </group>
-    );
-  }
-
-  if (kind === "cantilever") {
-    return (
-      <mesh position={[0, 0.18, 0]}>
-        <boxGeometry args={[3.8, 0.5, 0.72, 18, 4, 4]} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-      </mesh>
-    );
-  }
-
-  if (kind === "uploaded") return null;
-
-  return (
-    <group>
-      <mesh>
-        <primitive attach="geometry" object={bodyGeometry} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.26} />
-      </mesh>
-      <mesh>
-        <primitive attach="geometry" object={ribGeometry} />
-        <meshBasicMaterial color="#9ad1ff" wireframe transparent opacity={0.3} />
-      </mesh>
-    </group>
-  );
-}
 
 function BoundsCameraReset({ contentFitKey, signal, viewAxis, viewAxisSignal, controlsRef }: { contentFitKey: string; signal: number; viewAxis: RotationAxis | null; viewAxisSignal: number; controlsRef: MutableRefObject<ViewerOrbitControls | null> }) {
   const bounds = useBounds();

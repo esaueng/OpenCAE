@@ -2974,3 +2974,11 @@ describe("element-stress recovery onto the solver surface (smooth contour fix)",
     expect(recoverSurfaceNodeScalarField(surfaceMesh, [noSamples], "stress")).toBeNull();
   });
 });
+
+describe("mesh view draws the generated mesh (2026-09 review D13)", () => {
+  test("renders the volume mesh boundary in the mesh view and no decorative stand-in", () => {
+    expect(cadViewerSource).toContain('effectiveViewMode === "mesh" && props.meshPreviewSurface && meshPreviewFootprint');
+    expect(cadViewerSource).toContain("function MeshPreviewSurface({ surfaceMesh }");
+    expect(cadViewerSource).not.toContain("function MeshOverlay(");
+  });
+});

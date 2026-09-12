@@ -904,8 +904,10 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
-    expect(meshHtml).toContain("Analysis samples");
-    expect(meshHtml).toContain("45,000");
+    // The heuristic sample count meant nothing to a user; the element size does (2026-09 review F5).
+    expect(meshHtml).not.toContain("Analysis samples");
+    expect(meshHtml).toContain("Target element size");
+    expect(meshHtml).toContain("6 mm");
   });
 
   test("does not present preset fallback counts as geometry-specific mesh estimates", () => {
@@ -934,7 +936,8 @@ describe("RightPanel payload mass controls", () => {
     // A warning count is not a warning: the strings themselves render, in view.
     expect(meshHtml).toContain('aria-label="Mesh warnings"');
     expect(meshHtml).toContain("Preset fallback");
-    expect(meshHtml).toContain("4,800");
+    expect(meshHtml).toContain("Target element size");
+    expect(meshHtml).not.toContain("4,800");
     expect(meshHtml).not.toContain("42,381");
     expect(meshHtml).not.toContain("26,944");
     expect(meshHtml).not.toContain("Nodes (est.)");
@@ -2325,5 +2328,63 @@ describe("2026-09 interaction review stage 0 guards", () => {
 
     expect(html).toContain("Surface heat flux");
     expect(html).not.toContain("direction");
+  });
+});
+
+describe("workspace notice and readiness text (2026-09 review D7, F7)", () => {
+  test("renders the workspace notice on any step with a link to the step that can fix it", () => {
+    const notice = { key: "outdated:Load updated.", tone: "warning" as const, title: "Results outdated", message: "Load updated. Re-run to update them.", step: "run" as const, stepLabel: "Run" };
+    const html = renderPanel("material", { notice, onDismissNotice: vi.fn(), onNoticeStep: vi.fn() });
+
+    expect(html).toContain('class="workspace-notice warning"');
+    expect(html).toContain("Results outdated");
+    expect(html).toContain("Go to Run");
+    expect(html).toContain('aria-label="Dismiss notice"');
+    // On the step itself the link is redundant.
+    expect(renderPanel("run", { notice })).not.toContain("Go to Run");
+    expect(renderPanel("run", { notice: { ...notice, tone: "error" } })).toContain('role="alert"');
+  });
+
+  test("prints readiness blockers as text instead of a tooltip", () => {
+    const html = renderPanel("run");
+
+    expect(html).toContain('class="check-blockers"');
+    expect(html).toContain("Choose what the part is made of.");
+  });
+});
+
+describe("select-then-act and re-targeting (2026-09 review F1, D3, F3)", () => {
+  test("edit forms offer to move an entry to the face picked in the viewer", () => {
+    expect(rightPanelSource).toContain("Move to {pickedElsewhere.label} (picked in the viewer)");
+    expect(rightPanelSource).toContain("onSave(previewLoad, targetFace)");
+    expect(rightPanelSource).toContain("support.parameters }, targetFace)");
+  });
+
+  test("the in-panel Next commits a previewed material selection", () => {
+    expect(rightPanelSource).toContain("registerBeforeNext?.(selectionMatchesAssignment ? null : () => onAssignMaterial(selectedMaterialId, pendingParameters))");
+    expect(rightPanelSource).toContain("beforeNextRef.current?.();");
+  });
+
+  test("dynamic playback has frame step controls", () => {
+    expect(rightPanelSource).toContain('aria-label="Previous frame"');
+    expect(rightPanelSource).toContain('aria-label="Next frame"');
+  });
+});
+
+describe("mesh step shows the size it asks for and the mesh it made (2026-09 review D13, F5)", () => {
+  test("states the target element size for the preset", () => {
+    const html = renderPanel("mesh");
+    expect(html).toContain("target element size 12 mm");
+  });
+
+  test("offers to show the generated mesh only when a real volume mesh exists", () => {
+    const meshed: Study = {
+      ...study,
+      meshSettings: { preset: "medium", status: "complete", summary: { nodes: 1030, elements: 489, warnings: [], source: "wasm_gmsh", artifacts: { actualCoreModel: { model: {} } } } as Study["meshSettings"]["summary"] }
+    };
+    expect(renderPanel("mesh", { study: meshed, onViewModeChange: vi.fn() })).toContain("Show mesh in viewer");
+    expect(renderPanel("mesh", { study: meshed, viewMode: "mesh", onViewModeChange: vi.fn() })).toContain("Hide mesh");
+    const estimated: Study = { ...study, meshSettings: { preset: "medium", status: "complete", summary: { nodes: 10, elements: 4, warnings: [] } } };
+    expect(renderPanel("mesh", { study: estimated })).not.toContain("Show mesh in viewer");
   });
 });

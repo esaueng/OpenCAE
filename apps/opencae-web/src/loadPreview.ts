@@ -140,6 +140,7 @@ export function loadMarkerFromLoad(load: Load, study: Study, stackIndex: number,
     directionLabel: directionLabelForLoad(load, displayModel, face),
     labelIndex: stackIndex,
     stackIndex,
+    ...(typeof load.parameters.label === "string" && load.parameters.label.trim() ? { label: load.parameters.label.trim() } : {}),
     ...(preview ? { preview: true } : {})
   };
 }
@@ -179,7 +180,9 @@ function markerFromDraftLoadPreview(
 }
 
 export function loadMarkerOrdinalLabel(marker: ViewerLoadMarker) {
-  return `L${marker.labelIndex + 1}`;
+  // A label stored at creation never renumbers (2026-09 review F2, stable ids);
+  // legacy loads without one fall back to their position.
+  return marker.label ?? `L${marker.labelIndex + 1}`;
 }
 
 export function loadMarkerDisplayLabel(marker: ViewerLoadMarker) {

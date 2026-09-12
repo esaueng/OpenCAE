@@ -4,6 +4,7 @@ import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings,
 import type { StepGeometryInspection, StepGeometryRepairReport } from "@opencae/mesh-intake";
 import { assertCompatibleManufacturingProcess, resolveMaterial } from "@opencae/materials";
 import { unitsForLoadType, type LoadApplicationPoint, type LoadDirection, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata } from "../loadPreview";
+import { nextLoadLabel, nextSupportLabel } from "../supportLabels";
 import type { PayloadObjectSelection } from "../workspaceViewTypes";
 import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
 import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
@@ -18,6 +19,8 @@ import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConverge
 
 export interface SampleProjectResponse {
   message?: string;
+  /** A consequence the user must act on (e.g. a saved mesh that was not restored); shown as a workspace notice, not only logged. */
+  notice?: string;
   project: Project;
   displayModel: DisplayModel;
   results?: LocalResultBundle;
@@ -312,13 +315,13 @@ async function uploadModelWithGeometry(
     size: file.size,
     contentBase64
   };
-  const stepDisplayFaces = await stepDisplayFacesForUpload(file.name, contentBase64);
+  const { faces: stepDisplayFaces, dimensions: stepDimensions } = await stepDisplayFacesForUpload(file.name, contentBase64);
   assertCurrentModelMutation(mutationOptions);
   const stepGeometry = knownStepGeometry ?? await inspectStepGeometryForUpload(file.name, contentBase64);
   assertCurrentModelMutation(mutationOptions);
   void projectId;
   if (!currentProject) throw new Error("Could not upload model without an open project.");
-  const data = createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces });
+  const data = createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces, stepDimensions });
   let nextProject = embedUploadedModelFile(data.project, embeddedModel);
   if (stepGeometry) nextProject = attachStepGeometryMetadata(nextProject, embeddedModel.filename, stepGeometry);
   const notice = stepGeometryUploadNotice(stepGeometry);
@@ -446,19 +449,24 @@ function embeddedStepModel(project: Pick<Project, "geometryFiles">): EmbeddedMod
  * opt-out builds tree-shake the whole path; any registry failure falls back
  * to the legacy generic faces.
  */
-async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<DisplayModel["faces"] | undefined> {
+async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<{ faces?: DisplayModel["faces"]; dimensions?: NonNullable<DisplayModel["dimensions"]> }> {
   if (import.meta.env.VITE_WASM_MESHING !== "0") {
     const extension = filename.trim().split(".").pop()?.toLowerCase();
-    if (extension !== "step" && extension !== "stp") return undefined;
+    if (extension !== "step" && extension !== "stp") return {};
     try {
       const stepFaces = await import("../stepFaces");
       const registry = await stepFaces.stepFaceRegistryFromBase64(contentBase64);
-      return registry.displayFaces.length ? registry.displayFaces : undefined;
+      return {
+        faces: registry.displayFaces.length ? registry.displayFaces : undefined,
+        // Measured here, not by the viewer, so a run can start before the
+        // 3D view has painted (2026-09 review D27).
+        dimensions: stepFaces.stepRegistryDimensions(registry)
+      };
     } catch {
-      return undefined;
+      return {};
     }
   }
-  return undefined;
+  return {};
 }
 
 export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {
@@ -618,7 +626,7 @@ export async function addSupport(studyId: string, selectionRef: string | undefin
           id: `constraint-${crypto.randomUUID()}`,
           type: "fixed" as const,
           selectionRef: selectionRef ?? currentStudy.namedSelections.find((selection) => selection.entityType === "face")?.id ?? "selection-fixed-face",
-          parameters: {},
+          parameters: { label: nextSupportLabel(currentStudy.constraints, "fixed") },
           status: "complete" as const
         }
       ]
@@ -648,7 +656,7 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
           id: loadId,
           type,
           selectionRef,
-          parameters: { value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+          parameters: { label: nextLoadLabel(currentStudy.loads), value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
           status: "complete" as const
         }
       ],
@@ -871,6 +879,11 @@ function messageFromUnknownError(error: unknown): string {
 // Gmsh characteristic length (mm) per mesh preset for procedural sample
 // geometry (bracket). Shared by the mesh step and the run flow's mesh-first
 // path; STEP uploads use the same map as a characteristic-length hint.
+/** The target element size a preset asks the browser mesher for (2026-09 review F5: shown in the Mesh panel). */
+export function meshTargetSizeMmForPreset(preset: MeshQuality): number {
+  return PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium;
+}
+
 const PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
   coarse: 18,
   medium: 12,
