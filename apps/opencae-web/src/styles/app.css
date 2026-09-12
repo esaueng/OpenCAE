@@ -6000,3 +6000,30 @@ input[aria-invalid="true"] {
   padding-inline: var(--sp-2);
   min-width: 36px;
 }
+
+/* 2026-09 review D15: report-figure capture drives the live viewer; say so. */
+.viewer-capture-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-25);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  border: var(--border-thin);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+  z-index: var(--z-viewer-overlay);
+}
+
+/* 2026-09 review F8: the headline peak beside the averaged legend range. */
+.legend-peak {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+}

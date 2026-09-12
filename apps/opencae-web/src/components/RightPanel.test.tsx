@@ -904,8 +904,10 @@ describe("RightPanel payload mass controls", () => {
     expect(runHtml).toContain("Local (in-browser)");
     expect(runHtml).toContain("Fidelity");
     expect(meshHtml).toContain("Ultra");
-    expect(meshHtml).toContain("Analysis samples");
-    expect(meshHtml).toContain("45,000");
+    // The heuristic sample count meant nothing to a user; the element size does (2026-09 review F5).
+    expect(meshHtml).not.toContain("Analysis samples");
+    expect(meshHtml).toContain("Target element size");
+    expect(meshHtml).toContain("6 mm");
   });
 
   test("does not present preset fallback counts as geometry-specific mesh estimates", () => {
@@ -934,7 +936,8 @@ describe("RightPanel payload mass controls", () => {
     // A warning count is not a warning: the strings themselves render, in view.
     expect(meshHtml).toContain('aria-label="Mesh warnings"');
     expect(meshHtml).toContain("Preset fallback");
-    expect(meshHtml).toContain("4,800");
+    expect(meshHtml).toContain("Target element size");
+    expect(meshHtml).not.toContain("4,800");
     expect(meshHtml).not.toContain("42,381");
     expect(meshHtml).not.toContain("26,944");
     expect(meshHtml).not.toContain("Nodes (est.)");
@@ -2365,5 +2368,23 @@ describe("select-then-act and re-targeting (2026-09 review F1, D3, F3)", () => {
   test("dynamic playback has frame step controls", () => {
     expect(rightPanelSource).toContain('aria-label="Previous frame"');
     expect(rightPanelSource).toContain('aria-label="Next frame"');
+  });
+});
+
+describe("mesh step shows the size it asks for and the mesh it made (2026-09 review D13, F5)", () => {
+  test("states the target element size for the preset", () => {
+    const html = renderPanel("mesh");
+    expect(html).toContain("target element size 12 mm");
+  });
+
+  test("offers to show the generated mesh only when a real volume mesh exists", () => {
+    const meshed: Study = {
+      ...study,
+      meshSettings: { preset: "medium", status: "complete", summary: { nodes: 1030, elements: 489, warnings: [], source: "wasm_gmsh", artifacts: { actualCoreModel: { model: {} } } } as Study["meshSettings"]["summary"] }
+    };
+    expect(renderPanel("mesh", { study: meshed, onViewModeChange: vi.fn() })).toContain("Show mesh in viewer");
+    expect(renderPanel("mesh", { study: meshed, viewMode: "mesh", onViewModeChange: vi.fn() })).toContain("Hide mesh");
+    const estimated: Study = { ...study, meshSettings: { preset: "medium", status: "complete", summary: { nodes: 10, elements: 4, warnings: [] } } };
+    expect(renderPanel("mesh", { study: estimated })).not.toContain("Show mesh in viewer");
   });
 });
