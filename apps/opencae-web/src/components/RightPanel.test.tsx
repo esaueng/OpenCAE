@@ -153,7 +153,7 @@ test("explains the solver peak separately from the plotted stress range without 
   const html = renderPanel("results", overrides);
 
   expect(html).toContain("45.2 MPa");
-  expect(html).toContain("Automatic run range: 0.729822–39.7469 MPa");
+  expect(html).toContain("Automatic run range: 0.73–39.75 MPa");
   expect(html).toContain("peak von Mises stress");
   expect(html).toContain("Surface averaging or smoothing can lower the legend maximum");
   expect(renderPanel("results", { ...overrides, resultMode: "displacement" })).not.toContain("Surface averaging or smoothing");
@@ -291,7 +291,7 @@ describe("RightPanel result probes", () => {
     });
 
     expect(html).toContain("Pinned probes");
-    expect(html).toContain("0.000456789 MPa");
+    expect(html).toContain("0.0004568 MPa");
     expect(html).toContain("Governed near probe by Service");
     expect(html).toContain("Clear all");
     expect(html).toContain('aria-label="Remove probe 1"');
@@ -361,7 +361,9 @@ describe("RightPanel run variants and load cases", () => {
     expect(html).toContain("Run variant");
     expect(html).toContain("Service");
     expect(html).toContain("Net signed");
-    expect(html).toContain("Envelope · envelope");
+    // The kind suffix is only added when the name does not already say it.
+    expect(html).toContain(">Envelope<");
+    expect(html).not.toContain("Envelope · envelope");
     expect(html).toContain('value="combination:net" selected=""');
   });
 });
@@ -519,7 +521,7 @@ describe("RightPanel payload mass controls", () => {
     expect(html).toContain("OpenCAE Core Preview");
     expect(html).toContain("OpenCAE Core Preview mesh does not match this geometry; deformed shape disabled.");
     expect(html).toContain("Reaction force unavailable or invalid for this result.");
-    expect(html).toContain('type="checkbox" disabled=""');
+    expect(html).toContain('type="checkbox" aria-label="Deformed shape" disabled=""');
     expect(html).not.toContain("Max total load");
   });
 
@@ -685,6 +687,8 @@ describe("RightPanel payload mass controls", () => {
     expect(resultModeExplanation("stress")).toBe("Red areas have higher stress. Blue areas have lower stress.");
     expect(resultModeExplanation("displacement")).toBe("Red areas have higher displacement magnitude. Blue areas have lower displacement magnitude.");
     expect(resultModeExplanation("velocity")).toBe("Red areas have higher velocity magnitude. Blue areas have lower velocity magnitude.");
+    // SAFETY_RAMP puts red at low factors of safety; the sentence must agree with the ramp.
+    expect(resultModeExplanation("safety_factor")).toBe("Red areas are closest to yield (low safety factor). Green areas have the most margin.");
   });
 
   test("does not show the selected face as a persistent right-panel banner", () => {
@@ -1430,7 +1434,7 @@ describe("RightPanel payload mass controls", () => {
     });
 
     expect(html).toContain('class="toggle playback-loop-toggle"');
-    expect(html).toContain('<input type="checkbox" checked=""/>');
+    expect(html).toContain('<input type="checkbox" aria-label="Reverse loop" checked=""/>');
     expect(html).toContain("Reverse loop");
   });
 
@@ -2253,4 +2257,73 @@ test("hides the add-load workflow while editing and restores load-row focus", ()
   expect(rightPanelSource).toContain("window.requestAnimationFrame(() => editButtonRefs.current.get(supportId)?.focus())");
   expect(rightPanelSource).toContain('aria-pressed={viewMode === "mesh"}');
   expect(rightPanelSource).toContain('aria-pressed={resultMode === "stress"}');
+});
+
+describe("2026-09 interaction review stage 0 guards", () => {
+  const loadedStudy: Study = {
+    ...study,
+    loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, 0, -1], directionMode: "-Z" }, status: "complete" }]
+  };
+
+  test("refuses an identical load on the same face instead of stacking it (D2)", () => {
+    const html = renderPanel("loads", { study: loadedStudy, selectedFace: displayModel.faces[0]! });
+
+    expect(html).toContain("A face force (total) of 500 N is already applied to Top face. Edit it to change the magnitude.");
+    expect(html).toMatch(/<button class="outline-action wide" disabled=""[^>]*>[^<]*<svg[\s\S]*?Add load<\/button>/);
+    // A different magnitude on the same face is a legitimate second load.
+    expect(renderPanel("loads", { study: loadedStudy, selectedFace: displayModel.faces[0]!, draftLoadValue: 600 })).not.toContain("is already applied to");
+  });
+
+  test("refuses a second support on a face that already has one (D2)", () => {
+    const supported: Study = { ...study, constraints: [{ id: "fs-1", type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" }] };
+    const html = renderPanel("supports", { study: supported, selectedFace: displayModel.faces[0]! });
+
+    expect(html).toContain("A support already exists on Top face. Edit or remove it below.");
+    expect(renderPanel("supports", { study, selectedFace: displayModel.faces[0]! })).not.toContain("already exists on");
+  });
+
+  test("no longer offers the unimplemented prescribed-displacement support type (D1)", () => {
+    expect(rightPanelSource).not.toContain('<option value="prescribed_displacement">Prescribed displacement</option>');
+    expect(rightPanelSource).toContain("Prescribed displacement (not supported yet)");
+  });
+
+  test("announces preview-only STL/OBJ geometry on the Mesh step and disables meshing (D6)", () => {
+    const stlModel: DisplayModel = { ...displayModel, visualMesh: { format: "stl", filename: "cube.stl", contentBase64: "" } };
+    const html = renderPanel("mesh", { displayModel: stlModel });
+
+    expect(html).toContain("OpenCAE cannot build a volume mesh from a triangle mesh");
+    expect(html).toMatch(/<button class="primary wide" type="button" disabled="" aria-label="Generate mesh"/);
+    expect(renderPanel("mesh")).not.toContain("triangle mesh");
+  });
+
+  test("shows the shared draft temperature so a viewer pick uses the typed value (D12)", () => {
+    const thermal = StudySchema.parse({ ...study, type: "steady_state_thermal" });
+    const html = renderPanel("supports", { study: thermal, draftSupportTemperature: 100 });
+
+    expect(html).toContain('type="number" value="100"');
+  });
+
+  test("names load-case and combination toggles for assistive technology (D22)", () => {
+    const caseStudy: Study = {
+      ...loadedStudy,
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["load-1"] }],
+      loadCombinations: [{ id: "combo-1", name: "Service", enabled: true, factors: [{ caseId: "case-default", factor: 1 }] }]
+    };
+    const html = renderPanel("loads", { study: caseStudy, onLoadCasesChange: vi.fn() });
+
+    expect(html).toContain('aria-label="Enable load case Default"');
+    expect(html).toContain('aria-label="Enable combination Service"');
+  });
+
+  test("drops the direction phrase for thermal loads, which have none (D21)", () => {
+    const thermal = StudySchema.parse({
+      ...study,
+      type: "steady_state_thermal",
+      loads: [{ id: "flux-1", type: "heat_flux", selectionRef: "selection-top", parameters: { value: 10000, units: "W/m²" }, status: "complete" }]
+    });
+    const html = renderPanel("loads", { study: thermal });
+
+    expect(html).toContain("Surface heat flux");
+    expect(html).not.toContain("direction");
+  });
 });

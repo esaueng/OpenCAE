@@ -75,6 +75,7 @@ function SimulationTypePicker({ onCreateStatic, onCreateDynamic, onCreateModal, 
               className={`simulation-choice-card ${selectedType === option.type ? "active" : ""}`}
               type="button"
               aria-pressed={selectedType === option.type}
+              aria-label={`${option.title}. ${option.summary}`}
               onClick={() => setSelectedType(option.type)}
               onDoubleClick={createHandlers[option.type]}
             >

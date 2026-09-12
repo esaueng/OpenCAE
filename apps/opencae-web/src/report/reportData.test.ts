@@ -190,7 +190,7 @@ describe("buildReportData", () => {
 
     expect(data.pageFormat).toBe("letter");
     expect(data.keyResults).toContainEqual({ label: "Max von Mises stress", value: "20.6 ksi" });
-    expect(data.keyResults).toContainEqual({ label: "Max displacement", value: "0.007 in" });
+    expect(data.keyResults).toContainEqual({ label: "Max displacement", value: "0.007244 in" });
     expect(data.keyResults).toContainEqual({ label: "Reaction force", value: "112.4 lbf" });
     expect(data.materials.rows[0]?.[1]).toContain("ksi");
     expect(data.materials.rows[0]?.[3]).toContain("lb/in^3");
