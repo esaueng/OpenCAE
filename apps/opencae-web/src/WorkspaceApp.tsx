@@ -28,6 +28,7 @@ import { buildLocalProjectFile, portableResultBundle, suggestedProjectFilename, 
 import type { ConvergenceProbe } from "./meshConvergence";
 import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
+import { isPreviewOnlyGeometry } from "./geometryFormats";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -229,6 +230,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
   const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
   const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
+  const [draftSupportTemperature, setDraftSupportTemperature] = useState(20);
   const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
   const [draftPayloadPreview, setDraftPayloadPreview] = useState<{ value: number; metadata: PayloadLoadMetadata } | null>(null);
   const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
@@ -516,8 +518,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
   const hasActualVolumeMesh = Boolean(study?.meshSettings.summary?.artifacts?.actualCoreModel);
   const openStepNeedsRepair = stepGeometryNeedsRepair(project) && !hasActualVolumeMesh;
-  const effectiveMissingRunItems = openStepNeedsRepair ? [...missingRunItems, "Closed STEP solid"] : missingRunItems;
-  const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair;
+  // STL/OBJ previews cannot be volume-meshed; before this gate a placeholder
+  // mesh marked the step done and the run failed blaming the browser build
+  // (2026-09 review D6).
+  const previewOnlyGeometry = isPreviewOnlyGeometry(displayModel) && !hasActualVolumeMesh;
+  const effectiveMissingRunItems = [
+    ...missingRunItems,
+    ...(openStepNeedsRepair ? ["Closed STEP solid"] : []),
+    ...(previewOnlyGeometry ? ["Meshable geometry (STEP)"] : [])
+  ];
+  const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair && !previewOnlyGeometry;
   const canUndoAction = undoStack.length > 0 && !solverRunning && !convergenceBusy;
   const canRedoAction = redoStack.length > 0 && !solverRunning && !convergenceBusy;
 
@@ -1911,7 +1921,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       id: `constraint-${crypto.randomUUID()}`,
       type: study.type === "steady_state_thermal" ? "prescribed_temperature" : "fixed",
       selectionRef: selection.id,
-      parameters: study.type === "steady_state_thermal" ? { value: 20, units: "°C" } : {},
+      // Use the temperature typed in the panel; a pick used to hard-code 20 °C
+      // and silently discard the entered value (2026-09 review D12).
+      parameters: study.type === "steady_state_thermal" ? { value: Number.isFinite(draftSupportTemperature) ? draftSupportTemperature : 20, units: "°C" } : {},
       status: "complete"
     };
     await updateStudy(
@@ -2450,7 +2462,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
                 </button>
                 <KeyboardShortcutGuide />
                 <label className="shortcut-toggle">
-                  <input type="checkbox" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
+                  <input type="checkbox" aria-label="Single-key shortcuts" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
                   <span>
                     <strong>Single-key shortcuts</strong>
                     <small>Enable N, B, and H when you are not typing in a field.</small>
@@ -2652,6 +2664,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           sampleAnalysisType={sampleAnalysisType}
           draftLoadType={draftLoadType}
           draftLoadValue={draftLoadValue}
+          draftSupportTemperature={draftSupportTemperature}
+          onDraftSupportTemperatureChange={setDraftSupportTemperature}
           draftLoadDirection={draftLoadDirection}
           selectedLoadPoint={selectedLoadPoint}
           selectedPayloadObject={selectedPayloadObject}

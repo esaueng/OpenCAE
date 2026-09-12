@@ -2,6 +2,7 @@ import { finiteExtrema, type FiniteExtrema } from "@opencae/core";
 import { isModalResultSummary, isStructuralResultSummary, isThermalResultSummary } from "@opencae/schema";
 import type { DisplayFace, ResultField, ResultSummary, StructuralResultSummary } from "@opencae/schema";
 import { semanticResultFieldKey, stressComponentForField } from "./resultSelection";
+import { formatDisplayNumber } from "./unitDisplay";
 import type { ResultMode } from "./workspaceViewTypes";
 
 export type ResultFieldMode = "stress" | "displacement" | "safety_factor" | "velocity" | "acceleration" | "mode_shape" | "temperature" | "heat_flux";
@@ -1110,9 +1111,13 @@ function resultProbeLabel(mode: ResultFieldMode, value: number, units = "") {
   return `Stress: ${formatResultValue(value)}${unit}`;
 }
 
+/**
+ * Legend ticks and probe markers share the KPI formatter so one quantity never
+ * prints as `1.47029` in the legend and `1.47` on the card beside it.
+ */
 export function formatResultValue(value: number) {
-  if (!Number.isFinite(value) || Number.isInteger(value)) return String(value);
-  return String(Number(value.toPrecision(6)));
+  if (!Number.isFinite(value)) return String(value);
+  return formatDisplayNumber(value);
 }
 
 const SAFETY_FACTOR_DISPLAY_CAP = 10000;

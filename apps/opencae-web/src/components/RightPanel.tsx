@@ -8,7 +8,7 @@ import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolv
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 import type { RunReadinessItem } from "../runReadiness";
 import { STUDY_TYPE_LABELS, studyTypeSwitchConsequence } from "../studyTypeSwitch";
-import { GEOMETRY_FILE_ACCEPT, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
+import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, SUPPORTED_GEOMETRY_FORMAT_LABEL, isPreviewOnlyGeometry } from "../geometryFormats";
 import type { StepId } from "./StepBar";
 import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../loadPreview";
 import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../workspaceViewTypes";
@@ -23,7 +23,7 @@ import { shouldShowSampleModelPicker } from "../modelPanelState";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../settingHelp";
 import { supportDisplayLabel } from "../supportLabels";
 import { getViewportTooltipPosition } from "../tooltipPosition";
-import { defaultSolverMethodForStudy, forceForUnits, formatDensity, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
+import { defaultSolverMethodForStudy, forceForUnits, formatDensity, formatDisplayNumber, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../unitDisplay";
 import { canNavigateToStep } from "../appShellState";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { MaterialLibraryModal } from "./SimulationWorkflow";
@@ -108,6 +108,8 @@ interface RightPanelProps {
   sampleAnalysisType?: SampleAnalysisType;
   draftLoadType: LoadType;
   draftLoadValue: number;
+  /** Typed thermal boundary temperature (°C) shared with the viewer pick path. */
+  draftSupportTemperature?: number;
   draftLoadDirection: LoadDirectionLabel;
   selectedLoadPoint: LoadApplicationPoint | null;
   selectedPayloadObject: PayloadObjectSelection | null;
@@ -138,6 +140,7 @@ interface RightPanelProps {
   onRemoveSupport: (supportId: string) => void;
   onDraftLoadTypeChange: (type: LoadType) => void;
   onDraftLoadValueChange: (value: number) => void;
+  onDraftSupportTemperatureChange?: (value: number) => void;
   onDraftLoadDirectionChange: (direction: LoadDirectionLabel) => void;
   onDraftPayloadPreviewChange?: (preview: { value: number; metadata: PayloadLoadMetadata } | null) => void;
   onAddLoad: (type: LoadType, value: number, selectionRef: string | undefined, direction: LoadDirectionLabel, payloadMetadata?: PayloadLoadMetadata) => void;
@@ -318,7 +321,7 @@ function ModelPanel({ project, displayModel, study, viewMode, showDimensions, se
       {isBlankProject ? (
         <Callout>Upload {SUPPORTED_GEOMETRY_FORMAT_LABEL} to import a model. STL and OBJ files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
       ) : isUploadedProject ? (
-        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview.` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`}</Callout>
+        <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview. ${PREVIEW_ONLY_GEOMETRY_NOTICE}` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`}</Callout>
       ) : null}
     </>
   );
@@ -614,6 +617,7 @@ function MaterialPanel({ project, displayModel, study, onAssignMaterial, onSaveC
               type="button"
               role="radio"
               aria-checked={active}
+              aria-label={`${process.label}. ${process.description}`}
               onClick={() => handleProcessChange(process.id)}
             >
               <span className="material-process-radio" aria-hidden="true">{active ? <Check size={14} /> : null}</span>
@@ -739,17 +743,29 @@ function ManufacturingProcessIcon({ processId }: { processId: ManufacturingProce
   return <Layers3 size={18} aria-hidden="true" />;
 }
 
-function SupportsPanel({ selectedFace, study, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
+function SupportsPanel({ selectedFace, study, draftSupportTemperature, onDraftSupportTemperatureChange, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const thermal = study.type === "steady_state_thermal";
-  const [temperature, setTemperature] = useState(20);
+  // The draft temperature lives in the workspace so a viewer pick uses the
+  // typed value too (2026-09 review D12); fall back to local state for callers
+  // that do not supply it.
+  const [localTemperature, setLocalTemperature] = useState(20);
+  const temperature = draftSupportTemperature ?? localTemperature;
+  const setTemperature = onDraftSupportTemperatureChange ?? setLocalTemperature;
   const addLabel = thermal ? "Add prescribed temperature" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
+  // The panel button used to stack a second support on a face that already
+  // had one; the viewer-click path already refused that (2026-09 review D2).
+  const existingOnSelection = selectedFromViewport ? study.constraints.find((support) => support.selectionRef === selectedFromViewport.id) : undefined;
+  const duplicateSupportError = existingOnSelection
+    ? `${thermal ? "A temperature boundary" : "A support"} already exists on ${selectedFromViewport?.name ?? "this face"}. Edit or remove it below.`
+    : null;
   return (
     <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."} study={study}>
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
-      <button className="outline-action wide" disabled={!selectedFromViewport || (thermal && !Number.isFinite(temperature))} onClick={() => selectedFromViewport && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : { type: "fixed" })}><Plus size={18} />{addLabel}</button>
+      {duplicateSupportError && <p className="field-error" role="alert">{duplicateSupportError}</p>}
+      <button className="outline-action wide" disabled={!selectedFromViewport || Boolean(duplicateSupportError) || (thermal && !Number.isFinite(temperature))} title={duplicateSupportError ?? undefined} onClick={() => selectedFromViewport && !duplicateSupportError && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : { type: "fixed" })}><Plus size={18} />{addLabel}</button>
       <SupportEditorList study={study} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
       <Callout>{thermal ? "At least one prescribed temperature is required to make the conduction system unique." : "Fixed supports prevent any motion of the selected face."}</Callout>
     </Panel>
@@ -806,7 +822,19 @@ function LoadsPanel({
       : draftLoadType === "bolt_preload"
         ? Boolean(selectedFace && secondarySelectionRef)
         : Boolean(selectedFace);
-  const canAddDraftLoad = hasDraftPlacement && !draftMagnitudeError;
+  // A second click on Add stacked an identical load on the same face and
+  // silently doubled the applied force (2026-09 review D2). Refuse the exact
+  // duplicate and point at the edit form instead.
+  const duplicateLoad = placementSelection
+    ? study.loads.find((load) => load.selectionRef === placementSelection.id && load.type === draftLoadType
+        && (thermal || !selectedFace || sameLoadDirection(load.parameters.direction, directionVectorForLabel(draftLoadDirection, selectedFace, displayModel)))
+        && Number(load.parameters.value) === effectiveDraftValue)
+    : undefined;
+  const duplicateLoadError = duplicateLoad
+    ? `A ${loadTypeLabel(draftLoadType).toLowerCase()} of ${formatNumber(displayDraftLoad.value)} ${displayDraftLoad.units} is already applied to ${placementSelection?.name ?? "this face"}. Edit it to change the magnitude.`
+    : null;
+  const draftAddError = draftMagnitudeError ?? duplicateLoadError;
+  const canAddDraftLoad = hasDraftPlacement && !draftAddError;
   const payloadMetadata: PayloadLoadMetadata = draftLoadType === "gravity"
     ? {
       payloadMaterialId,
@@ -949,8 +977,8 @@ function LoadsPanel({
           ))}
         </select>
       </label>}
-      {hasDraftPlacement && draftMagnitudeError && <p className="field-error" role="alert">{draftMagnitudeError}</p>}
-      <button className="outline-action wide" disabled={!canAddDraftLoad} title={draftMagnitudeError ?? undefined} onClick={() => canAddDraftLoad && onAddLoad(
+      {hasDraftPlacement && draftAddError && <p className="field-error" role="alert">{draftAddError}</p>}
+      <button className="outline-action wide" disabled={!canAddDraftLoad} title={draftAddError ?? undefined} onClick={() => canAddDraftLoad && onAddLoad(
         draftLoadType,
         effectiveDraftValue,
         placementSelection?.id,
@@ -1090,7 +1118,7 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
           <div className="load-case-row" key={loadCase.id}>
             <input aria-label={`Load case name ${loadCase.name}`} value={loadCase.name} onChange={(event) => updateCase(loadCase.id, { name: event.currentTarget.value || "Untitled case" })} />
             <label className="toggle compact-toggle">
-              <input type="checkbox" checked={loadCase.enabled} onChange={(event) => updateCase(loadCase.id, { enabled: event.currentTarget.checked })} />
+              <input type="checkbox" aria-label={`Enable load case ${loadCase.name}`} checked={loadCase.enabled} onChange={(event) => updateCase(loadCase.id, { enabled: event.currentTarget.checked })} />
               <span>Enabled</span>
             </label>
             <small>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
@@ -1109,7 +1137,7 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
             <div className="load-combination-row" key={combination.id}>
               <input aria-label={`Combination name ${combination.name}`} value={combination.name} onChange={(event) => updateCombination(combination.id, { name: event.currentTarget.value || "Untitled combination" })} />
               <label className="toggle compact-toggle">
-                <input type="checkbox" checked={combination.enabled} onChange={(event) => updateCombination(combination.id, { enabled: event.currentTarget.checked })} />
+                <input type="checkbox" aria-label={`Enable combination ${combination.name}`} checked={combination.enabled} onChange={(event) => updateCombination(combination.id, { enabled: event.currentTarget.checked })} />
                 <span>Enabled</span>
               </label>
               {combination.factors.map((factor) => (
@@ -1201,7 +1229,9 @@ function LoadEditorList({ editingId, onEditingIdChange, study, displayModel, uni
               >
                 <span className={`item-icon load-type-icon ${load.type}`}><LoadTypeIcon type={load.type} /></span>
                 <strong>{loadLabel ? `${loadLabel} · ` : ""}{loadTypeLabel(load.type)} · {formatNumber(displayLoad.value)} {displayLoad.units}</strong>
-                <small>{label}{pointLabel} · {directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction{equivalentForce}</small>
+                <small>{load.type === "heat_flux" || load.type === "heat_generation"
+                  ? label
+                  : `${label}${pointLabel} · ${directionOptionLabel(directionLabelForLoad(load, displayModel, selectedFace))} direction${equivalentForce}`}</small>
               </button>
               {loadCases.length > 1 && (
                 <label className="load-case-assignment">
@@ -1501,7 +1531,13 @@ function SupportEditForm({ support, study, onSave, onCancel }: { support: Constr
       <label className="field">
         <HelpLabel helpId="supportType">Support type</HelpLabel>
         <select value={type} onChange={(event) => setType(event.currentTarget.value as Constraint["type"])}>
-          {thermal ? <option value="prescribed_temperature">Prescribed temperature</option> : <><option value="fixed">Fixed support</option><option value="prescribed_displacement">Prescribed displacement</option></>}
+          {thermal
+            ? <option value="prescribed_temperature">Prescribed temperature</option>
+            : <>
+              <option value="fixed">Fixed support</option>
+              {/* Prescribed displacement is not implemented by the solver (2026-09 review D1); keep it visible only for a study that already carries one. */}
+              {support.type === "prescribed_displacement" && <option value="prescribed_displacement">Prescribed displacement (not supported yet)</option>}
+            </>}
         </select>
       </label>
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
@@ -1538,12 +1574,13 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
   const hasVerifiedMeshSummary = meshSummary?.source === "core_solver" || meshSummary?.source === "wasm_gmsh";
   const stepGeometry = stepGeometryMetadataForProject(project);
   const stepGeometryResolvedByMesh = Boolean(study.meshSettings.summary?.artifacts?.actualCoreModel);
+  const previewOnlyGeometry = isPreviewOnlyGeometry(displayModel) && !stepGeometryResolvedByMesh;
   const staticStudy = study.type === "static_stress" ? study : null;
   const convergenceCases = staticStudy ? structuralLoadCasesForPanel(staticStudy).filter((loadCase) => loadCase.enabled && loadCase.loadIds.length) : [];
   const [convergenceCaseId, setConvergenceCaseId] = useState(convergenceCases[0]?.id ?? "");
   const initialProbe = staticStudy && convergenceCaseId ? defaultConvergenceProbe(staticStudy, convergenceCaseId, displayModel) : null;
   const [probeCoordinates, setProbeCoordinates] = useState<[string, string, string]>(() => initialProbe
-    ? initialProbe.point.map((value) => String(value)) as [string, string, string]
+    ? initialProbe.point.map(seedProbeCoordinate) as [string, string, string]
     : ["", "", ""]);
   const [probeEdited, setProbeEdited] = useState(false);
   useEffect(() => {
@@ -1551,7 +1588,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
     const caseId = convergenceCases.some((loadCase) => loadCase.id === convergenceCaseId) ? convergenceCaseId : convergenceCases[0]!.id;
     if (caseId !== convergenceCaseId) setConvergenceCaseId(caseId);
     const probe = defaultConvergenceProbe(staticStudy, caseId, displayModel);
-    setProbeCoordinates(probe ? probe.point.map((value) => String(value)) as [string, string, string] : ["", "", ""]);
+    setProbeCoordinates(probe ? probe.point.map(seedProbeCoordinate) as [string, string, string] : ["", "", ""]);
     setProbeEdited(false);
   }, [displayModel, staticStudy?.id, staticStudy?.loads, staticStudy?.loadCases, convergenceCaseId]);
   const probePoint = probeCoordinates.map(Number) as [number, number, number];
@@ -1568,7 +1605,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
     setConvergenceCaseId(caseId);
     if (!staticStudy) return;
     const probe = defaultConvergenceProbe(staticStudy, caseId, displayModel);
-    setProbeCoordinates(probe ? probe.point.map((value) => String(value)) as [string, string, string] : ["", "", ""]);
+    setProbeCoordinates(probe ? probe.point.map(seedProbeCoordinate) as [string, string, string] : ["", "", ""]);
     setProbeEdited(false);
   }
 
@@ -1611,11 +1648,13 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
           {connectionType === "contact" && <Callout>Small-sliding, frictionless node-to-surface penalty contact. Large sliding and friction are outside this beta.</Callout>}
         </section>
       ) : null}
+      {previewOnlyGeometry && <p className="panel-warning" role="alert">{PREVIEW_ONLY_GEOMETRY_NOTICE}</p>}
       <button
         className="primary wide"
         type="button"
-        disabled={convergenceBusy || (meshing && !onCancelMesh)}
+        disabled={convergenceBusy || previewOnlyGeometry || (meshing && !onCancelMesh)}
         aria-label={meshing ? "Stop mesh generation" : "Generate mesh"}
+        title={previewOnlyGeometry ? PREVIEW_ONLY_GEOMETRY_NOTICE : undefined}
         onClick={() => meshing ? onCancelMesh?.() : onGenerateMesh(preset)}
       >
         {meshing ? <X size={18} /> : <Grid3X3 size={18} />}
@@ -1661,7 +1700,7 @@ function MeshPanel({ project, displayModel, study, onGenerateMesh, onConnections
           <p className="panel-copy mesh-progress-message" aria-live="polite">{meshPhaseProgress.message}</p>
         </>
       )}
-      <Callout>{capitalize(preset)} creates a {meshPresetDescription(preset)}.</Callout>
+      <Callout>{capitalize(preset)} creates {meshPresetDescription(preset)}.</Callout>
       {meshSummary && (
         <div className="summary-box">
           {hasVerifiedMeshSummary ? (
@@ -2091,10 +2130,10 @@ function formatEditableNumberValue(value: number): string {
 }
 
 function meshPresetDescription(preset: MeshQuality) {
-  if (preset === "coarse") return "fast preview mesh for early setup checks";
-  if (preset === "medium") return "good balance between accuracy and speed";
-  if (preset === "fine") return "denser mesh for more detailed result gradients";
-  return "ultra-dense local analysis samples for granular contour gradients";
+  if (preset === "coarse") return "a fast preview mesh for early setup checks";
+  if (preset === "medium") return "a good balance between accuracy and speed";
+  if (preset === "fine") return "a denser mesh for more detailed result gradients";
+  return "an ultra-dense mesh for the finest contour gradients";
 }
 
 function solverFidelityForStudy(study: Study): SimulationFidelity {
@@ -2137,8 +2176,27 @@ function formatDurationSeconds(milliseconds: number): string {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
+/**
+ * Convergence probe inputs are seeded from face centroids, which carry float
+ * dust (-4.549e-12). A narrow number input clips that to "-4.5494", which reads
+ * as a real coordinate; seed at display precision instead.
+ */
+/** Two stored load directions count as the same when their unit vectors agree within ~2.5°. */
+function sameLoadDirection(stored: unknown, draft: readonly number[]): boolean {
+  if (!Array.isArray(stored) || stored.length !== 3 || !stored.every((value) => Number.isFinite(value))) return false;
+  const norm = (vector: readonly number[]) => Math.hypot(vector[0] ?? 0, vector[1] ?? 0, vector[2] ?? 0) || 1;
+  const dot = ((stored[0] as number) * (draft[0] ?? 0) + (stored[1] as number) * (draft[1] ?? 0) + (stored[2] as number) * (draft[2] ?? 0)) / (norm(stored as number[]) * norm(draft));
+  return dot > 0.999;
+}
+
+function seedProbeCoordinate(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  const rounded = Number(value.toPrecision(4));
+  return String(Math.abs(rounded) < 1e-9 ? 0 : rounded);
+}
+
 function formatProbeReading(probe: ResolvedResultProbe): string {
-  const value = Number.isFinite(probe.value) ? String(Number(probe.value.toPrecision(6))) : "Unavailable";
+  const value = Number.isFinite(probe.value) ? formatDisplayNumber(probe.value) : "Unavailable";
   return `${value}${probe.units ? ` ${probe.units}` : ""}`;
 }
 
@@ -2160,6 +2218,7 @@ function ResultsPanel(props: RightPanelProps) {
 }
 
 function ThermalResultsPanelContent({
+  project,
   study,
   resultSummary,
   resultMode,
@@ -2189,6 +2248,9 @@ function ThermalResultsPanelContent({
         { label: "Maximum temperature", value: formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits) },
         { label: "Maximum heat flux", value: formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits) }
       ]} />
+      {project.unitSystem === "US" && (
+        <p className="muted">Imperial display converts temperatures only. Heat flux and heat rates stay in {resultSummary.heatFluxUnits} and W.</p>
+      )}
       <div className="summary-box">
         <Info label="Energy balance error" value={formatResultMetric(resultSummary.energyBalanceRelativeError * 100, "%")} />
       </div>
@@ -2266,6 +2328,7 @@ function ModalResultsPanelContent({
             key={mode.modeIndex}
             type="button"
             aria-pressed={mode.modeIndex === selectedModeIndex}
+            aria-label={`Mode ${mode.modeIndex}, ${Number(mode.frequencyHz.toPrecision(6))} Hz`}
             className={mode.modeIndex === selectedModeIndex ? "primary" : "secondary"}
             onClick={() => onSelectedModeIndexChange?.(mode.modeIndex)}
           >
@@ -2640,7 +2703,7 @@ function ResultsPanelContent({
           <span>Run variant</span>
           <select value={activeResultVariantId} onChange={(event) => void onResultVariantChange?.(event.currentTarget.value)}>
             {resultVariants.map((variant) => (
-              <option key={variant.id} value={variant.id}>{variant.name}{variant.kind === "envelope" ? " · envelope" : ""}</option>
+              <option key={variant.id} value={variant.id}>{variant.name}{variant.kind === "envelope" && !/envelope/i.test(variant.name) ? " · envelope" : ""}</option>
             ))}
           </select>
         </label>
@@ -2702,6 +2765,7 @@ function ResultsPanelContent({
           <label className="toggle playback-loop-toggle">
             <input
               type="checkbox"
+              aria-label="Reverse loop"
               checked={resultPlaybackReverseLoop}
               onChange={(event) => onResultPlaybackReverseLoopChange?.(event.currentTarget.checked)}
             />
@@ -2772,7 +2836,7 @@ function ResultsPanelContent({
             <button className={resultColorScaleControl.setting.bands === "continuous" ? "active" : ""} type="button" aria-pressed={resultColorScaleControl.setting.bands === "continuous"} onClick={() => updateColorScaleSetting({ bands: "continuous" })}>Continuous</button>
             <button className={resultColorScaleControl.setting.bands === "bands8" ? "active" : ""} type="button" aria-pressed={resultColorScaleControl.setting.bands === "bands8"} onClick={() => updateColorScaleSetting({ bands: "bands8" })}>8 bands</button>
           </div>
-          <small>{`Automatic run range: ${Number(resultColorScaleControl.automaticMin.toPrecision(6))}–${Number(resultColorScaleControl.automaticMax.toPrecision(6))}${resultColorScaleControl.units ? ` ${resultColorScaleControl.units}` : ""}`}</small>
+          <small>{`Automatic run range: ${formatDisplayNumber(resultColorScaleControl.automaticMin)}–${formatDisplayNumber(resultColorScaleControl.automaticMax)}${resultColorScaleControl.units ? ` ${resultColorScaleControl.units}` : ""}`}</small>
         </section>
       )}
       {(resultProbes.length > 0 || resultProbeLimitReached) && (
@@ -2815,7 +2879,7 @@ function ResultsPanelContent({
           />
         </label>
       )}
-      <label className="toggle"><input type="checkbox" checked={showDeformed && !blockPreviewResults} disabled={blockPreviewResults} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
+      <label className="toggle"><input type="checkbox" aria-label="Deformed shape" checked={showDeformed && !blockPreviewResults} disabled={blockPreviewResults} onChange={onToggleDeformed} /> <HelpLabel helpId="deformedShape">Deformed shape</HelpLabel></label>
       {blockPreviewResults && <p className="panel-warning">{PREVIEW_GEOMETRY_WARNING}</p>}
       {legacyResultWarning && <p className="panel-warning">{legacyResultWarning}</p>}
       {reactionForceInvalid && <p className="panel-warning">{INVALID_REACTION_WARNING}</p>}
@@ -2912,21 +2976,22 @@ export function playbackPeakMarkerPercent(frames: Array<{ frameIndex: number; ti
 }
 
 export function resultModeExplanation(resultMode: ResultMode): string {
+  // The safety-factor ramp runs the other way (SAFETY_RAMP: red at low factors,
+  // green at high) and has no blue, so the generic sentence would be inverted.
+  if (resultMode === "safety_factor") return "Red areas are closest to yield (low safety factor). Green areas have the most margin.";
   const field = resultMode === "displacement"
     ? "displacement magnitude"
     : resultMode === "velocity"
       ? "velocity magnitude"
       : resultMode === "acceleration"
         ? "acceleration magnitude"
-        : resultMode === "safety_factor"
-          ? "safety factor"
-          : resultMode === "temperature"
-            ? "temperature"
-            : resultMode === "heat_flux"
-              ? "heat flux"
-              : resultMode === "mode_shape"
-                ? "normalized mode-shape amplitude"
-          : "stress";
+        : resultMode === "temperature"
+          ? "temperature"
+          : resultMode === "heat_flux"
+            ? "heat flux"
+            : resultMode === "mode_shape"
+              ? "normalized mode-shape amplitude"
+              : "stress";
   return `Red areas have higher ${field}. Blue areas have lower ${field}.`;
 }
 

@@ -159,7 +159,8 @@ Dependency notes:
 | 024 Codebase Health and Solver Capability Roadmap | PROPOSED | Release train for correctness/limits/CI, raw result export, backend retirement, solver benchmarking, dependency/UI modernization, harmonic response, buckling, shells, and beams. |
 | 025 Cleanup and Refinement Pass | PARTIALLY LANDED | Stage 1 landed: `main` CI is green again (golden-parity re-toleranced off the CG stopping criterion; the stale playback source-text assertion replaced). Remaining stages — local API structural cleanup, dead-code removal, one stacking scale, dependency/documentation — not confirmed here. |
 | 026 End-to-End QA Remediation | COMPLETE | Eleven live-verified defects from the E2E testing report: imperial display rounding to zero, an unwired domain validator behind the Run gate, undo/redo persistence, invalid dynamic drafts, four accessibility repairs, the start-screen flash, upload copy, and lazy/precache budgets. |
-| 027 UI/UX Overhaul | PROPOSED | Restructure-not-re-skin plan from a seven-step survey: Plex-on-screen decision, panel information architecture (Model/Material/Loads/Mesh/Results), viewer and status-bar chrome, and the deferred copy sweep. |
+| 027 UI/UX Overhaul | COMPLETE | Increments A (Plex on screen), B (panel information architecture), D (copy sweep) and E (analysis-type switch warning) merged 2026-09-05 as PRs #102–#105; C (viewer chrome) withdrawn after measurement. |
+| 028 Interaction Review Remediation | IN PROGRESS | Twenty-six live-verified defects from the 2026-09-12 design and interaction review, staged: Stage 0 setup guards and number/word fixes (this branch), Stage 1 feedback layer, Stage 2 selection and mesh visibility, Stage 3 product decisions. |
 
 Run 2 was non-interactive: plans 006–010 are the top findings by leverage (impact ÷ effort, confidence-weighted), selected by default per the advisor skill's non-interactive rule rather than by maintainer choice. Re-cut as desired.
 

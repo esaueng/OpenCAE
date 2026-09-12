@@ -84,6 +84,38 @@ describe("validateStaticStressStudy", () => {
     ]));
   });
 
+  it("blocks the run for a support type the solver does not implement", () => {
+    // 2026-09 review D1: a prescribed displacement passed the gate, was skipped
+    // by the adapter, and surfaced as a misleading face-mapping mesh error.
+    const study: Study = {
+      ...readyStudy,
+      constraints: [{ id: "pd-1", type: "prescribed_displacement", selectionRef: "face", parameters: {}, status: "complete" }]
+    };
+
+    expect(validateStudy(study).map((item) => item.message)).toEqual([
+      "Support pd-1 uses a prescribed displacement, which this solver does not support yet. Change it to a fixed support or remove it."
+    ]);
+    expect(validateStudy({ ...study, type: "modal_analysis", solverSettings: { modeCount: 6 } } as Study).map((item) => item.id)).toContain("validation-support-unsupported-pd-1");
+  });
+
+  it("flags an enabled load case that carries no loads", () => {
+    // 2026-09 review D10: an empty enabled case solved to numerical noise and
+    // was reported as "Unlikely to yield" with a safety factor of 2.8e12.
+    const study: Study = {
+      ...readyStudy,
+      loadCases: [
+        { id: "case-default", name: "Default", enabled: true, loadIds: ["force"] },
+        { id: "case-2", name: "Case 2", enabled: true, loadIds: [] }
+      ]
+    };
+
+    expect(validateStaticStressStudy(study).map((item) => item.message)).toEqual([
+      "Load case Case 2 is enabled but has no loads. Add a load to it or disable it."
+    ]);
+    // A disabled empty case is fine, and so is an empty Default case before any load exists.
+    expect(validateStaticStressStudy({ ...study, loadCases: [study.loadCases![0]!, { ...study.loadCases![1]!, enabled: false }] })).toEqual([]);
+  });
+
   it("rejects a zero-length load direction", () => {
     const study = {
       ...readyStudy,

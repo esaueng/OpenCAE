@@ -195,7 +195,7 @@ describe("resultSamplesForFaces", () => {
     ];
 
     expect(resultProbeSamplesForFaces(cantileverFaces, fields, "displacement").map((probe) => [probe.tone, probe.face.id, probe.label])).toEqual([
-      ["max", "face-load-top", "Disp: 12.559 mm"],
+      ["max", "face-load-top", "Disp: 12.56 mm"],
       ["mid", "face-web-front", "Disp: 4.384 mm"],
       ["min", "face-base-left", "Disp: 0.131 mm"]
     ]);

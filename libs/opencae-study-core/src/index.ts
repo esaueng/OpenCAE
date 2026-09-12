@@ -1,4 +1,4 @@
-import type { CustomMaterial, Diagnostic, DisplayModel, DynamicSolverSettings, Load, ModalSolverSettings, Study } from "@opencae/schema";
+import type { Constraint, CustomMaterial, Diagnostic, DisplayModel, DynamicSolverSettings, Load, ModalSolverSettings, Study } from "@opencae/schema";
 import { manufacturingProcessCompatibilityError, resolveMaterial } from "@opencae/materials";
 
 export type PrintCriticalAxis = "x" | "y" | "z";
@@ -58,6 +58,7 @@ export function validateStaticStressStudy(study: Study, customMaterials: readonl
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
+  diagnostics.push(...unsupportedSupportDiagnostics(study));
   if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
   diagnostics.push(...structuralVariantDiagnostics(study));
   for (const load of study.loads) {
@@ -136,6 +137,7 @@ export function validateModalStudy(study: Extract<Study, { type: "modal_analysis
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-modal-support", "Add at least one support for modal analysis."));
+  diagnostics.push(...unsupportedSupportDiagnostics(study));
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
   if (!Number.isInteger(settings.modeCount) || settings.modeCount < 1 || settings.modeCount > 10) {
     diagnostics.push(issue("validation-modal-mode-count", "Modal mode count must be from 1 through 10."));
@@ -173,6 +175,7 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
   if (study.constraints.length === 0 && solverSettings.allowFreeMotion !== true) {
     diagnostics.push(issue("validation-dynamic-support", "Add at least one support or enable free motion for the dynamic run."));
   }
+  diagnostics.push(...unsupportedSupportDiagnostics(study));
   if (!(solverSettings.endTime > solverSettings.startTime)) {
     diagnostics.push(issue("validation-dynamic-end-time", "Dynamic end time must be greater than start time."));
   }
@@ -188,6 +191,23 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
     diagnostics.push(issue("validation-dynamic-damping", "Dynamic damping ratio cannot be negative."));
   }
   return diagnostics;
+}
+
+/**
+ * Support types the solver adapter does not implement yet. A "prescribed
+ * displacement" constraint used to pass the run gate (readiness only counted
+ * constraints), then the adapter silently skipped it and the mesh stage failed
+ * with a face-mapping error that pointed the user at the wrong cause.
+ */
+const UNSUPPORTED_STRUCTURAL_SUPPORT_TYPES = new Set<Constraint["type"]>(["prescribed_displacement"]);
+
+function unsupportedSupportDiagnostics(study: Study): Diagnostic[] {
+  return study.constraints
+    .filter((constraint) => UNSUPPORTED_STRUCTURAL_SUPPORT_TYPES.has(constraint.type))
+    .map((constraint) => issue(
+      `validation-support-unsupported-${constraint.id}`,
+      `Support ${constraint.id} uses a prescribed displacement, which this solver does not support yet. Change it to a fixed support or remove it.`
+    ));
 }
 
 function structuralVariantDiagnostics(study: Study): Diagnostic[] {
@@ -216,6 +236,16 @@ function structuralVariantDiagnostics(study: Study): Diagnostic[] {
   }
   if (study.loads.length > 0 && !loadCases.some((loadCase) => loadCase.enabled && loadCase.loadIds.length > 0)) {
     diagnostics.push(issue("validation-load-case-enabled", "Enable at least one non-empty load case."));
+  }
+  // An enabled case with no loads still solves, and its numerical-noise result
+  // was reported as a verdict ("Unlikely to yield, safety factor 2.8e12"). Only
+  // flag it once the study has loads, so a fresh Default case is not double-reported.
+  if (study.loads.length > 0) {
+    for (const loadCase of loadCases) {
+      if (loadCase.enabled && loadCase.loadIds.length === 0) {
+        diagnostics.push(issue(`validation-load-case-empty-${loadCase.id}`, `Load case ${loadCase.name} is enabled but has no loads. Add a load to it or disable it.`));
+      }
+    }
   }
   const combinations = study.loadCombinations ?? [];
   if (study.type === "dynamic_structural" && combinations.length) {

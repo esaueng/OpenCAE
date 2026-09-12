@@ -127,6 +127,8 @@ type ModelPickHandlers = {
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
 const MAX_A11Y_FACE_BUTTONS = 256;
+/** Pointer travel (px) between down and up beyond which a viewer click is an orbit drag, not a pick. */
+export const VIEWER_CLICK_DRAG_THRESHOLD_PX = 4;
 export const VIEWER_GIZMO_ALIGNMENT = "bottom-right";
 export const VIEWER_GIZMO_MARGIN: [number, number] = [112, 112];
 export const VIEWER_GIZMO_SCALE = 40;
@@ -1769,6 +1771,10 @@ function BracketModel({
       setSnapResult(null);
     },
     onClick: (event) => {
+      // R3F dispatches onClick to any object hit at both pointer-down and
+      // pointer-up regardless of travel, so an orbit drag that starts and ends
+      // on the same face would place a support. Treat travel as a drag.
+      if (event.delta > VIEWER_CLICK_DRAG_THRESHOLD_PX) return;
       const hit = hitFromEvent(event, true);
       if (!hit) return;
       event.stopPropagation();
@@ -1783,6 +1789,7 @@ function BracketModel({
     },
     onClick: (event) => {
       if (!isSnapOverlayObject(event.object)) return;
+      if (event.delta > VIEWER_CLICK_DRAG_THRESHOLD_PX) return;
       const hit = hoveredHit ?? selectedHit;
       if (!hit) return;
       event.stopPropagation();
