@@ -42,6 +42,7 @@ interface CadViewerProps {
   importingModelFilename?: string;
   activeStep: StepId;
   selectedFaceId: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   payloadObjectSelectionMode: boolean;
   selectedPayloadObject: PayloadObjectSelection | null;
   onViewerMiss: () => void;
@@ -132,6 +133,11 @@ type ModelPickHandlers = {
   onPointerOut?: () => void;
   onClick?: (event: ThreeEvent<MouseEvent>) => void;
 };
+/** A face that carries a support or load, tinted in its marker colour (2026-09 review F2). */
+export interface ViewerFaceTint {
+  faceId: string;
+  color: string;
+}
 const MAX_A11Y_FACE_BUTTONS = 256;
 /** Pointer travel (px) between down and up beyond which a viewer click is an orbit drag, not a pick. */
 export const VIEWER_CLICK_DRAG_THRESHOLD_PX = 4;
@@ -362,6 +368,7 @@ export function CadViewer(props: CadViewerProps) {
           resultMode={props.resultMode}
           resultPlaybackPlaying={props.resultPlaybackPlaying}
           selectedFaceId={props.selectedFaceId}
+          assignedFaceTints={props.assignedFaceTints}
           selectedPayloadObject={props.selectedPayloadObject}
           sectionPlane={props.sectionPlane}
           showDeformed={effectiveShowDeformed}
@@ -579,6 +586,7 @@ function ViewerInvalidator({
   resultMode: ResultMode;
   resultPlaybackPlaying: boolean;
   selectedFaceId: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   selectedPayloadObject: PayloadObjectSelection | null;
   sectionPlane: SectionPlaneState;
   showDeformed: boolean;
@@ -1676,6 +1684,7 @@ function BracketModel({
   displayModel,
   activeStep,
   selectedFaceId,
+  assignedFaceTints,
   payloadObjectSelectionMode,
   selectedPayloadObject,
   onSelectFace,
@@ -1723,7 +1732,10 @@ function BracketModel({
     const bounds = dimensionBoundsForDisplayModel(displayModel);
     if (!bounds) return new Map<string, [number, number, number]>();
     const anchors: LabelAnchor[] = [
-      ...loadMarkers.filter((marker) => marker.type === "gravity").map((marker) => {
+      // Every load takes a laid-out callout, not only payload masses: two
+      // forces on one face used to print their labels on top of each other
+      // (2026-09 review D20).
+      ...loadMarkers.map((marker) => {
         const face = displayModel.faces.find((item) => item.id === marker.faceId);
         return face ? { id: boundaryLabelKey("load", marker.id), anchor: loadMarkerAnchor(marker, face) } : null;
       }),
@@ -1860,6 +1872,7 @@ function BracketModel({
             enableHoleWallPicking={activeStep === "supports"}
             activePayloadObjectId={activePayloadObjectId}
             selectedFaceId={selectedFaceId}
+        assignedFaceTints={assignedFaceTints}
             onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
             onUploadedPreviewBounds={onUploadedPreviewBounds}
           /></group>
@@ -2575,7 +2588,7 @@ function stepPreviewMeshIndexFor(object: THREE.Object3D): number | null {
   return null;
 }
 
-function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRegistry, record: import("../stepFaces").StepFaceRecord): THREE.Mesh {
+function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRegistry, record: import("../stepFaces").StepFaceRecord, color = "#4da3ff", opacity = 0.42): THREE.Mesh {
   const meshData = registry.meshes[record.meshIndex]!;
   const [first, last] = record.triangleRange;
   const triangleCount = last - first + 1;
@@ -2591,9 +2604,9 @@ function createStepFaceHighlightMesh(registry: import("../stepFaces").StepFaceRe
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   const material = new THREE.MeshBasicMaterial({
-    color: "#4da3ff",
+    color,
     transparent: true,
-    opacity: 0.42,
+    opacity,
     depthWrite: false,
     side: THREE.DoubleSide,
     polygonOffset: true,
@@ -2724,6 +2737,7 @@ function SampleSolid({
   enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
+  assignedFaceTints,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -2734,6 +2748,7 @@ function SampleSolid({
   enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -2747,6 +2762,7 @@ function SampleSolid({
         enableHoleWallPicking={enableHoleWallPicking}
         activePayloadObjectId={activePayloadObjectId}
         selectedFaceId={selectedFaceId}
+        assignedFaceTints={assignedFaceTints}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -2822,6 +2838,7 @@ function UploadedSolid({
   enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
+  assignedFaceTints,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -2831,6 +2848,7 @@ function UploadedSolid({
   enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -2843,6 +2861,7 @@ function UploadedSolid({
         enableHoleWallPicking={enableHoleWallPicking}
         activePayloadObjectId={activePayloadObjectId}
         selectedFaceId={selectedFaceId}
+        assignedFaceTints={assignedFaceTints}
         onMeasureDisplayModelDimensions={onMeasureDisplayModelDimensions}
         onUploadedPreviewBounds={onUploadedPreviewBounds}
       />
@@ -2860,6 +2879,7 @@ function UploadedNativeCadModel({
   enableHoleWallPicking,
   activePayloadObjectId,
   selectedFaceId,
+  assignedFaceTints,
   onMeasureDisplayModelDimensions,
   onUploadedPreviewBounds
 }: {
@@ -2869,6 +2889,7 @@ function UploadedNativeCadModel({
   enableHoleWallPicking?: boolean;
   activePayloadObjectId?: string;
   selectedFaceId?: string | null;
+  assignedFaceTints?: ViewerFaceTint[];
   onMeasureDisplayModelDimensions?: (dimensions: NonNullable<DisplayModel["dimensions"]>) => void;
   onUploadedPreviewBounds?: (bounds: THREE.Box3) => void;
 }) {
@@ -2895,6 +2916,35 @@ function UploadedNativeCadModel({
       cancelled = true;
     };
   }, [nativeCadContentBase64]);
+
+  // Faces that carry a support or load stay tinted in the marker colour, so
+  // an assignment is visible on the model itself and not only as a callout
+  // label; before, only the transient selection was highlighted (2026-09 review F2).
+  useEffect(() => {
+    const api = stepFacesApi;
+    const target = preview.object;
+    if (!api || !nativeCadContentBase64 || !target || !assignedFaceTints?.length) return undefined;
+    const registry = api.peekStepFaceRegistryForBase64(nativeCadContentBase64);
+    if (!registry) return undefined;
+    const attached: Array<{ parent: THREE.Mesh; highlight: THREE.Mesh }> = [];
+    for (const tint of assignedFaceTints) {
+      if (!api.isStepFaceId(tint.faceId) || tint.faceId === selectedFaceId) continue;
+      const record = api.stepFaceRecordForId(registry, tint.faceId);
+      if (!record) continue;
+      const parent = target.children[record.meshIndex];
+      if (!(parent instanceof THREE.Mesh)) continue;
+      const highlight = createStepFaceHighlightMesh(registry, record, tint.color, 0.3);
+      parent.add(highlight);
+      attached.push({ parent, highlight });
+    }
+    return () => {
+      for (const { parent, highlight } of attached) {
+        parent.remove(highlight);
+        highlight.geometry.dispose();
+        (highlight.material as THREE.Material).dispose();
+      }
+    };
+  }, [assignedFaceTints, nativeCadContentBase64, preview.object, selectedFaceId, stepRegistryVersion]);
 
   useEffect(() => {
     const api = stepFacesApi;

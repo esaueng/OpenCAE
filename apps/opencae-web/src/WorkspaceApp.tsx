@@ -34,6 +34,7 @@ import { geometryReplacementLosses } from "./geometryReplacement";
 import { GeometryReplaceDialog } from "./components/GeometryReplaceDialog";
 import { sampleOptionFor } from "./components/sampleOptions";
 import { solverSurfaceMeshFromModel } from "@opencae/core";
+import type { ViewerFaceTint } from "./components/CadViewer";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -566,6 +567,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // The generated volume mesh's boundary, for the Mesh step's viewer. "Toggle
   // mesh" used to draw nothing for uploads and a decorative box for samples
   // (2026-09 review D13).
+  // Faces carrying a support (teal) or a load (amber), tinted on the model so
+  // an assignment is visible where it lives, not only as a callout (2026-09 review F2).
+  const assignedFaceTints = useMemo<ViewerFaceTint[]>(() => {
+    if (!study) return [];
+    const faceIdsFor = (selectionRef: string) => study.namedSelections.find((item) => item.id === selectionRef)?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? [];
+    const tints = new Map<string, string>();
+    for (const load of study.loads) for (const faceId of faceIdsFor(load.selectionRef)) tints.set(faceId, "#f59e0b");
+    for (const support of study.constraints) for (const faceId of faceIdsFor(support.selectionRef)) tints.set(faceId, "#2dd4bf");
+    return [...tints].map(([faceId, color]) => ({ faceId, color }));
+  }, [study]);
   const meshArtifactModel = (study?.meshSettings.summary?.artifacts as { actualCoreModel?: { model?: unknown } } | undefined)?.actualCoreModel?.model;
   const meshPreviewSurface = useMemo(() => {
     if (!meshArtifactModel) return undefined;
@@ -2323,6 +2334,16 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
       pushMessage(effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}.` : "Simulation is already running.");
       return;
     }
+    // Solver eligibility needs the model's display dimensions, which the
+    // viewer measures after its first frame. Say so instead of letting the
+    // solver refuse with "requires usable block-like display dimensions"
+    // (2026-09 review D27).
+    if (!displayModel?.dimensions) {
+      const message = "The 3D view has not finished measuring the model yet. Wait for the model to appear in the viewer, then run again.";
+      setRunError(message);
+      pushMessage(message);
+      return;
+    }
     setResultPlaybackPlaying(false);
     setRunError(null);
     pushMessage("Starting simulation run.");
@@ -2677,6 +2698,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             meshPreviewSurface={meshPreviewSurface}
             captureBusy={reportCaptureBusy}
             resultPeaks={resultPeaks}
+            assignedFaceTints={assignedFaceTints}
             resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
             resultPlaybackFrameController={resultPlaybackPlaying && resultPlaybackCacheState.status === "ready" && resultPlaybackCacheState.cache.packed ? resultPlaybackFrameControllerRef.current : undefined}
             meshSummary={solverMeshSummary ?? study.meshSettings.summary}
