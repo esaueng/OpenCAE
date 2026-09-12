@@ -103,7 +103,16 @@ describe("unit display formatting", () => {
     expect(formatDisplayNumber(151.10482851265246)).toBe("151.1");
     expect(formatDisplayNumber(20.59535875768971)).toBe("20.6");
     expect(formatDisplayNumber(2.519060156230549)).toBe("2.519");
-    expect(formatDisplayNumber(0.0012345)).toBe("0.001");
+    expect(formatDisplayNumber(0.123456)).toBe("0.123");
+  });
+
+  test("never drops below three significant digits", () => {
+    // The 2026-09 review defect: a 0.00143 mm peak displacement rendered as
+    // "0.001 mm" beside a legend and a peak row that both read 0.00143.
+    expect(formatDisplayNumber(0.00143293)).toBe("0.001433");
+    expect(formatDisplayNumber(0.0012345)).toBe("0.001235");
+    expect(formatDisplayNumber(0.0143)).toBe("0.0143");
+    expect(formatDisplayNumber(0.000958168)).toBe("0.0009582");
   });
 
   test("converts result summaries without rounding the converted magnitudes", () => {

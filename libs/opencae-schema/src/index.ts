@@ -926,9 +926,20 @@ export function assessResultFailure(summary: Pick<StructuralResultSummary, "safe
   };
 }
 
+/**
+ * Mirrors the web app's adaptive display formatter (at least three significant
+ * digits, fewer decimals at larger magnitudes) so the verdict sentence and the
+ * KPI card beside it never print the same safety factor two different ways
+ * ("128.569" against "128.6").
+ */
 function formatAssessmentNumber(value: number): string {
   if (!Number.isFinite(value)) return "unknown";
-  return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  const magnitude = Math.abs(value);
+  if (magnitude === 0) return "0";
+  if (magnitude >= 100) return value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  if (magnitude >= 10) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (magnitude >= 0.1) return value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+  return value.toLocaleString(undefined, { maximumSignificantDigits: 4 });
 }
 
 export function estimateAllowableLoadForSafetyFactor(
