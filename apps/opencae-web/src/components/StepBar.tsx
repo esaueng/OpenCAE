@@ -1,8 +1,8 @@
-import { isRunResultReadyStatus } from "@opencae/schema";
 import type { Project, Study } from "@opencae/schema";
 import { Activity, Anchor, Atom, Box, Layers3, Moon, PanelLeftClose, PanelLeftOpen, Play, Sun, Weight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { canNavigateToStep } from "../appShellState";
+import type { RunReadinessItem } from "../runReadiness";
 import type { UnitSystem } from "../unitDisplay";
 import type { ThemeMode } from "../workspaceViewTypes";
 
@@ -19,6 +19,10 @@ interface StepBarProps {
   onToggleCollapsed: () => void;
   onToggleTheme: () => void;
   onUnitSystemChange: (unitSystem: UnitSystem) => void;
+  /** Run-gate rows; a step with a blocker renders as blocked rather than done. */
+  readiness?: readonly RunReadinessItem[];
+  /** Steps carrying the workspace notice (failed mesh/run, cleared results). */
+  notices?: Partial<Record<StepId, "error" | "warning">>;
 }
 
 const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
@@ -31,15 +35,40 @@ const steps: ReadonlyArray<{ id: StepId; label: string; Icon: LucideIcon }> = [
   { id: "results", label: "Results", Icon: Activity }
 ] as const;
 
-export function StepBar({ activeStep, project, study, hasResults, collapsed, themeMode, onSelect, onToggleCollapsed, onToggleTheme, onUnitSystemChange }: StepBarProps) {
+/** Which step owns each readiness row, so the rail can show a blocked state where the fix lives. */
+const READINESS_STEP: Record<string, StepId> = {
+  "Material assigned": "material",
+  "Support added": "supports",
+  "Load added": "loads",
+  "Mesh generated": "mesh",
+  "Run settings valid": "run",
+  "Study valid": "run"
+};
+
+export function readinessBlockersByStep(readiness: readonly RunReadinessItem[]): Partial<Record<StepId, string[]>> {
+  const blockers: Partial<Record<StepId, string[]>> = {};
+  for (const item of readiness) {
+    if (item.done || !item.blockers.length) continue;
+    const step = READINESS_STEP[item.label] ?? "run";
+    blockers[step] = [...(blockers[step] ?? []), ...item.blockers];
+  }
+  return blockers;
+}
+
+export function StepBar({ activeStep, project, study, hasResults, readiness = [], notices = {}, collapsed, themeMode, onSelect, onToggleCollapsed, onToggleTheme, onUnitSystemChange }: StepBarProps) {
+  // Done means "present and valid": a step whose readiness row lists a blocker
+  // is shown as blocked, not ticked (2026-09 review D14). Run and Results tick
+  // only for results the viewer can show — a seeded sample run record used to
+  // tick both beside an empty Results panel.
+  const blockersByStep = readinessBlockersByStep(readiness);
   const completed: Record<StepId, boolean> = {
     model: true,
-    material: study.materialAssignments.length > 0,
-    supports: study.constraints.length > 0,
-    loads: study.type === "modal_analysis" || study.loads.length > 0,
-    mesh: study.meshSettings.status === "complete",
-    run: hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status)),
-    results: hasResults || study.runs.some((run) => isRunResultReadyStatus(run.status))
+    material: study.materialAssignments.length > 0 && !blockersByStep.material,
+    supports: study.constraints.length > 0 && !blockersByStep.supports,
+    loads: (study.type === "modal_analysis" || study.loads.length > 0) && !blockersByStep.loads,
+    mesh: study.meshSettings.status === "complete" && !blockersByStep.mesh,
+    run: hasResults,
+    results: hasResults
   };
 
   const unitShort = project.unitSystem === "SI" ? "mm" : "in";
@@ -75,10 +104,21 @@ export function StepBar({ activeStep, project, study, hasResults, collapsed, the
         const isComplete = completed[step.id];
         const canSelect = canNavigateToStep(step.id, { meshStatus: study.meshSettings.status });
         const StepIcon = step.Icon;
+        const stepBlockers = blockersByStep[step.id];
+        const notice = notices[step.id];
         return (
-          <button key={step.id} className={`step ${isActive ? "active" : ""}`} disabled={!canSelect} onClick={() => onSelect(step.id)} aria-current={isActive ? "step" : undefined}>
-            <span className={`step-icon ${isComplete ? "done" : ""}`} aria-hidden="true">
+          <button
+            key={step.id}
+            className={`step ${isActive ? "active" : ""}`}
+            disabled={!canSelect}
+            onClick={() => onSelect(step.id)}
+            aria-current={isActive ? "step" : undefined}
+            title={stepBlockers?.length ? stepBlockers.join(" ") : undefined}
+            aria-label={stepBlockers?.length ? `${step.label}: ${stepBlockers.join(" ")}` : notice ? `${step.label}: needs attention` : undefined}
+          >
+            <span className={`step-icon ${isComplete ? "done" : stepBlockers?.length ? "blocked" : ""}`} aria-hidden="true">
               <StepIcon size={18} strokeWidth={1.8} />
+              {notice && <i className={`step-badge ${notice}`} />}
             </span>
             <span>{step.label}</span>
           </button>

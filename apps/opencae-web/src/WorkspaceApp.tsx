@@ -29,6 +29,7 @@ import type { ConvergenceProbe } from "./meshConvergence";
 import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
 import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
 import { isPreviewOnlyGeometry } from "./geometryFormats";
+import { workspaceNoticeFor, type WorkspaceNoticeTone } from "./workspaceNotice";
 import { buildReportData, suggestedReportFilename } from "./report/reportData";
 import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
 import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
@@ -186,6 +187,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // the results it describes, never outliving them.
   const [solveElapsedMs, setSolveElapsedMs] = useState<number | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // Set when a study edit clears the last results (with the edit named), so
+  // the loss is announced on every step instead of one line in the collapsed
+  // log drawer (2026-09 review D4).
+  const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(null);
+  const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [pngExportBusy, setPngExportBusy] = useState(false);
@@ -530,6 +536,11 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair && !previewOnlyGeometry;
   const canUndoAction = undoStack.length > 0 && !solverRunning && !convergenceBusy;
   const canRedoAction = redoStack.length > 0 && !solverRunning && !convergenceBusy;
+  // One notice for the whole workspace (2026-09 review D7): a failed mesh or
+  // run, or results cleared by an edit, used to be visible only on the panel
+  // where it happened and as a footer pill.
+  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, dismissedKey: dismissedNoticeKey });
+  const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
 
   useEffect(() => {
     setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
@@ -1784,6 +1795,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (resultFields.length) {
       invalidateCompletedRunState();
       pushMessage("Previous results cleared: the study changed since the last run.");
+      setResultsOutdatedBy(response.message);
     }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
@@ -2035,6 +2047,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
 
   function invalidateCompletedRunState() {
     resultVariantLoadGenerationRef.current += 1;
+    setResultsOutdatedBy(null);
     setResultSummary(null);
     setSolveElapsedMs(null);
     setCompletedRunId("");
@@ -2561,6 +2574,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onUnitSystemChange={handleUnitSystemChange}
           study={study}
           hasResults={resultDisplayEligible}
+          readiness={runReadiness}
+          notices={stepNotices}
         />
         <Suspense fallback={(
           <section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">
@@ -2618,6 +2633,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         </Suspense>
         <RightPanel
           activeStep={activeStep}
+          notice={workspaceNotice}
+          onDismissNotice={() => workspaceNotice && setDismissedNoticeKey(workspaceNotice.key)}
+          onNoticeStep={(step) => navigateToStep(step)}
           project={project}
           displayModel={displayModelForUi}
           study={study}
@@ -2812,7 +2830,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         status={status}
         logs={logs}
         meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
-        solverStatus={solverRunning ? "Running" : runError ? "Error" : runProgress >= 100 ? "Complete" : "Idle"}
+        solverStatus={solverRunning ? "Running" : runError ? "Error" : resultsOutdatedBy ? "Outdated" : runProgress >= 100 ? "Complete" : "Idle"}
         onClearLogs={clearLogs}
       />
       {renderStorageRecoveryNotice()}
