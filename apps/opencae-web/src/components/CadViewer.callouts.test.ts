@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 import * as THREE from "three";
 import { beamPayloadSelectionForTarget, dimensionAnnotationScale, faceIdForPlacementSnap, faceSnapAxesForDisplayModel, holeSupportGlyphGeometry, loadGlyphLabelPosition, loadGlyphSurfacePoint, pointForPlacementSnap, shouldCreateUploadedFacePlaceholder, shouldShowModelHitLabel, stepFaceIdFromPickObject, supportGlyphAnchor, supportMarkerAnchor } from "./CadViewer";
@@ -208,5 +210,19 @@ describe("CadViewer callouts", () => {
     expect(axes[0]?.unitsPerWorld).toBeCloseTo(48);
     expect(axes[1]).toMatchObject({ direction: [0, 0, 1], minPoint: [1.9, 0.18, -0.36], maxPoint: [1.9, 0.18, 0.36], units: "mm", unitStep: 1 });
     expect(axes[1]?.unitsPerWorld).toBeCloseTo(33.333333);
+  });
+});
+
+describe("assigned faces and load callouts (2026-09 review F2, D20)", () => {
+  const source = readFileSync(resolve(__dirname, "CadViewer.tsx"), "utf8");
+
+  test("tints faces that carry a support or load in the marker colour", () => {
+    expect(source).toContain("export interface ViewerFaceTint");
+    expect(source).toContain("createStepFaceHighlightMesh(registry, record, tint.color, 0.3)");
+  });
+
+  test("lays out every load callout, not only payload masses", () => {
+    expect(source).not.toContain('loadMarkers.filter((marker) => marker.type === "gravity").map((marker) => {');
+    expect(source).toContain("...loadMarkers.map((marker) => {\n        const face = displayModel.faces.find((item) => item.id === marker.faceId);\n        return face ? { id: boundaryLabelKey(\"load\", marker.id), anchor: loadMarkerAnchor(marker, face) } : null;");
   });
 });
