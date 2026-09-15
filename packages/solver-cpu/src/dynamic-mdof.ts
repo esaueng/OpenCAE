@@ -241,6 +241,7 @@ function solveDynamicPreparedSystem(
     solverMode: "sparse",
     converged: true,
     ...(system.loadAssembly ? { loadAssembly: system.loadAssembly } : {}),
+    ...(system.connections ? { connections: system.connections } : {}),
     frameCount: frames.length,
     visualizationSmoothing: options.visualizationSmoothing,
     startTime: settings.startTime,
@@ -477,7 +478,11 @@ function newmarkStep(
   const solve = conjugateGradient(effective, rhs, {
     tolerance: options.tolerance ?? 1e-10,
     maxIterations: options.maxIterations,
-    jacobi: true,
+    preconditioner: options.preconditioner === "none" || options.preconditioner === "jacobi" || options.preconditioner === "ssor"
+      ? options.preconditioner
+      : "jacobi",
+    ssorOmega: options.ssorOmega,
+    hooks: options.hooks,
     // The previous displacement is an excellent predictor for the next one, so CG
     // typically converges in a small fraction of the cold-start iteration count.
     initialGuess: u

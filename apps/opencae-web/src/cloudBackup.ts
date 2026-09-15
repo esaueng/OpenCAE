@@ -51,7 +51,15 @@ export async function saveEncryptedCloudBackup(
     encryptionKey: bytesToBase64Url(new Uint8Array(rawKey)),
     expiresAt: result.expiresAt
   };
-  if (!writeDescriptor(descriptor, storage)) throw new Error("Cloud backup was stored, but its local recovery key could not be saved. Download the project file now.");
+  if (!writeDescriptor(descriptor, storage)) {
+    // The server object is unrecoverable without the local key, so remove it
+    // instead of orphaning 30 days of ciphertext the user can never delete.
+    await fetchImpl(`${CLOUD_BACKUP_PATH}/${backupId}`, {
+      method: "DELETE",
+      headers: { "x-opencae-backup-token": token }
+    }).catch(() => undefined);
+    throw new Error(`Cloud backup ${backupId} was stored, but its local recovery key could not be saved. Download the project file now.`);
+  }
   return descriptor;
 }
 

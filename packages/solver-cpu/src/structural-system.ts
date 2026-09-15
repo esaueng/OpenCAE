@@ -29,6 +29,13 @@ export type PreparedStructuralSystem = {
   fullMass: Float64Array;
   totalMass: number;
   loadAssembly?: LoadAssemblyDiagnostics;
+  connections?: {
+    connectionCount: number;
+    equationCount: number;
+    unmatchedSourceNodes: number;
+    formulation: "node-to-surface-penalty-mpc";
+    kinematics: "small_sliding";
+  };
   free: Int32Array;
   constraints: Map<number, number>;
 };
@@ -89,6 +96,7 @@ export function prepareStructuralSystem(
       fullMass: lumpedMass.dofMass,
       totalMass: lumpedMass.totalMass,
       ...(hasAdvancedLoadPrimitives(model, loadNames) ? { loadAssembly: loadAssembly.diagnostics } : {}),
+      ...(stiffness.connections ? { connections: stiffness.connections } : {}),
       free,
       constraints: constraints.values
     }

@@ -93,10 +93,21 @@ const BUILT_IN_MATERIAL_IDS = new Set(starterMaterials.map((material) => materia
 export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAEModelJson {
   validateVolumeMeshArtifact(input.volumeMesh);
   const resolvedMaterial = resolveMaterial(input);
+  const mm = input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa";
   const material: IsotropicLinearElasticMaterialJson = {
     ...resolvedMaterial,
+    // Catalog densities are kg/m^3; solver mm units need tonne/mm^3 (kg/m^3 / 1e12).
+    // Young's modulus and yield strength stay in catalog Pa/MPa-consistent
+    // values only when the mesh is m-based; mm meshes need MPa-scale stiffness.
+    ...(mm
+      ? {
+        youngModulus: resolvedMaterial.youngModulus / 1_000_000,
+        yieldStrength: resolvedMaterial.yieldStrength === undefined ? undefined : resolvedMaterial.yieldStrength / 1_000_000,
+        density: (resolvedMaterial.density ?? 0) / 1e12
+      }
+      : {}),
     ...(resolvedMaterial.thermalConductivity !== undefined
-      ? { thermalConductivity: input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa" ? resolvedMaterial.thermalConductivity / 1000 : resolvedMaterial.thermalConductivity }
+      ? { thermalConductivity: mm ? resolvedMaterial.thermalConductivity / 1000 : resolvedMaterial.thermalConductivity }
       : {})
   };
   const elementBlocks = [{
@@ -113,7 +124,11 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
   const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
 
   for (const [index, constraint] of (input.study?.constraints ?? []).entries()) {
-    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") continue;
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") {
+      throw new Error(
+        `OpenCAE Core browser solve does not support ${constraint.type} constraints yet (constraint ${constraint.id ?? index}). Change it to a fixed support or remove it.`
+      );
+    }
     const selectionRef = constraint.selectionRef ?? "FS1";
     const surfaceSet = ensureMappedSurfaceSet({
       study: input.study,
@@ -143,7 +158,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       loads.push({
         name: `bodyGravity${index}`,
         type: "bodyGravity",
-        acceleration: gravityAcceleration(load.parameters)
+        acceleration: gravityAcceleration(load.parameters, input.volumeMesh.coordinateSystem.solverUnits)
       });
       continue;
     }
@@ -154,7 +169,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
         name: `bodyForceDensity${index}`,
         type: "bodyForceDensity",
         elementSet: elementSet.name,
-        forceDensity: forceDensityVector(load.parameters)
+        forceDensity: forceDensityVector(load.parameters, input.volumeMesh.coordinateSystem.solverUnits)
       });
       continue;
     }
@@ -1005,17 +1020,22 @@ function forceVector(parameters: Record<string, unknown> | undefined): [number, 
   return [direction[0] * value, direction[1] * value, direction[2] * value];
 }
 
-function forceDensityVector(parameters: Record<string, unknown> | undefined): [number, number, number] {
+function forceDensityVector(
+  parameters: Record<string, unknown> | undefined,
+  solverUnits: "m-N-s-Pa" | "mm-N-s-MPa" = "m-N-s-Pa"
+): [number, number, number] {
   const direction = normalize(vector3(parameters?.direction) ?? [0, -1, 0]);
   const value = numberValue(parameters?.value) ?? 0;
   const units = typeof parameters?.units === "string" ? parameters.units.toLowerCase().replace(/³/g, "^3") : "n/m^3";
-  const magnitude = units === "kn/m^3"
+  const perCubicMeter = units === "kn/m^3"
     ? value * 1_000
     : units === "n/mm^3"
       ? value * 1_000_000_000
       : units === "lbf/in^3"
         ? value * 271_447.14116097
         : value;
+  // Solver mm units need N/mm^3 (N/m^3 divided by 1e9).
+  const magnitude = solverUnits === "mm-N-s-MPa" ? perCubicMeter / 1_000_000_000 : perCubicMeter;
   return [direction[0] * magnitude, direction[1] * magnitude, direction[2] * magnitude];
 }
 
@@ -1074,9 +1094,14 @@ function payloadGravityForce(parameters: Record<string, unknown> | undefined): [
   return [direction[0] * massKg * STANDARD_GRAVITY, direction[1] * massKg * STANDARD_GRAVITY, direction[2] * massKg * STANDARD_GRAVITY];
 }
 
-function gravityAcceleration(parameters: Record<string, unknown> | undefined): [number, number, number] {
+function gravityAcceleration(
+  parameters: Record<string, unknown> | undefined,
+  solverUnits: "m-N-s-Pa" | "mm-N-s-MPa" = "m-N-s-Pa"
+): [number, number, number] {
   const direction = normalize(vector3(parameters?.direction) ?? [0, -1, 0]);
-  return [direction[0] * STANDARD_GRAVITY, direction[1] * STANDARD_GRAVITY, direction[2] * STANDARD_GRAVITY];
+  // m-based solves need m/s^2; mm-based solves need mm/s^2.
+  const gravity = solverUnits === "mm-N-s-MPa" ? STANDARD_GRAVITY * 1000 : STANDARD_GRAVITY;
+  return [direction[0] * gravity, direction[1] * gravity, direction[2] * gravity];
 }
 
 function dynamicLoadProfile(value: unknown): "step" | "ramp" | "quasi_static" | "half_sine" {

@@ -125,6 +125,13 @@ export type CpuSolverDiagnostics = {
   preconditioner?: "none" | "jacobi" | "ssor";
   estimatedMatrixBytes?: number;
   loadAssembly?: LoadAssemblyDiagnostics;
+  connections?: {
+    connectionCount: number;
+    equationCount: number;
+    unmatchedSourceNodes: number;
+    formulation: "node-to-surface-penalty-mpc";
+    kinematics: "small_sliding";
+  };
   reactionBalance?: {
     appliedLoad: [number, number, number];
     reaction: [number, number, number];
@@ -238,6 +245,7 @@ export type DynamicTet4CpuDiagnostics = Omit<CpuSolverDiagnostics, "reactionBala
     relativeResidual: number;
   }[];
   totalMass: number;
+  connections?: CpuSolverDiagnostics["connections"];
   reactionBalance: {
     frameIndex: number;
     timeSeconds: number;

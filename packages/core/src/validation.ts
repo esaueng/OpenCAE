@@ -646,6 +646,12 @@ function validateLoads(
         errors.push(issue("invalid-pressure", "Pressure load pressure must be finite.", `${path}.pressure`));
       }
       validateOptionalVector3(load.direction, `${path}.direction`, "invalid-pressure-direction", errors);
+      if (
+        Array.isArray(load.direction) && load.direction.length === 3 && load.direction.every(isFiniteNumber) &&
+        Math.hypot(load.direction[0], load.direction[1], load.direction[2]) <= 1e-15
+      ) {
+        errors.push(issue("zero-pressure-direction", "Pressure load direction must be nonzero.", `${path}.direction`));
+      }
       return;
     }
     if (load.type === "bodyGravity") {
@@ -678,7 +684,6 @@ function validateLoads(
       if (Array.isArray(load.axis) && load.axis.length === 3 && load.axis.every(isFiniteNumber) && Math.hypot(load.axis[0], load.axis[1], load.axis[2]) <= 1e-15) {
         errors.push(issue("zero-bolt-preload-axis", "Bolt preload axis must be nonzero.", `${path}.axis`));
       }
-      validatePositive(load.preloadForce, `${path}.preloadForce`, "invalid-bolt-preload-force", errors);
       return;
     }
     if (load.type === "surfaceHeatFlux") {

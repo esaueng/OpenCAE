@@ -74,6 +74,12 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
   if (!step || step.type !== "modal") {
     return failure("invalid-modal-step", "Selected modal solve requires a modal step.");
   }
+  if (!Array.isArray(step.boundaryConditions) || step.boundaryConditions.length === 0) {
+    return failure(
+      "insufficient-modal-constraints",
+      "Model is insufficiently constrained for modal analysis. Add or revise supports in the Supports step."
+    );
+  }
   const requestedModeCount = clampModeCount(options.modeCount ?? step.modeCount);
   const prepared = prepareStructuralSystem(model, step.boundaryConditions, [], options.hooks, "Modal");
   if (!prepared.ok) return prepared;

@@ -119,14 +119,37 @@ async function handleProjectBackup(request: Request, env: Env, backupId: string)
       return backupJson({ error: "Cloud backup authorization failed." }, 403);
     }
     const expiresAt = new Date(Date.now() + PROJECT_BACKUP_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    await env.PROJECT_BACKUPS.put(key, request.body, {
-      httpMetadata: { contentType: "application/octet-stream" },
-      customMetadata: {
-        tokenHash,
-        expiresAt,
-        runId: sanitizeMetadata(request.headers.get("x-opencae-run-id"))
+    // The content-length header is client-claimed, so enforce the size cap on
+    // the stored bytes too: count the stream, then verify with head().
+    let storedBytes = 0;
+    const countingBody = request.body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        storedBytes += chunk.byteLength;
+        if (storedBytes > PROJECT_BACKUP_MAX_BYTES) {
+          controller.error(new Error("Backup exceeds the 95 MiB cap."));
+          return;
+        }
+        controller.enqueue(chunk);
       }
-    });
+    }));
+    try {
+      await env.PROJECT_BACKUPS.put(key, countingBody, {
+        httpMetadata: { contentType: "application/octet-stream" },
+        customMetadata: {
+          tokenHash,
+          expiresAt,
+          runId: sanitizeMetadata(request.headers.get("x-opencae-run-id"))
+        }
+      });
+    } catch {
+      await env.PROJECT_BACKUPS.delete(key).catch(() => undefined);
+      return backupJson({ error: "Encrypted cloud backups must be between 13 bytes and 95 MiB. Save this project to a local file instead." }, 413);
+    }
+    const stored = await env.PROJECT_BACKUPS.head(key);
+    if (!stored || stored.size > PROJECT_BACKUP_MAX_BYTES || stored.size <= 12) {
+      await env.PROJECT_BACKUPS.delete(key).catch(() => undefined);
+      return backupJson({ error: "Encrypted cloud backups must be between 13 bytes and 95 MiB. Save this project to a local file instead." }, 413);
+    }
     return backupJson({ backupId, expiresAt }, 201);
   }
 

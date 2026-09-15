@@ -16,6 +16,7 @@ import { deleteLocalRunVariantResults, loadLocalRunResults, loadLocalRunVariantR
 import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
 import { coreMeshStatisticsForStudy, geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConvergence";
+import { SUPPORTED_GEOMETRY_FORMAT_LABEL, isSupportedGeometryExtension } from "../geometryFormats";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -302,7 +303,10 @@ async function uploadModelWithGeometry(
   mutationOptions: ModelMutationOptions = {}
 ): Promise<SampleProjectResponse> {
   assertCurrentModelMutation(mutationOptions);
-  const extension = file.name.trim().split(".").pop()?.toLowerCase();
+  const extension = file.name.trim().split(".").pop()?.toLowerCase() ?? "";
+  if (!isSupportedGeometryExtension(extension)) {
+    throw new Error(`Unsupported geometry format. Supported uploads: ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`);
+  }
   const uploadLimit = extension === "stl" || extension === "obj" ? MAX_VISUAL_MESH_BYTES : MAX_EMBEDDED_MODEL_BYTES;
   if (file.size <= 0 || file.size > uploadLimit) {
     throw new Error(`CAD and mesh uploads must be between 1 byte and ${uploadLimit / (1024 * 1024)} MiB for this format.`);

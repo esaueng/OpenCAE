@@ -35,9 +35,17 @@ export type OpenCAEModelJson = {
 export type IsotropicLinearElasticMaterialJson = {
   name: string;
   type: "isotropicLinearElastic";
+  /** Young's modulus in Pa (m-N-s-Pa) or MPa (mm-N-s-MPa). */
   youngModulus: number;
   poissonRatio: number;
+  /** Yield strength in Pa (m-N-s-Pa) or MPa (mm-N-s-MPa). */
   yieldStrength?: number;
+  /**
+   * Mass density in the model's solver unit system: kg/m^3 for m-N-s-Pa,
+   * tonne/mm^3 for mm-N-s-MPa (1 kg/m^3 = 1e-12 tonne/mm^3). Intake paths must
+   * convert catalog densities; the solver consumes the value as-is in solver
+   * length units.
+   */
   density?: number;
   /** Isotropic conductivity in W/(m*K) for m-N-s-Pa or W/(mm*K) for mm-N-s-MPa. */
   thermalConductivity?: number;
@@ -191,17 +199,24 @@ export type PressureLoadJson = {
   name: string;
   type: "pressure";
   surfaceSet: string;
+  /** Pressure in Pa (m-N-s-Pa) or MPa (mm-N-s-MPa). */
   pressure: number;
+  /**
+   * Optional load direction. Must be a nonzero vector when present; the solver
+   * normalizes it, so any nonzero magnitude is accepted. Omitted means
+   * pressure acts along each facet's outward normal.
+   */
   direction?: [number, number, number];
 };
 
 export type BodyGravityLoadJson = {
   name: string;
   type: "bodyGravity";
+  /** Acceleration in m/s^2 (m-N-s-Pa) or mm/s^2 (mm-N-s-MPa). */
   acceleration: [number, number, number];
 };
 
-/** Uniform force per unit area in the model's solver unit system. */
+/** Uniform force per unit area in the model's solver unit system (Pa or MPa). */
 export type SurfaceTractionLoadJson = {
   name: string;
   type: "surfaceTraction";
@@ -209,7 +224,10 @@ export type SurfaceTractionLoadJson = {
   traction: [number, number, number];
 };
 
-/** Uniform force per unit volume over an explicit element set. */
+/**
+ * Uniform force per unit volume over an explicit element set, in the model's
+ * solver unit system: N/m^3 for m-N-s-Pa, N/mm^3 for mm-N-s-MPa.
+ */
 export type BodyForceDensityLoadJson = {
   name: string;
   type: "bodyForceDensity";

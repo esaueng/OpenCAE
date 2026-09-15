@@ -25,6 +25,12 @@ export interface WorkspaceNoticeInputs {
   solverRunning: boolean;
   /** The edit message that cleared the last results, e.g. `Load updated.` */
   resultsOutdatedBy: string | null;
+  /**
+   * Monotonic event counter for staleness edits. Dismissals are keyed on
+   * (message, sequence): repeating the same edit after a dismiss produces a
+   * new key so the banner re-appears instead of staying suppressed.
+   */
+  resultsOutdatedSequence?: number;
   /** A consequence of opening a file the user must act on, e.g. a mesh that was not restored. */
   openNote?: string | null;
   dismissedKey: string | null;
@@ -36,7 +42,7 @@ export function workspaceNoticeFor(inputs: WorkspaceNoticeInputs): WorkspaceNoti
   return notice;
 }
 
-function rawNoticeFor({ meshError, meshing, runError, solverRunning, resultsOutdatedBy, openNote }: WorkspaceNoticeInputs): WorkspaceNotice | null {
+function rawNoticeFor({ meshError, meshing, runError, solverRunning, resultsOutdatedBy, resultsOutdatedSequence, openNote }: WorkspaceNoticeInputs): WorkspaceNotice | null {
   if (meshError && !meshing) {
     return { key: `mesh:${meshError}`, tone: "error", title: "Mesh generation failed", message: meshError, step: "mesh", stepLabel: "Mesh" };
   }
@@ -48,7 +54,7 @@ function rawNoticeFor({ meshError, meshing, runError, solverRunning, resultsOutd
   }
   if (resultsOutdatedBy) {
     return {
-      key: `outdated:${resultsOutdatedBy}`,
+      key: `outdated:${resultsOutdatedSequence ?? 0}:${resultsOutdatedBy}`,
       tone: "warning",
       title: "Results outdated",
       message: `${resultsOutdatedBy.replace(/\.?$/, ".")} The results shown are from before this change and cannot be reported or exported. Re-run to update them.`,

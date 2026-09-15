@@ -10,6 +10,7 @@ import {
   TET10_HRZ_VERTEX_MASS_FRACTION,
   tet10Volume
 } from "../src/mesh";
+import { elevateTet4MeshToTet10 } from "../src/mesh-elevate";
 
 const coordinates = [
   0, 0, 0,
@@ -107,6 +108,50 @@ describe("assembleNodalLoadVector", () => {
     expect(diagnostics.perLoad[0].mass).toBeCloseTo(2);
     expectApproxVector(sumVector(vector), [0, 0, -19.62]);
     expectApproxVector(diagnostics.totalAppliedForce, [0, 0, -19.62]);
+  });
+
+  test("assembles bodyGravity on Tet10 with the HRZ lumped-mass distribution", () => {
+    const model = baseModel();
+    const elevated = elevateTet4MeshToTet10({ coordinates, elements: [[0, 1, 2, 3]] });
+    model.nodes = { coordinates: elevated.coordinates };
+    model.elementBlocks = [{ name: "solid", type: "Tet10", material: "steel", connectivity: elevated.elements[0]! as number[] }];
+    model.surfaceFacets = extractBoundarySurfaceFacets(model);
+    model.loads = [{ name: "gravity", type: "bodyGravity", acceleration: [0, 0, -9.81] }];
+
+    const { vector, diagnostics } = assembleNodalLoadVectorWithDiagnostics(model, ["gravity"]);
+
+    expect(diagnostics.errors).toEqual([]);
+    // Total force must equal mass times acceleration regardless of order.
+    expectApproxVector(sumVector(vector), [0, 0, -19.62]);
+    expectApproxVector(diagnostics.totalAppliedForce, [0, 0, -19.62]);
+    // HRZ fractions: corners carry TET10_HRZ_VERTEX_MASS_FRACTION each,
+    // midsides TET10_HRZ_EDGE_MASS_FRACTION each.
+    const cornerForce = nodeForce(vector, 0)[2];
+    const midsideForce = nodeForce(vector, 4)[2];
+    expect(cornerForce).toBeCloseTo(-19.62 * TET10_HRZ_VERTEX_MASS_FRACTION, 10);
+    expect(midsideForce).toBeCloseTo(-19.62 * TET10_HRZ_EDGE_MASS_FRACTION, 10);
+  });
+
+  test("normalizes a non-unit pressure direction instead of scaling the load", () => {
+    const model = baseModel();
+    model.loads = [{ name: "pressure", type: "pressure", surfaceSet: "sloped", pressure: 10, direction: [0, 0, -2] }];
+
+    const { vector, diagnostics } = assembleNodalLoadVectorWithDiagnostics(model, ["pressure"]);
+
+    expect(diagnostics.errors).toEqual([]);
+    expectApproxVector(sumVector(vector), [0, 0, -5 * Math.sqrt(3)]);
+  });
+
+  test("rejects a zero pressure direction with a load error instead of a silent zero load", () => {
+    const model = baseModel();
+    model.loads = [{ name: "pressure", type: "pressure", surfaceSet: "sloped", pressure: 10, direction: [0, 0, 0] }];
+
+    const result = assembleNodalLoadVectorWithDiagnostics(model, ["pressure"]);
+
+    expect(result.diagnostics.errors).toContainEqual(
+      expect.objectContaining({ code: "zero-pressure-direction", loadName: "pressure" })
+    );
+    expect(sumVector(result.vector)).toEqual([0, 0, 0]);
   });
 
   test("fails clearly when a surface load references a missing surface set", () => {

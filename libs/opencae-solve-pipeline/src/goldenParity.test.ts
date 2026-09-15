@@ -199,8 +199,13 @@ type DeltaStats = {
 function additiveKeysAfterRecordedRunner(path: string): string[] {
   // Principal/max-shear identity metadata on result fields.
   if (/^response\.fields\[\d+\]$/u.test(path)) return ["component", "tensorValues"];
-  // Solver memory budgeting (bb06839) and preconditioner identity (SSOR).
-  if (/^response\.diagnostics\[\d+\]$/u.test(path)) return ["estimatedMatrixBytes", "preconditioner"];
+  // Solver memory budgeting (bb06839), preconditioner identity (SSOR), and
+  // connection assembly diagnostics (always zero-unmatched on these
+  // single-body fixtures; surfaced so partial contact matches cannot solve
+  // silently). Runner 0.1.6 predates all three; they are additive metadata.
+  if (/^response\.diagnostics\[\d+\]$/u.test(path)) {
+    return ["estimatedMatrixBytes", "preconditioner", "connections", "truncation"];
+  }
   return [];
 }
 

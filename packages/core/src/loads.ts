@@ -267,7 +267,18 @@ function assemblePressure(
       });
       continue;
     }
-    const direction = load.direction ?? geometry.normal;
+    const explicit = load.direction;
+    const direction = explicit ? normalizeVector(explicit) : geometry.normal;
+    if (!direction) {
+      diagnostics.errors.push({
+        code: explicit ? "zero-pressure-direction" : "degenerate-facet-normal",
+        loadName: load.name,
+        message: explicit
+          ? `Load ${load.name} has a zero pressure direction; provide a nonzero direction vector.`
+          : `Load ${load.name} references facet ${facet.id} with a degenerate normal.`
+      });
+      continue;
+    }
     const facetForce = scaleVector(direction, load.pressure * geometry.area);
     distributeToFacet(vector, facet, facetForce, loadTotal);
   }
@@ -317,14 +328,6 @@ function assembleBodyGravity(
   let massTotal = 0;
 
   for (const block of model.elementBlocks) {
-    if (block.type !== "Tet4") {
-      diagnostics.errors.push({
-        code: "unsupported-element-type",
-        loadName: load.name,
-        message: `Load ${load.name} bodyGravity only supports Tet4 elements; ${block.type} is unsupported.`
-      });
-      continue;
-    }
     const material = materialByName.get(block.material);
     if (!material?.density || !Number.isFinite(material.density)) {
       diagnostics.errors.push({
@@ -338,21 +341,27 @@ function assembleBodyGravity(
     const nodesPerElement = elementNodeCount(block.type);
     for (let offset = 0; offset + nodesPerElement <= block.connectivity.length; offset += nodesPerElement) {
       const nodes = block.connectivity.slice(offset, offset + nodesPerElement);
-      const volume = tet4Volume(model.nodes.coordinates, nodes);
+      const volume = block.type === "Tet10"
+        ? tet10Volume(model.nodes.coordinates, nodes)
+        : tet4Volume(model.nodes.coordinates, nodes);
       if (!Number.isFinite(volume) || volume <= 0) {
         diagnostics.errors.push({
           code: "non-positive-element-volume",
           loadName: load.name,
-          message: `Load ${load.name} cannot assemble bodyGravity for non-positive Tet4 volume.`
+          message: `Load ${load.name} cannot assemble bodyGravity for non-positive ${block.type} volume.`
         });
         continue;
       }
       const mass = material.density * volume;
       const elementForce = scaleVector(load.acceleration, mass);
-      const nodalForce = scaleVector(elementForce, 1 / nodes.length);
+      // Tet10 uses the same HRZ lumped-mass fractions as the inertial mass
+      // path so gravity and dynamics agree on nodal mass distribution.
+      const fractions = block.type === "Tet10"
+        ? nodes.map((_node, localNode) => localNode < 4 ? TET10_HRZ_VERTEX_MASS_FRACTION : TET10_HRZ_EDGE_MASS_FRACTION)
+        : new Array<number>(nodes.length).fill(1 / nodes.length);
       massTotal += mass;
-      for (const node of nodes) {
-        addToNode(vector, node, nodalForce);
+      for (let localNode = 0; localNode < nodes.length; localNode += 1) {
+        addToNode(vector, nodes[localNode], scaleVector(elementForce, fractions[localNode]!));
       }
       addVector(loadTotal, elementForce);
     }

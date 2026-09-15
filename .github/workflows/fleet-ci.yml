@@ -95,6 +95,9 @@ jobs:
       - name: Build web app
         run: pnpm --filter @opencae/web build
 
+      - name: Enforce retired-token bundle proof on the fresh build
+        run: pnpm exec vitest run scripts/cloud-retirement-guard.test.mjs
+
       - name: Enforce web bundle budget
         run: node scripts/check-web-bundle-budget.mjs
   browser:

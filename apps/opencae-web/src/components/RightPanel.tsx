@@ -2353,9 +2353,9 @@ function ThermalResultsPanelContent({
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
       </div>
       <div className="result-actions">
-        <button className="secondary wide" type="button" disabled={reportBusy} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
-        <button className="secondary wide" type="button" disabled={pngExportBusy} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
-        <button className="secondary wide" type="button" disabled={htmlExportBusy} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
+        <button className="secondary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
+        <button className="secondary wide" type="button" disabled={pngExportBusy || reportDisabled} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
+        <button className="secondary wide" type="button" disabled={htmlExportBusy || reportDisabled} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
         {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}</button>}
         {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}</button>}
       </div>
