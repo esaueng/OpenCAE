@@ -2832,7 +2832,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
           onSaveCustomMaterial={handleSaveCustomMaterial}
           onDeleteCustomMaterial={handleDeleteCustomMaterial}
           onPreviewPrintLayerOrientation={setPreviewPrintLayerOrientation}
-          onAddSupport={(selectionRef, options) => {
+          onAddSupport={(selectionRef, options, extras) => {
             if (options?.type === "prescribed_temperature") {
               const constraint: Constraint = {
                 id: `constraint-${crypto.randomUUID()}`,
@@ -2844,7 +2844,49 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
               updateStudy(saveStudyPatch(study.id, { constraints: [...study.constraints, constraint] }, "Temperature boundary added.", study));
               return;
             }
-            updateStudy(addSupport(study.id, selectionRef, study));
+            if (options?.type === "prescribed_displacement") {
+              const component = options.component ?? "z";
+              const extraRefs = [...new Set((extras?.selectionRefs ?? []).filter((ref) => ref && ref !== selectionRef))];
+              const constraint: Constraint = {
+                id: `constraint-${crypto.randomUUID()}`,
+                type: "prescribed_displacement",
+                selectionRef: selectionRef ?? "",
+                ...(extraRefs.length ? { selectionRefs: extraRefs } : {}),
+                parameters: {
+                  label: nextSupportLabel(study.constraints, "prescribed_displacement"),
+                  value: options.value ?? 0,
+                  units: "mm",
+                  component
+                },
+                status: "complete"
+              };
+              updateStudy(saveStudyPatch(
+                study.id,
+                { constraints: [...study.constraints, constraint] },
+                extraRefs.length ? `Prescribed displacement added on ${extraRefs.length + 1} faces.` : "Prescribed displacement added.",
+                study
+              ));
+              return;
+            }
+            const extraRefs = [...new Set((extras?.selectionRefs ?? []).filter((ref) => ref && ref !== selectionRef))];
+            if (!extraRefs.length) {
+              updateStudy(addSupport(study.id, selectionRef, study));
+              return;
+            }
+            const constraint: Constraint = {
+              id: `constraint-${crypto.randomUUID()}`,
+              type: "fixed",
+              selectionRef: selectionRef ?? "",
+              selectionRefs: extraRefs,
+              parameters: { label: nextSupportLabel(study.constraints, "fixed") },
+              status: "complete"
+            };
+            updateStudy(saveStudyPatch(
+              study.id,
+              { constraints: [...study.constraints, constraint] },
+              `Fixed support added on ${extraRefs.length + 1} faces.`,
+              study
+            ));
           }}
           onUpdateSupport={(support: Constraint, targetFace?: DisplayFace) => {
             const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
@@ -2882,8 +2924,19 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             const directionFace = face ?? displayModel.faces[0];
             if (!directionFace) return;
             const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
+            // Multi-face loads (Decision 2): extras arrive via payloadMetadata
+            // and are stored as selectionRefs on the load (adapter unions facets).
+            const { selectionRefs: extraRefsRaw, ...restMetadata } = payloadMetadata;
+            const extraRefs = [...new Set((extraRefsRaw ?? []).filter((ref) => ref && ref !== selectionRef))];
             if (selection) {
-              updateStudy(addLoad(study.id, type, value, selection.id, directionVectorForLabel(direction, directionFace, displayModel ?? undefined), applicationPoint, payloadObject, study, payloadMetadata, direction));
+              updateStudy(addLoad(
+                study.id, type, value, selection.id,
+                directionVectorForLabel(direction, directionFace, displayModel ?? undefined),
+                applicationPoint, payloadObject, study,
+                { ...restMetadata, ...(extraRefs.length ? { selectionRefs: extraRefs } : {}) },
+                direction,
+                extraRefs.length ? { selectionRefs: extraRefs } : undefined
+              ));
               setSelectedLoadPoint(null);
               if (type === "gravity") setSelectedPayloadObject(null);
               return;

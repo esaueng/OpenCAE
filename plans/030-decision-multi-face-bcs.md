@@ -1,6 +1,6 @@
 # Decision 2: Multi-Face / Named-Selection BCs + Per-Body Materials
 
-Status: PROPOSED — needs product call
+Status: ACCEPTED (option A, first half) — implemented on review/decisions-build; per-body materials remain deferred
 Area: modeling expressiveness
 Related: plan 028 Stage 3 queue (F4), named selections
 (`libs/opencae-samples/src/index.ts:114-150`), review feature F2

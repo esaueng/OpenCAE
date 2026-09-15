@@ -2295,9 +2295,11 @@ describe("2026-09 interaction review stage 0 guards", () => {
     expect(renderPanel("supports", { study, selectedFace: displayModel.faces[0]! })).not.toContain("already exists on");
   });
 
-  test("no longer offers the unimplemented prescribed-displacement support type (D1)", () => {
-    expect(rightPanelSource).not.toContain('<option value="prescribed_displacement">Prescribed displacement</option>');
-    expect(rightPanelSource).toContain("Prescribed displacement (not supported yet)");
+  test("offers prescribed displacement with value and component fields (Decision 1)", () => {
+    expect(rightPanelSource).toContain('<option value="prescribed_displacement">Prescribed displacement</option>');
+    expect(rightPanelSource).not.toContain("Prescribed displacement (not supported yet)");
+    expect(rightPanelSource).toContain("Displacement");
+    expect(rightPanelSource).toContain("Component");
   });
 
   test("announces preview-only STL/OBJ geometry on the Mesh step and disables meshing (D6)", () => {

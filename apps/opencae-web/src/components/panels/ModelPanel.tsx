@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AlertTriangle, ArrowDown, Atom, Eye, Factory, Maximize2, RotateCcw, Ruler, ScanLine, Upload, Wrench } from "lucide-react";
 
-import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../../geometryFormats";
+import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, STL_PREVIEW_SCOPE_NOTE, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../../geometryFormats";
 
 import { DEFAULT_SECTION_PLANE } from "../../workspaceViewTypes";
 
@@ -139,7 +139,7 @@ export function ModelPanel({ project, displayModel, study, viewMode, showDimensi
         {isBlankProject ? "Upload model" : "Replace model"}
       </button>
       {isBlankProject ? (
-        <Callout>Upload {SUPPORTED_GEOMETRY_FORMAT_LABEL} to import a model. STL and OBJ files use the mesh preview; STEP files import as a selectable CAD body.</Callout>
+        <Callout>Upload {SUPPORTED_GEOMETRY_FORMAT_LABEL} to import a model. {STL_PREVIEW_SCOPE_NOTE}</Callout>
       ) : isUploadedProject ? (
         <Callout>{isNativeCadImport ? `${geometry.filename} is loaded as a selectable STEP import.` : uploadPreviewFormat ? `${geometry.filename} is loaded with a ${uploadPreviewFormat} viewport preview. ${PREVIEW_ONLY_GEOMETRY_NOTICE}` : `${geometry.filename} cannot be previewed in this local viewer. Replace it with ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`}</Callout>
       ) : null}

@@ -152,6 +152,50 @@ describe("OpenCAE Core browser solver adapter", () => {
     expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
   });
 
+  test("maps prescribed-displacement supports to Core Dirichlet values (Decision 1)", () => {
+    const pdStudy = {
+      ...staticStudy,
+      id: "study-pd",
+      constraints: [
+        { id: "constraint-fixed", type: "fixed", selectionRef: "selection-fixed", parameters: {}, status: "complete" },
+        { id: "constraint-pd", type: "prescribed_displacement", selectionRef: "selection-load", parameters: { value: 0.5, units: "mm", component: "z" }, status: "complete" }
+      ],
+      loads: []
+    } satisfies Study;
+    expect(openCaeCoreEligibility(pdStudy, displayModel)).toEqual({ ok: true });
+    const built = buildOpenCaeCoreModelForStudy(pdStudy, displayModel);
+    const pd = built.model.boundaryConditions.find((bc) => bc.type === "prescribedDisplacement");
+    expect(pd).toMatchObject({ type: "prescribedDisplacement", component: "z" });
+    // Study values are display mm; the browser path builds m-based Core models.
+    expect((pd as { value?: number }).value).toBeCloseTo(0.0005, 12);
+    const outcome = trySolveOpenCaeCoreStudy({ study: pdStudy, runId: "run-core-pd-1", displayModel });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+    if (!outcome.ok) return;
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
+    // Imposed 0.5 mm on the load face: peak displacement must reflect it.
+    expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0.4);
+  });
+
+  test("unions multi-face supports/loads into one surface set (Decision 2)", () => {
+    const multiStudy = {
+      ...staticStudy,
+      id: "study-multi",
+      constraints: [
+        { id: "constraint-fixed", type: "fixed", selectionRef: "selection-fixed", selectionRefs: ["selection-load"], parameters: {}, status: "complete" }
+      ]
+    } satisfies Study;
+    const built = buildOpenCaeCoreModelForStudy(multiStudy, displayModel);
+    const bc = built.model.boundaryConditions.find((candidate) => candidate.name === "fixedSupport0");
+    expect(bc).toBeTruthy();
+    // The union node set covers both faces: more nodes than the single-face set.
+    const single = buildOpenCaeCoreModelForStudy(staticStudy, displayModel);
+    const singleNodes = single.model.nodeSets.find((set) => set.name === "fixedNodes0");
+    const multiNodes = built.model.nodeSets.find((set) => set.name === "fixedNodes0");
+    expect(multiNodes!.nodes.length).toBeGreaterThan(singleNodes!.nodes.length);
+    const outcome = trySolveOpenCaeCoreStudy({ study: multiStudy, runId: "run-core-multi-1", displayModel });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+  });
+
   test("solves modal studies without applied loads through the guarded browser pipeline", { timeout: 60000 }, () => {
     const modalDisplayModel = {
       ...displayModel,

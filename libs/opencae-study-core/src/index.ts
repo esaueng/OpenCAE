@@ -58,13 +58,22 @@ export function validateStaticStressStudy(study: Study, customMaterials: readonl
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-support", "Choose where the part is held fixed."));
-  diagnostics.push(...unsupportedSupportDiagnostics(study));
-  if (study.loads.length === 0) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
+  diagnostics.push(...prescribedDisplacementDiagnostics(study));
+  // A study driven only by nonzero imposed motion needs no applied loads;
+  // a zero-valued displacement behaves as a fixed component, not a driver.
+  const drivenByImposedMotion = study.constraints.some(
+    (constraint) => constraint.type === "prescribed_displacement" && Number(constraint.parameters.value) !== 0
+  );
+  if (study.loads.length === 0 && !drivenByImposedMotion) diagnostics.push(issue("validation-load", "Choose where force, pressure, or payload weight is applied."));
   diagnostics.push(...structuralVariantDiagnostics(study));
   for (const load of study.loads) {
-    const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
+    const refs = selectionRefsFor(load);
     const expectedSelectionType = load.type === "volume_force" ? "body" : "face";
-    if (!selection || selection.entityType !== expectedSelectionType) {
+    const missing = refs.filter((ref) => {
+      const selection = study.namedSelections.find((item) => item.id === ref);
+      return !selection || selection.entityType !== expectedSelectionType;
+    });
+    if (missing.length) {
       diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isPositiveFinite(load.parameters.value)) {
@@ -78,7 +87,8 @@ export function validateStaticStressStudy(study: Study, customMaterials: readonl
     }
     if (load.type === "bolt_preload") {
       const secondarySelection = study.namedSelections.find((item) => item.id === load.parameters.secondarySelectionRef);
-      if (!secondarySelection || secondarySelection.entityType !== "face" || secondarySelection.id === selection?.id) {
+      const primaryRefs = selectionRefsFor(load);
+      if (!secondarySelection || secondarySelection.entityType !== "face" || primaryRefs.includes(secondarySelection.id)) {
         diagnostics.push(issue(`validation-load-secondary-selection-${load.id}`, `Bolt preload ${load.id} needs a different opposing face selection.`));
       }
     }
@@ -118,9 +128,12 @@ export function validateSteadyStateThermalStudy(study: Study, customMaterials: r
   }
   if (study.loads.length === 0) diagnostics.push(issue("validation-thermal-load", "Apply a surface heat flux or volumetric heat generation."));
   for (const load of study.loads) {
-    const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
     const expectedSelectionType = load.type === "heat_generation" ? "body" : "face";
-    if (!selection || selection.entityType !== expectedSelectionType) {
+    const missing = selectionRefsFor(load).filter((ref) => {
+      const selection = study.namedSelections.find((item) => item.id === ref);
+      return !selection || selection.entityType !== expectedSelectionType;
+    });
+    if (missing.length) {
       diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isFiniteNonZero(load.parameters.value)) {
@@ -137,7 +150,7 @@ export function validateModalStudy(study: Extract<Study, { type: "modal_analysis
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   if (study.constraints.length === 0) diagnostics.push(issue("validation-modal-support", "Add at least one support for modal analysis."));
-  diagnostics.push(...unsupportedSupportDiagnostics(study));
+  diagnostics.push(...prescribedDisplacementDiagnostics(study));
   if (study.meshSettings.status !== "complete") diagnostics.push(issue("validation-mesh", "Generate the mesh before running."));
   if (!Number.isInteger(settings.modeCount) || settings.modeCount < 1 || settings.modeCount > 10) {
     diagnostics.push(issue("validation-modal-mode-count", "Modal mode count must be from 1 through 10."));
@@ -151,9 +164,12 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
   if (study.materialAssignments.length === 0) diagnostics.push(issue("validation-material", "Choose what the part is made of."));
   diagnostics.push(...materialProcessDiagnostics(study, customMaterials));
   for (const load of study.loads) {
-    const selection = study.namedSelections.find((item) => item.id === load.selectionRef);
     const expectedSelectionType = load.type === "volume_force" ? "body" : "face";
-    if (!selection || selection.entityType !== expectedSelectionType) {
+    const missing = selectionRefsFor(load).filter((ref) => {
+      const selection = study.namedSelections.find((item) => item.id === ref);
+      return !selection || selection.entityType !== expectedSelectionType;
+    });
+    if (missing.length) {
       diagnostics.push(issue(`validation-load-selection-${load.id}`, `Load ${load.id} must reference a ${expectedSelectionType} selection.`));
     }
     if (!isPositiveFinite(load.parameters.value)) {
@@ -175,7 +191,7 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
   if (study.constraints.length === 0 && solverSettings.allowFreeMotion !== true) {
     diagnostics.push(issue("validation-dynamic-support", "Add at least one support or enable free motion for the dynamic run."));
   }
-  diagnostics.push(...unsupportedSupportDiagnostics(study));
+  diagnostics.push(...prescribedDisplacementDiagnostics(study));
   if (!(solverSettings.endTime > solverSettings.startTime)) {
     diagnostics.push(issue("validation-dynamic-end-time", "Dynamic end time must be greater than start time."));
   }
@@ -194,20 +210,34 @@ export function validateDynamicStructuralStudy(study: Study, customMaterials: re
 }
 
 /**
- * Support types the solver adapter does not implement yet. A "prescribed
- * displacement" constraint used to pass the run gate (readiness only counted
- * constraints), then the adapter silently skipped it and the mesh stage failed
- * with a face-mapping error that pointed the user at the wrong cause.
+ * Prescribed-displacement constraints (Decision 1, plans/029): validated like
+ * any support — finite value, single component — and mapped by the adapter to
+ * Core prescribedDisplacement BCs. A zero value behaves as a fixed component.
  */
-const UNSUPPORTED_STRUCTURAL_SUPPORT_TYPES = new Set<Constraint["type"]>(["prescribed_displacement"]);
+/**
+ * Multi-face BCs (Decision 2, plans/030): a support/load targets its primary
+ * selectionRef plus any selectionRefs extras. Old single-face studies carry
+ * no extras and behave exactly as before.
+ */
+export function selectionRefsFor(entry: { selectionRef: string; selectionRefs?: string[] }): string[] {
+  const refs = [entry.selectionRef, ...(entry.selectionRefs ?? [])];
+  return [...new Set(refs.filter((ref) => typeof ref === "string" && ref.length > 0))];
+}
 
-function unsupportedSupportDiagnostics(study: Study): Diagnostic[] {
-  return study.constraints
-    .filter((constraint) => UNSUPPORTED_STRUCTURAL_SUPPORT_TYPES.has(constraint.type))
-    .map((constraint) => issue(
-      `validation-support-unsupported-${constraint.id}`,
-      `Support ${constraint.id} uses a prescribed displacement, which this solver does not support yet. Change it to a fixed support or remove it.`
-    ));
+function prescribedDisplacementDiagnostics(study: Study): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  for (const constraint of study.constraints) {
+    if (constraint.type !== "prescribed_displacement") continue;
+    const value = constraint.parameters.value;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      diagnostics.push(issue(`validation-support-value-${constraint.id}`, `Support ${constraint.id} needs a finite displacement value in mm.`));
+    }
+    const component = constraint.parameters.component;
+    if (component !== "x" && component !== "y" && component !== "z") {
+      diagnostics.push(issue(`validation-support-component-${constraint.id}`, `Support ${constraint.id} needs a displacement component (x, y, or z).`));
+    }
+  }
+  return diagnostics;
 }
 
 function structuralVariantDiagnostics(study: Study): Diagnostic[] {

@@ -1,6 +1,6 @@
 # Decision 1: Prescribed-Displacement Supports
 
-Status: PROPOSED — needs product call
+Status: ACCEPTED (option A) — implemented on review/decisions-build
 Area: solver capability / UX honesty
 Related: `UNSUPPORTED_STRUCTURAL_SUPPORT_TYPES` (`libs/opencae-study-core/src/index.ts:202`),
 `settingHelp.ts:184`, plan 028 D1 deferral, review findings D4/H3

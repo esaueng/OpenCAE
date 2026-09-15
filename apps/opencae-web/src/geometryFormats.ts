@@ -33,6 +33,12 @@ export function isPreviewOnlyGeometry(displayModel: { nativeCad?: unknown; visua
 
 export const PREVIEW_ONLY_GEOMETRY_NOTICE = "STL and OBJ files are viewport previews only: OpenCAE cannot build a volume mesh from a triangle mesh, so this model cannot be meshed or solved. Import STEP to simulate.";
 
+/** Decision 3 outcome (plans/031, option B): STL/OBJ are a declared
+ * preview scope, not a deferred feature. The Model step states the limit
+ * at upload time so no STL user reaches Mesh or Run with a runnable
+ * button; the Mesh panel and run gate enforce the same rule. */
+export const STL_PREVIEW_SCOPE_NOTE = "STL/OBJ scope: viewport preview and face picking only — meshing and solving need STEP.";
+
 function formatList(items: readonly string[]): string {
   if (items.length < 2) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")}, or ${items[items.length - 1]}`;

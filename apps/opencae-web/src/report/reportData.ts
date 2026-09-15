@@ -524,8 +524,8 @@ function supportTable(study: Study): ReportTable {
   return {
     headers: ["Support", "Target"],
     rows: study.constraints.map((constraint) => [
-      constraint.type === "fixed" ? "Fixed support" : constraint.type === "prescribed_temperature" ? `Prescribed temperature (${Number(constraint.parameters.value ?? 0)} ${String(constraint.parameters.units ?? "°C")})` : "Prescribed displacement",
-      selectionLabel(study, constraint.selectionRef)
+      constraint.type === "fixed" ? "Fixed support" : constraint.type === "prescribed_temperature" ? `Prescribed temperature (${Number(constraint.parameters.value ?? 0)} ${String(constraint.parameters.units ?? "°C")})` : `Prescribed displacement (${Number(constraint.parameters.value ?? 0)} ${String(constraint.parameters.units ?? "mm")} ${String(constraint.parameters.component ?? "z")})`,
+      selectionLabels(study, constraint.selectionRef, constraint.selectionRefs)
     ]),
     emptyMessage: "No supports recorded."
   };
@@ -543,8 +543,8 @@ function loadTable(study: Study, unitSystem: UnitSystem): ReportTable {
         converted ? formatResultMetric(converted.value, converted.units) : MISSING,
         formatDirection(load.parameters.direction),
         load.type === "bolt_preload" && typeof load.parameters.secondarySelectionRef === "string"
-          ? `${selectionLabel(study, load.selectionRef)} ↔ ${selectionLabel(study, load.parameters.secondarySelectionRef)}`
-          : selectionLabel(study, load.selectionRef)
+          ? `${selectionLabels(study, load.selectionRef, load.selectionRefs)} ↔ ${selectionLabel(study, load.parameters.secondarySelectionRef)}`
+          : selectionLabels(study, load.selectionRef, load.selectionRefs)
       ];
     }),
     emptyMessage: "No loads recorded."
@@ -804,6 +804,12 @@ export function meshConvergenceTable(records: MeshConvergenceRecord[] | undefine
 
 function selectionLabel(study: Study, selectionRef: string): string {
   return study.namedSelections.find((selection) => selection.id === selectionRef)?.name ?? selectionRef ?? MISSING;
+}
+
+/** Multi-face BCs (Decision 2): primary + extras render as "A + B". */
+function selectionLabels(study: Study, selectionRef: string, selectionRefs?: string[]): string {
+  const refs = [selectionRef, ...(selectionRefs ?? [])].filter((ref) => typeof ref === "string" && ref.length > 0);
+  return [...new Set(refs)].map((ref) => selectionLabel(study, ref)).join(" + ");
 }
 
 // Saved demo projects persist the internal seed-data phrasing; translate it at

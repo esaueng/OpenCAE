@@ -17,6 +17,8 @@ export interface PayloadLoadMetadata {
   payloadMassMode?: PayloadMassMode;
   remotePoint?: LoadApplicationPoint;
   secondarySelectionRef?: string;
+  /** Multi-face loads (Decision 2): extra face selection ids sharing this load. */
+  selectionRefs?: string[];
 }
 export interface DraftLoadPreview {
   load: Load;

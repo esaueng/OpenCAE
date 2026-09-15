@@ -84,18 +84,24 @@ describe("validateStaticStressStudy", () => {
     ]));
   });
 
-  it("blocks the run for a support type the solver does not implement", () => {
-    // 2026-09 review D1: a prescribed displacement passed the gate, was skipped
-    // by the adapter, and surfaced as a misleading face-mapping mesh error.
+  it("validates prescribed-displacement supports instead of blocking them", () => {    // Decision 1 (plans/029): prescribed displacement is implemented end to
+    // end, so the validator checks value/component instead of refusing.
     const study: Study = {
       ...readyStudy,
-      constraints: [{ id: "pd-1", type: "prescribed_displacement", selectionRef: "face", parameters: {}, status: "complete" }]
+      constraints: [{ id: "pd-1", type: "prescribed_displacement", selectionRef: "face", parameters: { value: 0.5, units: "mm", component: "z" }, status: "complete" }]
     };
 
-    expect(validateStudy(study).map((item) => item.message)).toEqual([
-      "Support pd-1 uses a prescribed displacement, which this solver does not support yet. Change it to a fixed support or remove it."
-    ]);
-    expect(validateStudy({ ...study, type: "modal_analysis", solverSettings: { modeCount: 6 } } as Study).map((item) => item.id)).toContain("validation-support-unsupported-pd-1");
+    expect(validateStudy(study)).toEqual([]);
+    expect(validateStudy({ ...study, type: "modal_analysis", solverSettings: { modeCount: 6 } } as Study)).toEqual(
+      expect.not.arrayContaining([expect.objectContaining({ id: "validation-support-unsupported-pd-1" })])
+    );
+    const bad: Study = {
+      ...readyStudy,
+      constraints: [{ id: "pd-2", type: "prescribed_displacement", selectionRef: "face", parameters: {}, status: "complete" }]
+    };
+    expect(validateStudy(bad).map((item) => item.id)).toEqual(
+      expect.arrayContaining(["validation-support-value-pd-2", "validation-support-component-pd-2"])
+    );
   });
 
   it("flags an enabled load case that carries no loads", () => {
@@ -484,5 +490,48 @@ describe("validateStaticStressStudy", () => {
     };
 
     expect(validateStudy(dynamicStudy)).toEqual([]);
+  });
+});
+
+describe("multi-face BCs (Decision 2)", () => {
+  const readyStudy: Study = {
+    id: "study-test",
+    projectId: "project-test",
+    name: "Static Stress",
+    type: "static_stress",
+    geometryScope: [],
+    materialAssignments: [{ id: "assign", materialId: "mat-aluminum-6061", selectionRef: "body", status: "complete" }],
+    contacts: [],
+    constraints: [{ id: "fixed", type: "fixed", selectionRef: "face-a", selectionRefs: ["face-b"], parameters: {}, status: "complete" }],
+    namedSelections: [
+      { id: "face-a", name: "Face A", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-1", label: "A" }], fingerprint: "a" },
+      { id: "face-b", name: "Face B", entityType: "face", geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-2", label: "B" }], fingerprint: "b" }
+    ],
+    loads: [{ id: "force", type: "force", selectionRef: "face-a", selectionRefs: ["face-b"], parameters: { value: 500, direction: [0, -1, 0] }, status: "complete" }],
+    meshSettings: { preset: "medium", status: "complete", summary: { nodes: 10, elements: 4, warnings: [] } },
+    solverSettings: {},
+    validation: [],
+    runs: []
+  };
+
+  it("accepts one support/load spanning two faces", () => {
+    expect(validateStudy(readyStudy)).toEqual([]);
+  });
+
+  it("rejects a multi-face entry with a missing face", () => {
+    const bad: Study = {
+      ...readyStudy,
+      loads: [{ ...readyStudy.loads[0]!, selectionRefs: ["face-missing"] }]
+    };
+    expect(validateStudy(bad).map((item) => item.id)).toContain("validation-load-selection-force");
+  });
+
+  it("keeps single-face studies valid (round-trip)", () => {
+    const single: Study = {
+      ...readyStudy,
+      constraints: [{ id: "fixed", type: "fixed", selectionRef: "face-a", parameters: {}, status: "complete" }],
+      loads: [{ id: "force", type: "force", selectionRef: "face-a", parameters: { value: 500, direction: [0, -1, 0] }, status: "complete" }]
+    };
+    expect(validateStudy(single)).toEqual([]);
   });
 });

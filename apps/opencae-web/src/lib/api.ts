@@ -603,12 +603,16 @@ export async function updateStudy(studyId: string, patch: Partial<Study>, messag
   return { study: { ...currentStudy, ...patch } as Study, message };
 }
 
-export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint: LoadApplicationPoint | null | undefined, payloadObject: PayloadObjectSelection | null | undefined, currentStudy: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel): Promise<{ study: Study; message: string }> {
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint: LoadApplicationPoint | null | undefined, payloadObject: PayloadObjectSelection | null | undefined, currentStudy: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel, extras?: { selectionRefs?: string[] }): Promise<{ study: Study; message: string }> {
   void studyId;
   if (!currentStudy) throw new Error("Could not add load without an open study.");
   const loadId = `load-${crypto.randomUUID()}`;
   const structuralStudy = currentStudy.type === "static_stress" || currentStudy.type === "dynamic_structural" ? currentStudy : null;
   const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, loadId) : undefined;
+  // Multi-face loads (Decision 2): extras land on selectionRefs; the metadata
+  // copy is stripped so parameters stay parseable scalars.
+  const { selectionRefs: metadataRefs, ...cleanMetadata } = payloadMetadata;
+  const extraRefs = [...new Set([...(extras?.selectionRefs ?? []), ...(metadataRefs ?? [])].filter((ref) => ref && ref !== selectionRef))];
   return {
     study: {
       ...currentStudy,
@@ -618,13 +622,14 @@ export async function addLoad(studyId: string, type: LoadType, value: number, se
           id: loadId,
           type,
           selectionRef,
-          parameters: { label: nextLoadLabel(currentStudy.loads), value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+          ...(extraRefs.length ? { selectionRefs: extraRefs } : {}),
+          parameters: { label: nextLoadLabel(currentStudy.loads), value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? cleanMetadata : {}) },
           status: "complete" as const
         }
       ],
       ...(loadCases ? { loadCases } : {})
     },
-    message: "Load added."
+    message: extraRefs.length ? `Load added on ${extraRefs.length + 1} faces.` : "Load added."
   };
 }
 

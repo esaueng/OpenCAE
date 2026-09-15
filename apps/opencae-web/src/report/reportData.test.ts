@@ -429,6 +429,19 @@ describe("buildReportData", () => {
     expect(data.meshConvergence?.rows[1]).toContain("skipped: 150k DOF ceiling");
     expect(data.meshConvergence?.footnote).toContain("Verdict: apparent convergence.");
   });
+
+  test("renders multi-face supports/loads as joined targets (Decision 2)", () => {
+    const project = { ...bracketDemoProject, studies: bracketDemoProject.studies.map((study) => ({ ...study })) };
+    const study = project.studies[0]!;
+    study.namedSelections = [
+      ...study.namedSelections,
+      { id: "extra-face", name: "Extra face", entityType: "face", geometryRefs: [], fingerprint: "extra" }
+    ];
+    study.constraints = study.constraints.map((constraint) => ({ ...constraint, selectionRefs: ["extra-face"] }));
+    const data = report({ project, study });
+
+    expect(data.supports.rows[0]?.[1]).toContain("+");
+  });
 });
 
 describe("suggestedReportFilename", () => {
