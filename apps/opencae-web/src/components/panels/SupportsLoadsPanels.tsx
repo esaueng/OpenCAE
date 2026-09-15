@@ -22,26 +22,77 @@ import { Callout, Collapsible, EmptyEditableList, HelpLabel, HelpNote, Info, Pla
 export function SupportsPanel({ selectedFace, study, draftSupportTemperature, onDraftSupportTemperatureChange, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const thermal = study.type === "steady_state_thermal";
+  const modal = study.type === "modal_analysis";
+  // Multi-face BCs (Decision 2): the viewer pick seeds the first face;
+  // additional faces toggle on from the selection list below.
+  const [extraSelectionRefs, setExtraSelectionRefs] = useState<string[]>([]);
   // The draft temperature lives in the workspace so a viewer pick uses the
   // typed value too (2026-09 review D12); fall back to local state for callers
   // that do not supply it.
   const [localTemperature, setLocalTemperature] = useState(20);
   const temperature = draftSupportTemperature ?? localTemperature;
   const setTemperature = onDraftSupportTemperatureChange ?? setLocalTemperature;
-  const addLabel = thermal ? "Add prescribed temperature" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
+  // Prescribed displacement: imposed motion in display mm along one axis.
+  // Zero behaves as a fixed component; the solver treats it as a Dirichlet value.
+  const [displacementKind, setDisplacementKind] = useState<"fixed" | "prescribed_displacement">("fixed");
+  const [displacementValueMm, setDisplacementValueMm] = useState(0);
+  const [displacementComponent, setDisplacementComponent] = useState<"x" | "y" | "z">("z");
+  const prescribedDisplacement = displacementKind === "prescribed_displacement" && !thermal && !modal;
+  const displacementValid = Number.isFinite(displacementValueMm);
+  const addLabel = thermal ? "Add prescribed temperature" : prescribedDisplacement ? "Add prescribed displacement" : study.constraints.length ? "Add another fixed support" : "Add fixed support";
   // The panel button used to stack a second support on a face that already
   // had one; the viewer-click path already refused that (2026-09 review D2).
   const existingOnSelection = selectedFromViewport ? study.constraints.find((support) => support.selectionRef === selectedFromViewport.id) : undefined;
   const duplicateSupportError = existingOnSelection
     ? `${thermal ? "A temperature boundary" : "A support"} already exists on ${selectedFromViewport?.name ?? "this face"}. Edit or remove it below.`
     : null;
+  const faceOptions = study.namedSelections.filter((selection) => selection.entityType === "face");
+  const appliedRefs = [selectedFromViewport?.id, ...extraSelectionRefs].filter((ref): ref is string => Boolean(ref));
+  const toggleExtraRef = (ref: string) => setExtraSelectionRefs((current) =>
+    current.includes(ref) ? current.filter((candidate) => candidate !== ref) : [...current, ref]
+  );
   return (
     <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."} study={study}>
       <HelpNote helpId="supportPlacement" />
       <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
+      {!thermal && !modal && (
+        <label className="field">Support type
+          <select value={displacementKind} onChange={(event) => setDisplacementKind(event.currentTarget.value as "fixed" | "prescribed_displacement")}>
+            <option value="fixed">Fixed support</option>
+            <option value="prescribed_displacement">Prescribed displacement</option>
+          </select>
+        </label>
+      )}
+      {prescribedDisplacement && (
+        <>
+          <label className="field">Displacement<span className="input-with-unit"><input type="number" value={displacementValueMm} onChange={(event) => setDisplacementValueMm(Number(event.currentTarget.value))} /><span>mm</span></span></label>
+          <label className="field">Component
+            <select value={displacementComponent} onChange={(event) => setDisplacementComponent(event.currentTarget.value as "x" | "y" | "z")}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </label>
+        </>
+      )}
       {duplicateSupportError && <p className="field-error" role="alert">{duplicateSupportError}</p>}
-      <button className="outline-action wide" disabled={!selectedFromViewport || Boolean(duplicateSupportError) || (thermal && !Number.isFinite(temperature))} title={duplicateSupportError ?? undefined} onClick={() => selectedFromViewport && !duplicateSupportError && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : { type: "fixed" })}><Plus size={18} />{addLabel}</button>
+      {!thermal && !modal && faceOptions.length > 1 && (
+        <fieldset className="field">
+          <legend>Additional faces (optional)</legend>
+          {faceOptions.filter((selection) => selection.id !== selectedFromViewport?.id).map((selection) => (
+            <label className="toggle" key={selection.id}>
+              <input
+                type="checkbox"
+                checked={extraSelectionRefs.includes(selection.id)}
+                onChange={() => toggleExtraRef(selection.id)}
+              />
+              <span>{selection.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <button className="outline-action wide" disabled={!selectedFromViewport || Boolean(duplicateSupportError) || (thermal && !Number.isFinite(temperature)) || (prescribedDisplacement && !displacementValid)} title={duplicateSupportError ?? undefined} onClick={() => selectedFromViewport && !duplicateSupportError && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : prescribedDisplacement ? { type: "prescribed_displacement", value: displacementValueMm, component: displacementComponent } : { type: "fixed" }, extraSelectionRefs.length ? { selectionRefs: extraSelectionRefs } : undefined)}><Plus size={18} />{addLabel}{appliedRefs.length > 1 ? ` (${appliedRefs.length} faces)` : ""}</button>
       <SupportEditorList study={study} retargetFace={selectedFace} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
       <Callout>{thermal ? "At least one prescribed temperature is required to make the conduction system unique." : "Fixed supports prevent any motion of the selected face."}</Callout>
     </Panel>
@@ -82,6 +133,13 @@ export function LoadsPanel({
   const secondaryFaceOptions = useMemo(
     () => study.namedSelections.filter((selection) => selection.entityType === "face" && selection.id !== selectedFromViewport?.id),
     [selectedFromViewport?.id, study.namedSelections]
+  );
+  // Multi-face loads (Decision 2): extra faces share the same magnitude and
+  // direction; pressure/traction distribute by area, forces split evenly.
+  const [extraLoadRefs, setExtraLoadRefs] = useState<string[]>([]);
+  const faceOptionsForLoad = study.namedSelections.filter((selection) => selection.entityType === "face");
+  const toggleExtraLoadRef = (ref: string) => setExtraLoadRefs((current) =>
+    current.includes(ref) ? current.filter((candidate) => candidate !== ref) : [...current, ref]
   );
   const [secondarySelectionRef, setSecondarySelectionRef] = useState(secondaryFaceOptions[0]?.id ?? "");
   const payloadVolumeM3 = selectedPayloadObject?.volumeM3;
@@ -254,6 +312,21 @@ export function LoadsPanel({
         </select>
       </label>}
       {hasDraftPlacement && draftAddError && <p className="field-error" role="alert">{draftAddError}</p>}
+      {!thermal && draftLoadType !== "gravity" && draftLoadType !== "volume_force" && draftLoadType !== "heat_generation" && draftLoadType !== "bolt_preload" && faceOptionsForLoad.length > 1 && (
+        <fieldset className="field">
+          <legend>Additional faces (optional)</legend>
+          {faceOptionsForLoad.filter((selection) => selection.id !== placementSelection?.id).map((selection) => (
+            <label className="toggle" key={selection.id}>
+              <input
+                type="checkbox"
+                checked={extraLoadRefs.includes(selection.id)}
+                onChange={() => toggleExtraLoadRef(selection.id)}
+              />
+              <span>{selection.name}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
       <button className="outline-action wide" disabled={!canAddDraftLoad} title={draftAddError ?? undefined} onClick={() => canAddDraftLoad && onAddLoad(
         draftLoadType,
         effectiveDraftValue,
@@ -262,9 +335,10 @@ export function LoadsPanel({
         {
           ...payloadMetadata,
           ...(draftLoadType === "remote_force" ? { remotePoint } : {}),
-          ...(draftLoadType === "bolt_preload" ? { secondarySelectionRef } : {})
+          ...(draftLoadType === "bolt_preload" ? { secondarySelectionRef } : {}),
+          ...(extraLoadRefs.length ? { selectionRefs: extraLoadRefs } : {})
         }
-      )}><Plus size={18} />{addLabel}</button>
+      )}>{/* selectionRefs travel in payloadMetadata and are split out by the workspace handler. */}<Plus size={18} />{addLabel}{extraLoadRefs.length ? ` (${extraLoadRefs.length + 1} faces)` : ""}</button>
       </div>
       {structuralStudy && (
         <Collapsible
@@ -763,7 +837,7 @@ function SupportEditorList({ study, retargetFace, onUpdateSupport, onRemoveSuppo
           <div className="editable-item" key={support.id}>
             <div className="editable-summary">
               <span className="item-icon warning"><SupportIcon /></span>
-              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)} °C)` : "Prescribed displacement"}</strong>
+              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)} °C)` : `Prescribed displacement (${Number(support.parameters.value ?? 0)} mm ${String(support.parameters.component ?? "z")})`}</strong>
               <small>{label}</small>
               <button className="remove-glyph" type="button" aria-label="Remove support" onClick={() => onRemoveSupport(support.id)}><X size={16} /></button>
             </div>
@@ -808,6 +882,12 @@ function SupportEditForm({ support, study, retargetFace, onSave, onCancel }: { s
   const thermal = study.type === "steady_state_thermal";
   const [type, setType] = useState<Constraint["type"]>(support.type);
   const [temperature, setTemperature] = useState(Number(support.parameters.value ?? 20));
+  const [displacementValueMm, setDisplacementValueMm] = useState(Number(support.parameters.value ?? 0));
+  const [displacementComponent, setDisplacementComponent] = useState<"x" | "y" | "z">(
+    support.parameters.component === "x" || support.parameters.component === "y" || support.parameters.component === "z"
+      ? support.parameters.component
+      : "z"
+  );
   const selectedRef = study.namedSelections.find((selection) => selection.id === support.selectionRef);
   // Re-targeting (2026-09 review D3): a face picked while editing can become
   // the new target; before, the pick added a second support instead.
@@ -829,15 +909,26 @@ function SupportEditForm({ support, study, retargetFace, onSave, onCancel }: { s
             ? <option value="prescribed_temperature">Prescribed temperature</option>
             : <>
               <option value="fixed">Fixed support</option>
-              {/* Prescribed displacement is not implemented by the solver (2026-09 review D1); keep it visible only for a study that already carries one. */}
-              {support.type === "prescribed_displacement" && <option value="prescribed_displacement">Prescribed displacement (not supported yet)</option>}
+              <option value="prescribed_displacement">Prescribed displacement</option>
             </>}
         </select>
       </label>
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
+      {!thermal && type === "prescribed_displacement" && (
+        <>
+          <label className="field">Displacement<span className="input-with-unit"><input type="number" value={displacementValueMm} onChange={(event) => setDisplacementValueMm(Number(event.currentTarget.value))} /><span>mm</span></span></label>
+          <label className="field">Component
+            <select value={displacementComponent} onChange={(event) => setDisplacementComponent(event.currentTarget.value as "x" | "y" | "z")}>
+              <option value="x">X</option>
+              <option value="y">Y</option>
+              <option value="z">Z</option>
+            </select>
+          </label>
+        </>
+      )}
       <PlacementReadout selectedRef={selectedRef} />
       <div className="edit-actions">
-        <button className="primary" type="button" disabled={thermal && !Number.isFinite(temperature)} onClick={() => onSave({ ...support, type, parameters: thermal ? { ...support.parameters, value: temperature, units: "°C" } : support.parameters }, targetFace)}>Save</button>
+        <button className="primary" type="button" disabled={(thermal && !Number.isFinite(temperature)) || (!thermal && type === "prescribed_displacement" && !Number.isFinite(displacementValueMm))} onClick={() => onSave({ ...support, type, parameters: thermal ? { ...support.parameters, value: temperature, units: "°C" } : type === "prescribed_displacement" ? { ...support.parameters, value: displacementValueMm, units: "mm", component: displacementComponent } : support.parameters }, targetFace)}>Save</button>
         <button className="secondary" type="button" onClick={onCancel}>Cancel</button>
       </div>
     </div>

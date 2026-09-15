@@ -1,6 +1,6 @@
 # Decision 5: Thermal Breadth — Transient Conduction, Convection BCs
 
-Status: PROPOSED — needs product call (lowest priority of the six)
+Status: DEFERRED (option C) — steady-state conduction remains the scope; thermo-mechanical coupling explicitly out
 Area: physics scope
 Related: `study-core:104-132`, solver `thermal.ts:50-127`, review feature F10
 

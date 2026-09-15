@@ -38,7 +38,7 @@ import {
   type RunVariantRef,
   type Study
 } from "@opencae/schema";
-import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
+import { inferGlobalCriticalPrintAxis, selectionRefsFor } from "@opencae/study-core";
 import {
   selectionPlaneMatches,
   topologySpanIsUsable
@@ -337,14 +337,19 @@ export function openCaeCoreEligibility(
     if (study.loads.some((load) => load.type !== "heat_flux" && load.type !== "heat_generation")) return { ok: false, reason: "Steady thermal studies accept heat flux and heat generation only." };
     return { ok: true };
   }
-  if (!study.constraints.some((constraint) => constraint.type === "fixed")) {
-    return { ok: false, reason: "OpenCAE Core requires at least one fixed support." };
+  if (!study.constraints.some((constraint) => constraint.type === "fixed" || constraint.type === "prescribed_displacement")) {
+    return { ok: false, reason: "OpenCAE Core requires at least one fixed or prescribed-displacement support." };
   }
   if (study.type === "dynamic_structural" && study.loads.some((load) => load.type === "bolt_preload")) {
     return { ok: false, reason: "Equivalent bolt preload is supported for static studies only." };
   }
   if (study.type === "modal_analysis") return { ok: true };
-  if (!study.loads.length) return { ok: false, reason: "OpenCAE Core requires at least one load." };
+  // A prescribed displacement IS a load driver: imposed motion stresses the
+  // part with no applied force. Studies driven only by imposed motion skip
+  // the applied-load gate but keep the load-case gate below.
+  const drivenByImposedMotion = study.loads.length === 0 &&
+    study.constraints.some((constraint) => constraint.type === "prescribed_displacement" && Number(constraint.parameters.value) !== 0);
+  if (!study.loads.length && !drivenByImposedMotion) return { ok: false, reason: "OpenCAE Core requires at least one load." };
   const combinations = structuralLoadCombinations(study).filter((combination) => combination.enabled);
   const requiredCaseIds = new Set([
     ...structuralLoadCases(study).filter((loadCase) => loadCase.enabled).map((loadCase) => loadCase.id),
@@ -353,7 +358,7 @@ export function openCaeCoreEligibility(
   const requiredLoadIds = new Set(structuralLoadCases(study).filter((loadCase) => requiredCaseIds.has(loadCase.id)).flatMap((loadCase) => loadCase.loadIds));
   if (!requiredCaseIds.size) return { ok: false, reason: "OpenCAE Core requires at least one enabled load case or combination." };
   const hasNonzeroLoad = study.loads.some((load) => requiredLoadIds.has(load.id) && Math.hypot(...forceVectorForLoad(load, displayModel, material.material.density)) > 1e-12);
-  if (!hasNonzeroLoad) {
+  if (!hasNonzeroLoad && !drivenByImposedMotion) {
     return { ok: false, reason: "OpenCAE Core requires a load with a finite positive value and direction." };
   }
   return { ok: true };
@@ -793,22 +798,41 @@ export function buildOpenCaeCoreModelForStudy(
   const coreLoadNameByStudyLoadId = new Map<string, string>();
 
   for (const [index, constraint] of study.constraints.entries()) {
-    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") {
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature" && constraint.type !== "prescribed_displacement") {
       throw new Error(
         `OpenCAE Core browser solve does not support ${constraint.type} constraints yet (constraint ${constraint.id}). Change it to a fixed support or remove it.`
       );
     }
-    const surfaceSet = ensureSurfaceSetForSelection({
+    const constraintRefs = selectionRefsForStudyEntry(constraint);
+    const surfaceSet = ensureSurfaceSetForSelections(
       model,
       renderNodePoints,
       displayModel,
       study,
-      selectionRef: constraint.selectionRef,
+      constraintRefs,
       surfaceSets
-    });
+    );
     const nodeSet = deriveFixedSupportNodeSetFromSurface(`fixedNodes${index}`, surfaceSet.name, { ...model, surfaceSets });
-    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Local could not map boundary ${constraint.selectionRef} to mesh nodes.`);
+    if (!nodeSet.nodes.length) throw new Error(`OpenCAE Core Local could not map boundary ${constraintRefs.join(", ")} to mesh nodes.`);
     nodeSets.push(nodeSet);
+    if (constraint.type === "prescribed_displacement") {
+      // Study values are display mm; the Core model is solver units. The
+      // browser path builds m-based models (structured block + gmsh parser),
+      // so mm → m here; mm-based direct-API models convert at intake.
+      const mm = model.coordinateSystem?.solverUnits === "mm-N-s-MPa";
+      const valueMm = Number(constraint.parameters.value ?? 0);
+      const component = constraint.parameters.component === "x" || constraint.parameters.component === "y" || constraint.parameters.component === "z"
+        ? constraint.parameters.component
+        : "z";
+      boundaryConditions.push({
+        name: `prescribedDisplacement${index}`,
+        type: "prescribedDisplacement",
+        nodeSet: nodeSet.name,
+        component,
+        value: mm ? valueMm : valueMm / 1000
+      });
+      continue;
+    }
     boundaryConditions.push(constraint.type === "prescribed_temperature"
       ? { name: `prescribedTemperature${index}`, type: "prescribedTemperature", nodeSet: nodeSet.name, value: Number(constraint.parameters.value ?? 20) }
       : { name: `fixedSupport${index}`, type: "fixed", nodeSet: nodeSet.name, components: ["x", "y", "z"] });
@@ -846,14 +870,14 @@ export function buildOpenCaeCoreModelForStudy(
       continue;
     }
 
-    const surfaceSet = ensureSurfaceSetForSelection({
+    const surfaceSet = ensureSurfaceSetForSelections(
       model,
       renderNodePoints,
       displayModel,
       study,
-      selectionRef: load.selectionRef,
+      selectionRefsForStudyEntry(load),
       surfaceSets
-    });
+    );
     if (load.type === "heat_flux") {
       const raw = Number(load.parameters.value ?? 0);
       const units = String(load.parameters.units ?? "W/m^2").toLowerCase().replace(/²/g, "^2");
@@ -916,7 +940,7 @@ export function buildOpenCaeCoreModelForStudy(
       const secondarySelectionRef = typeof load.parameters.secondarySelectionRef === "string"
         ? load.parameters.secondarySelectionRef
         : undefined;
-      if (!secondarySelectionRef || secondarySelectionRef === load.selectionRef) {
+      if (!secondarySelectionRef || selectionRefsForStudyEntry(load).includes(secondarySelectionRef)) {
         throw new Error(`Equivalent bolt preload ${load.id} requires a different opposing face selection.`);
       }
       const surfaceSetB = ensureSurfaceSetForSelection({
@@ -956,7 +980,10 @@ export function buildOpenCaeCoreModelForStudy(
   }
 
   if (!boundaryConditions.length) throw new Error(study.type === "steady_state_thermal" ? "OpenCAE Core requires a mapped prescribed temperature." : "OpenCAE Core requires at least one mapped fixed support.");
-  if (study.type !== "modal_analysis" && study.type !== "steady_state_thermal" && !loads.length) throw new Error("OpenCAE Core requires at least one mapped load.");
+  const drivenByImposedMotion = study.constraints.some(
+    (constraint) => constraint.type === "prescribed_displacement" && Number(constraint.parameters.value) !== 0
+  );
+  if (study.type !== "modal_analysis" && study.type !== "steady_state_thermal" && !loads.length && !drivenByImposedMotion) throw new Error("OpenCAE Core requires at least one mapped load.");
 
   const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
   for (const connection of study.contacts ?? []) {
@@ -1038,6 +1065,14 @@ function cloneModelForLocalSolve(model: OpenCAEModelJson): OpenCAEModelJson {
   };
 }
 
+/**
+ * Multi-face BCs (Decision 2): primary selectionRef plus selectionRefs
+ * extras, deduped. Local alias over the study-core helper (same semantics).
+ */
+function selectionRefsForStudyEntry(entry: { selectionRef: string; selectionRefs?: string[] }): string[] {
+  return selectionRefsFor(entry);
+}
+
 function ensureSurfaceSetForSelection({
   model,
   renderNodePoints,
@@ -1066,9 +1101,36 @@ function ensureSurfaceSetForSelection({
     .map((facet) => facet.id);
   const facets = sourceMatches.length
     ? sourceMatches
-    : facetsForDisplaySelection(model.surfaceFacets ?? [], renderNodePoints, displayModel, study, selectionRef);
+    : facetsForDisplaySelections(model.surfaceFacets ?? [], renderNodePoints, displayModel, study, [selectionRef]);
   if (!facets.length) throw new Error(`OpenCAE Core Local could not map selection ${selectionRef} to Core surface facets.`);
   const next = { name: selectionRef, facets: [...new Set(facets)].sort((left, right) => left - right) };
+  surfaceSets.push(next);
+  return next;
+}
+
+/**
+ * Multi-face union (Decision 2): merge several selections' facets into one
+ * surface set so one support/load can span N faces. Facet ids are deduped
+ * and sorted; an empty union throws the same mapping error as a single miss.
+ */
+function ensureSurfaceSetForSelections(
+  model: OpenCAEModelJson,
+  renderNodePoints: Vec3[],
+  displayModel: DisplayModel,
+  study: Study,
+  selectionRefs: string[],
+  surfaceSets: SurfaceSetJson[]
+): SurfaceSetJson {
+  const refs = [...new Set(selectionRefs.filter((ref) => typeof ref === "string" && ref.length > 0))];
+  if (refs.length === 1) {
+    return ensureSurfaceSetForSelection({ model, renderNodePoints, displayModel, study, selectionRef: refs[0]!, surfaceSets });
+  }
+  const name = refs.join("+");
+  const existing = surfaceSets.find((set) => set.name === name);
+  if (existing?.facets.length) return existing;
+  const facets = facetsForDisplaySelections(model.surfaceFacets ?? [], renderNodePoints, displayModel, study, refs);
+  if (!facets.length) throw new Error(`OpenCAE Core Local could not map selections ${refs.join(", ")} to Core surface facets.`);
+  const next = { name, facets: [...new Set(facets)].sort((left, right) => left - right) };
   surfaceSets.push(next);
   return next;
 }
@@ -1111,18 +1173,21 @@ function normalizedSelectionName(value: string): string {
   return collapsed.slice(start, end);
 }
 
-function facetsForDisplaySelection(
+function facetsForDisplaySelections(
   surfaceFacets: SurfaceFacetJson[],
   renderNodePoints: Vec3[],
   displayModel: DisplayModel,
   study: Study,
-  selectionRef: string
+  selectionRefs: string[]
 ): number[] {
-  const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
-  const faceIds = new Set([
-    selectionRef,
-    ...(selection?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? [])
-  ]);
+  const faceIds = new Set<string>();
+  for (const selectionRef of selectionRefs) {
+    const selection = study.namedSelections.find((candidate) => candidate.id === selectionRef);
+    faceIds.add(selectionRef);
+    for (const ref of selection?.geometryRefs.filter((candidate) => candidate.entityType === "face") ?? []) {
+      faceIds.add(ref.entityId);
+    }
+  }
   const faces = displayModel.faces.filter((face) => faceIds.has(face.id));
   if (!faces.length) return [];
 

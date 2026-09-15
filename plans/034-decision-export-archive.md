@@ -1,6 +1,6 @@
 # Decision 6: Full-Transient / Multi-Variant Export Archive
 
-Status: PROPOSED — needs product call
+Status: DEFERRED (option B) — selected-state export stands; plan 024 increment deferral confirmed
 Area: export scope
 Related: plan 024 Release 2, `selectedResultExport.ts:66-71,322-325`,
 user-guide `:40` (selected-state scope), review feature F8

@@ -1,6 +1,6 @@
 # Decision 3: STL/OBJ — Close the Solve Loop or Declare Preview Scope
 
-Status: PROPOSED — needs product call
+Status: ACCEPTED (option B) — implemented on review/decisions-build: declared preview scope
 Area: import scope / UX honesty
 Related: plan 028 D6, `WorkspaceApp.tsx:552` STL/OBJ gate,
 `lib/wasmMeshing.ts:24-31`, review feature F4

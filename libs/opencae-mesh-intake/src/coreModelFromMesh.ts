@@ -124,7 +124,7 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
   const meshConnections: NonNullable<OpenCAEModelJson["meshConnections"]> = [];
 
   for (const [index, constraint] of (input.study?.constraints ?? []).entries()) {
-    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") {
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature" && constraint.type !== "prescribed_displacement") {
       throw new Error(
         `OpenCAE Core browser solve does not support ${constraint.type} constraints yet (constraint ${constraint.id ?? index}). Change it to a fixed support or remove it.`
       );
@@ -139,6 +139,20 @@ export function buildCoreModelFromCloudMesh(input: BuildCoreModelInput): OpenCAE
       diagnostics: input.mappingDiagnostics
     }, surfaceSets);
     const nodeSetName = ensureNodeSetForSurfaceSet(nodeSets, surfaceSet, input.volumeMesh.surfaceFacets);
+    if (constraint.type === "prescribed_displacement") {
+      const mm = input.volumeMesh.coordinateSystem.solverUnits === "mm-N-s-MPa";
+      const valueMm = numberValue(constraint.parameters?.value) ?? 0;
+      const rawComponent = (constraint.parameters as { component?: unknown } | undefined)?.component;
+      const component = rawComponent === "x" || rawComponent === "y" || rawComponent === "z" ? rawComponent : "z";
+      boundaryConditions.push({
+        name: `prescribedDisplacement${index}`,
+        type: "prescribedDisplacement",
+        nodeSet: nodeSetName,
+        component,
+        value: mm ? valueMm : valueMm / 1000
+      });
+      continue;
+    }
     boundaryConditions.push(constraint.type === "prescribed_temperature" ? {
       name: `prescribedTemperature${index}`,
       type: "prescribedTemperature",

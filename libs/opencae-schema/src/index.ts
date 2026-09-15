@@ -103,7 +103,9 @@ export const NamedSelectionSchema = z.object({
 export const ConstraintSchema = z.object({
   id: z.string(),
   type: z.enum(["fixed", "prescribed_displacement", "prescribed_temperature"]),
+  /** One or more face selection ids the constraint applies to (multi-face BCs, Decision 2). */
   selectionRef: z.string(),
+  selectionRefs: z.array(z.string()).optional(),
   parameters: z.record(z.unknown()),
   status: z.enum(["not_started", "ready", "warning", "complete"])
 });
@@ -112,6 +114,8 @@ export const LoadSchema = z.object({
   id: z.string(),
   type: z.enum(["force", "pressure", "gravity", "surface_traction", "volume_force", "remote_force", "bolt_preload", "heat_flux", "heat_generation"]),
   selectionRef: z.string(),
+  /** Additional face selection ids the load applies to (multi-face BCs, Decision 2). */
+  selectionRefs: z.array(z.string()).optional(),
   parameters: z.record(z.unknown()),
   status: z.enum(["not_started", "ready", "warning", "complete"])
 });

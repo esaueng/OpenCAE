@@ -1,6 +1,6 @@
 # Decision 4: Harmonic Response + Linear Buckling Sequencing
 
-Status: PROPOSED — needs product call
+Status: DEFERRED (option C) — modal + transient remain the dynamics scope; revisit on user evidence
 Area: solver roadmap
 Related: plan 024 Releases 6–7, `selectedResultExport.ts:13,446`
 (`harmonic_frequency` state with no producing study), review feature F3
