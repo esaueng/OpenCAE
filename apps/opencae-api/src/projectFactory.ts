@@ -2,6 +2,16 @@ import type { Constraint, DisplayModel, Load, Project } from "@opencae/schema";
 import { bracketDemoProject, bracketDisplayModel } from "@opencae/db/sample-data";
 import { stlDimensionsFromBase64 } from "@opencae/units";
 
+/**
+ * FROZEN REFERENCE: this factory serves the loopback-only dev API
+ * (apps/opencae-api + services/*), which is a separately-runnable reference
+ * backend — not the production path (the browser workspace builds samples in
+ * apps/opencae-web/src/localProjectFactory.ts). Values here intentionally
+ * mirror the web factory at the time of freezing; the parity test in
+ * projectFactory.test.ts fails on divergence so drift is a loud decision,
+ * not a silent one. Do not "fix" numbers here without the web twin.
+ */
+
 export type SampleModelId = "bracket" | "plate" | "cantilever";
 export type SampleAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal";
 

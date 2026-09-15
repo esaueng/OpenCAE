@@ -78,14 +78,16 @@ describe("result playback cache", () => {
     });
 
     expect(prepared.mode).toBe("full");
-    expect(prepared.frames[0]?.fields[0]?.values).toBeInstanceOf(Float32Array);
+    // Single representation: per-frame copies are gone; the packed buffer is
+    // the cache and actualBytes counts only it.
+    expect(prepared.frames[0]?.fields).toEqual([]);
     expect(prepared.packed?.values).toBeInstanceOf(Float32Array);
     expect(prepared.packed?.framePositions).toBeInstanceOf(Float32Array);
-    expect(prepared.actualBytes).toBeGreaterThan(0);
+    expect(prepared.actualBytes).toBe(prepared.packed?.actualBytes);
 
     const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001);
     expect(halfway).toBeTruthy();
-    expect(hydratePreparedPlaybackFrame(halfway!).fields[0]?.values).toEqual([5, 20]);
+    expect(hydratePreparedPlaybackFrame(halfway!, prepared.packed).fields[0]?.values).toEqual([5, 20]);
   });
 
   test("packs and unpacks worker playback input without losing frames or selected field values", () => {
@@ -233,8 +235,8 @@ describe("result playback cache", () => {
     });
 
     expect(prepared.frameCount).toBeGreaterThan(2);
-    expect(prepared.frames[0]?.fields[0]?.values).toBeInstanceOf(Float32Array);
-    expect(hydratePreparedPlaybackFrame(prepared.frames[0]!).fields[0]?.values).toEqual([0, 10]);
+    expect(prepared.frames[0]?.fields).toEqual([]);
+    expect(hydratePreparedPlaybackFrame(prepared.frames[0]!, prepared.packed).fields[0]?.values).toEqual([0, 10]);
   });
 
   test("includes every packed playback buffer in worker transferables", () => {
@@ -287,10 +289,12 @@ describe("result playback cache", () => {
     }));
 
     const prepared = preparePlaybackFrames({ fields, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
-    const halfway = hydratePreparedPlaybackFrame(prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001)!);
+    const halfway = hydratePreparedPlaybackFrame(prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001)!, prepared.packed);
     const slot = packedPreparedPlaybackFieldSlot(prepared.packed!, packedPreparedPlaybackFrameOrdinal(prepared.packed!, halfway.framePosition), "displacement")!;
 
-    expect(halfway.fields[0]?.samples?.[0]?.vector).toEqual([0, -5, 1]);
+    // Hydration from packed slots covers scalar values; sample/vector detail
+    // stays in the packed buffers (rendered via slots, not via hydration).
+    expect(halfway.fields[0]?.values).toEqual([5]);
     expect(Array.from(slot.sampleVectors.slice(slot.sampleOffset * 3, slot.sampleOffset * 3 + 3))).toEqual([0, -5, 1]);
   });
 
@@ -351,7 +355,11 @@ describe("result playback cache", () => {
 
     const prepared = preparePlaybackFrames({ fields: selected, frameIndexes: [0, 1], playbackFps: 30, budgetBytes: 100_000 });
     const halfway = prepared.frames.find((frame) => Math.abs(frame.framePosition - 0.5) < 0.001)!;
-    expect(hydratePreparedPlaybackFrame(halfway).fields.find((field) => field.type === "stress")?.tensorValues).toEqual([150, 0, 0, 0, 0, 0]);
+    // Hydration covers scalar values; tensor detail stays addressable via
+    // packed slots (packedPreparedPlaybackFieldSlot) without retained copies.
+    expect(hydratePreparedPlaybackFrame(halfway, prepared.packed).fields.find((field) => field.type === "stress")?.values).toEqual([10.5]);
+    const stressSlot = packedPreparedPlaybackFieldSlot(prepared.packed!, packedPreparedPlaybackFrameOrdinal(prepared.packed!, halfway.framePosition), "stress")!;
+    expect(Array.from(prepared.packed!.tensorValues.slice(stressSlot.tensorOffset, stressSlot.tensorOffset + stressSlot.tensorLength))).toEqual([150, 0, 0, 0, 0, 0]);
   });
   test("falls back to all playback fields when the selected result mode is unavailable", () => {
     const fields = [0, 1].flatMap((frameIndex) => [

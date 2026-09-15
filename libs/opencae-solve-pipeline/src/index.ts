@@ -475,11 +475,14 @@ export function boundedSolverSettings(
   };
   if (analysisType === "dynamic_structural") {
     const requestedMaxFrames = positiveInteger(input?.maxFrames);
-    settings.maxFrames = Math.min(
-      requestedMaxFrames ?? limits.maxFrames,
+    // DOF-aware frame cap: the transient frame budget already scales with mesh
+    // size (bytesPerFrame ~ nodes/elements), so large meshes get fewer frames
+    // instead of exhausting the worker heap holding all Float64 frames.
+    const dofAwareMaxFrames = Math.min(
       limits.maxFrames,
       transientFrameBudget(model, limits.transientFieldBytes)
     );
+    settings.maxFrames = Math.min(requestedMaxFrames ?? dofAwareMaxFrames, dofAwareMaxFrames);
     if (requestedMaxFrames !== undefined && settings.maxFrames < requestedMaxFrames) {
       settings.truncation = {
         ...(settings.truncation ?? {}),

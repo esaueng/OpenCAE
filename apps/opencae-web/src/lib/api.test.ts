@@ -534,7 +534,9 @@ describe("api", () => {
       headers: { "content-type": "application/json" }
     })));
 
-    const response = await generateMesh("study-1", "fine", study);
+    // Estimate fallback is quarantined: callers opt in explicitly for
+    // preview/sample geometry; STEP uploads always throw instead.
+    const response = await generateMesh("study-1", "fine", study, undefined, undefined, undefined, { allowEstimateFallback: true });
 
     expect(response.study.meshSettings).toEqual({
       preset: "fine",
@@ -559,10 +561,15 @@ describe("api", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await generateMesh("study-1", "coarse", study, undefined, undefined, undefined, { localOnly: true });
+    const response = await generateMesh("study-1", "coarse", study, undefined, undefined, undefined, { localOnly: true, allowEstimateFallback: true });
 
     expect(response.study.meshSettings.preset).toBe("coarse");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("refuses estimate fallback for production STEP meshing without opt-in", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("NetworkError when attempting to fetch resource."); }));
+    await expect(generateMesh("study-1", "coarse", study)).rejects.toThrow(/unavailable for this geometry/);
   });
 
   test("does not mask a STEP topology failure with a completed preset estimate", async () => {

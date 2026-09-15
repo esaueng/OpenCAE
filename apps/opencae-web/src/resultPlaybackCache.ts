@@ -206,13 +206,11 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
   }
 
   const frameCache = createResultFrameCache(fields);
-  let actualBytes = 0;
   const frames = plan.framePositions.map((framePosition) => {
     const fields = frameCache.fieldsForFramePosition(framePosition).map((field) => {
       const { tensorValues: sourceTensorValues, ...fieldWithoutTensors } = field;
       const values = new Float32Array(field.values);
       const tensorValues = sourceTensorValues ? new Float32Array(sourceTensorValues) : undefined;
-      actualBytes += values.byteLength + (tensorValues?.byteLength ?? 0);
       return {
         ...fieldWithoutTensors,
         values,
@@ -227,8 +225,13 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
     };
   });
 
+  // Single representation: the packed Float32 buffer is the cache. The
+  // per-frame Float32Array copies that used to live in `frames` doubled
+  // resident memory (and postMessage bytes); hydrated ResultField views are
+  // derived on demand from packed slots instead. `frames` metadata (positions,
+  // indexes, times) is retained for planning and cheap lookups.
   const packed = packPreparedPlaybackFrames(frames);
-  actualBytes += packed?.actualBytes ?? 0;
+  const packedBytes = packed?.actualBytes ?? 0;
 
   return {
     cacheKey: input.cacheKey,
@@ -236,8 +239,13 @@ export function preparePlaybackFrames(input: PlaybackFrameCacheInput): PreparedP
     presentationFps: plan.presentationFps,
     frameCount: frames.length,
     estimatedBytes: plan.estimatedBytes,
-    actualBytes,
-    frames,
+    actualBytes: packedBytes,
+    frames: frames.map((frame) => ({
+      framePosition: frame.framePosition,
+      frameIndex: frame.frameIndex,
+      timeSeconds: frame.timeSeconds,
+      fields: []
+    })),
     ...(packed ? { packed } : {})
   };
 }
@@ -435,24 +443,52 @@ export function playbackFieldsForResultMode(
   return displacement.length ? [...selected, ...displacement] : selected;
 }
 
-export function hydratePreparedPlaybackFrame(frame: PreparedPlaybackFrame): { framePosition: number; frameIndex: number; timeSeconds: number; fields: ResultField[] } {
+export function hydratePreparedPlaybackFrame(frame: PreparedPlaybackFrame, cache?: PackedPreparedPlaybackCache): { framePosition: number; frameIndex: number; timeSeconds: number; fields: ResultField[] } {
   const cached = hydratedFrames.get(frame);
   if (cached) return cached;
-  const hydrated = {
-    framePosition: frame.framePosition,
-    frameIndex: frame.frameIndex,
-    timeSeconds: frame.timeSeconds,
-    fields: frame.fields.map((field) => {
-      const { tensorValues, ...fieldWithoutTensors } = field;
-      return {
-        ...fieldWithoutTensors,
-        values: Array.prototype.slice.call(field.values) as number[],
-        ...(tensorValues ? { tensorValues: Array.prototype.slice.call(tensorValues) as number[] } : {})
-      };
-    })
-  };
+  // Single-representation caches carry no per-frame fields; hydrate from the
+  // packed slots for the frame's ordinal instead.
+  const fromPacked = cache?.frameCount
+    ? resultFieldsForPackedPreparedCacheFrame(cache, packedPreparedPlaybackFrameOrdinal(cache, frame.framePosition))
+    : undefined;
+  const hydrated = fromPacked
+    ? { framePosition: frame.framePosition, frameIndex: frame.frameIndex, timeSeconds: frame.timeSeconds, fields: fromPacked }
+    : {
+      framePosition: frame.framePosition,
+      frameIndex: frame.frameIndex,
+      timeSeconds: frame.timeSeconds,
+      fields: frame.fields.map((field) => {
+        const { tensorValues, ...fieldWithoutTensors } = field;
+        return {
+          ...fieldWithoutTensors,
+          values: Array.prototype.slice.call(field.values) as number[],
+          ...(tensorValues ? { tensorValues: Array.prototype.slice.call(tensorValues) as number[] } : {})
+        };
+      })
+    };
   hydratedFrames.set(frame, hydrated);
   return hydrated;
+}
+
+/** Hydrate one packed frame's fields as plain ResultField views (no copies retained). */
+function resultFieldsForPackedPreparedCacheFrame(cache: PackedPreparedPlaybackCache, frameOrdinal: number): ResultField[] {
+  const clampedFrameOrdinal = Math.max(0, Math.min(cache.frameCount - 1, Math.floor(frameOrdinal)));
+  const frameIndex = cache.frameIndexes[clampedFrameOrdinal] ?? clampedFrameOrdinal;
+  const timeSeconds = cache.times[clampedFrameOrdinal] ?? 0;
+  return cache.fieldDescriptors.map((descriptor, fieldOrdinal): ResultField => {
+    const slot = clampedFrameOrdinal * cache.fieldCount + fieldOrdinal;
+    const offset = cache.fieldOffsets[slot] ?? 0;
+    const length = cache.fieldLengths[slot] ?? 0;
+    return {
+      ...descriptor,
+      id: `${descriptor.id}-packed-${frameIndex}`,
+      values: Array.from(cache.values.slice(offset, offset + length)),
+      min: cache.fieldMins[slot] ?? 0,
+      max: cache.fieldMaxes[slot] ?? 0,
+      frameIndex,
+      timeSeconds
+    };
+  });
 }
 
 export function preparedPlaybackFrameForPosition(cache: PreparedPlaybackFrameCache | null | undefined, framePosition: number): PreparedPlaybackFrame | null {
@@ -474,38 +510,29 @@ export function preparedPlaybackFrameForPosition(cache: PreparedPlaybackFrameCac
 }
 
 export function preparedPlaybackTransferables(cache: PreparedPlaybackFrameCache): Transferable[] {
-  const transferables: Transferable[] = [];
-  if (cache.packed) {
-    transferables.push(
-      cache.packed.framePositions.buffer,
-      cache.packed.frameIndexes.buffer,
-      cache.packed.times.buffer,
-      cache.packed.fieldOffsets.buffer,
-      cache.packed.fieldLengths.buffer,
-      cache.packed.fieldMins.buffer,
-      cache.packed.fieldMaxes.buffer,
-      cache.packed.values.buffer,
-      cache.packed.tensorOffsets.buffer,
-      cache.packed.tensorLengths.buffer,
-      cache.packed.tensorValues.buffer,
-      cache.packed.vectorOffsets.buffer,
-      cache.packed.vectorLengths.buffer,
-      cache.packed.vectors.buffer,
-      cache.packed.sampleOffsets.buffer,
-      cache.packed.sampleLengths.buffer,
-      cache.packed.sampleValues.buffer,
-      cache.packed.samplePoints.buffer,
-      cache.packed.sampleNormals.buffer,
-      cache.packed.sampleVectors.buffer
-    );
-  }
-  for (const frame of cache.frames) {
-    for (const field of frame.fields) {
-      transferables.push(field.values.buffer);
-      if (field.tensorValues) transferables.push(field.tensorValues.buffer);
-    }
-  }
-  return transferables;
+  if (!cache.packed) return [];
+  return [
+    cache.packed.framePositions.buffer,
+    cache.packed.frameIndexes.buffer,
+    cache.packed.times.buffer,
+    cache.packed.fieldOffsets.buffer,
+    cache.packed.fieldLengths.buffer,
+    cache.packed.fieldMins.buffer,
+    cache.packed.fieldMaxes.buffer,
+    cache.packed.values.buffer,
+    cache.packed.tensorOffsets.buffer,
+    cache.packed.tensorLengths.buffer,
+    cache.packed.tensorValues.buffer,
+    cache.packed.vectorOffsets.buffer,
+    cache.packed.vectorLengths.buffer,
+    cache.packed.vectors.buffer,
+    cache.packed.sampleOffsets.buffer,
+    cache.packed.sampleLengths.buffer,
+    cache.packed.sampleValues.buffer,
+    cache.packed.samplePoints.buffer,
+    cache.packed.sampleNormals.buffer,
+    cache.packed.sampleVectors.buffer
+  ];
 }
 
 export function packedResultFieldsForPlaybackTransferables(packed: PackedResultFieldsForPlayback): Transferable[] {

@@ -7,7 +7,11 @@ const css = readFileSync(resolve(__dirname, "app.css"), "utf8");
 const tokens = readFileSync(resolve(__dirname, "../theme/tokens.css"), "utf8");
 const cadViewer = readFileSync(resolve(__dirname, "../components/CadViewer.tsx"), "utf8");
 const appSource = readFileSync(resolve(__dirname, "../WorkspaceApp.tsx"), "utf8");
-const rightPanel = readFileSync(resolve(__dirname, "../components/RightPanel.tsx"), "utf8");
+const rightPanel = [
+  "RightPanel.tsx",
+  "panels/PanelChrome.tsx",
+  "panels/RightPanelProps.tsx"
+].map((relative) => readFileSync(resolve(__dirname, "../components", relative), "utf8")).join("\n");
 const bottomPanel = readFileSync(resolve(__dirname, "../components/BottomPanel.tsx"), "utf8");
 const lightThemeBlock = tokens.match(/\.theme-light\s*\{(?<body>[\s\S]*?)\n\}/)?.groups?.body ?? "";
 

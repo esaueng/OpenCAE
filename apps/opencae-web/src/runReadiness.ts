@@ -14,13 +14,27 @@ export interface RunReadinessItem {
  * problem, not a solver-settings problem, so the support group must be tried
  * before the settings group.
  */
+/**
+ * Ownership contract for the three validation layers:
+ * - @opencae/schema (zod Study/Project shape): rejects malformed payloads at
+ *   parse time; never emits readiness diagnostics.
+ * - @opencae/study-core validateStudy (domain readiness): every diagnostic id
+ *   below must be claimed by exactly one group here, or surface as a "Study
+ *   valid" blocker. Adding a validator rule without a group fails the
+ *   cross-layer test in runReadiness.test.ts — update the groups, not the gate.
+ * - @opencae/core validateModelJson (Core-model validity) + adapter
+ *   openCaeCoreEligibility/buildOpenCaeCoreModelForStudy (routing): their
+ *   throws surface at run time via the run-error path, not readiness. Every
+ *   builder throw for user-fixable input must have a corresponding
+ *   study-core/eligibility diagnostic; the adapter test pins the mapping.
+ */
 const READINESS_GROUPS: ReadonlyArray<{ label: string; prefixes: readonly string[] }> = [
   { label: "Material assigned", prefixes: ["validation-material"] },
   {
     label: "Support added",
     prefixes: ["validation-support", "validation-modal-support", "validation-dynamic-support", "validation-thermal-support"]
   },
-  { label: "Load added", prefixes: ["validation-load", "validation-thermal-load", "validation-combination"] },
+  { label: "Load added", prefixes: ["validation-load", "validation-thermal-load", "validation-combination", "validation-load-case"] },
   { label: "Mesh generated", prefixes: ["validation-mesh"] },
   { label: "Run settings valid", prefixes: ["validation-dynamic", "validation-modal-mode-count"] }
 ];

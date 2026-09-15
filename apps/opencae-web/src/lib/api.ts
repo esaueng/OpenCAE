@@ -17,6 +17,19 @@ import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type
 import { coreMeshStatisticsForStudy, geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openCaeCoreEligibility, OPENCAE_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/opencaeCoreSolve";
 import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConvergence";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL, isSupportedGeometryExtension } from "../geometryFormats";
+import {
+  meshSummaryForPreset,
+  meshTargetSizeMmForPreset,
+  PROCEDURAL_MESH_SIZE_MM
+} from "./meshEstimates";
+import {
+  createLocalRunStore,
+  emitLocalRunEvent,
+  finishLocalRun,
+  subscribeToLocalRunRecord,
+  syntheticRunErrorEvent,
+  type LocalRunRecord
+} from "./localRunStore";
 
 export interface SampleProjectResponse {
   message?: string;
@@ -85,10 +98,15 @@ export interface RunMeshConvergenceOptions {
 export interface GenerateMeshOptions {
   /** Keep isolated workflows, such as convergence ladders, from mutating the API-owned study. */
   localOnly?: boolean;
+  /**
+   * Allow the quarantined preset-estimate fallback for preview/sample
+   * geometry when wasm meshing is unavailable. Default off: production STEP
+   * meshing throws instead of marking a fake estimate complete.
+   */
+  allowEstimateFallback?: boolean;
 }
 
 const localResultsByRunId = new Map<string, ResultsResponse>();
-const localRunsByRunId = new Map<string, LocalRunRecord>();
 const RUN_BOOKKEEPING_LIMIT = 4;
 const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
 const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
@@ -96,6 +114,10 @@ const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
 const HISTORICAL_CLOUD_RUN_ID_PREFIX = "run-cloud-core-";
 const HISTORICAL_CLOUD_RUN_MESSAGE =
   "This run was solved on the retired OpenCAE Core Cloud. Its results are only available if they were saved with the project; re-run the simulation to solve locally in your browser.";
+const localRunStore = createLocalRunStore(RUN_BOOKKEEPING_LIMIT);
+const localRunsByRunId = localRunStore.records;
+const createLocalRunRecord = localRunStore.createRecord;
+const activeLocalRun = localRunStore.activeRun;
 
 function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, limit = RUN_BOOKKEEPING_LIMIT): void {
   cache.delete(runId);
@@ -112,78 +134,9 @@ function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, li
 // Replaces the former pre-timed synthetic event scripts (honest results: every
 // progress event now reflects actual solver phase reports, elapsed time is
 // wall-clock, and estimatedRemainingMs is only present where it is derivable).
+// Run-record storage, event emission, terminal transitions, and the replay
+// adapter live in ./localRunStore; this module keeps progress mapping.
 // ---------------------------------------------------------------------------
-
-type LocalRunStatus = "running" | "complete" | "failed" | "cancelled";
-
-type LocalRunRecord = {
-  runId: string;
-  status: LocalRunStatus;
-  /** Replay buffer for late subscribers (bounded). */
-  events: RunEvent[];
-  listeners: Set<(event: RunEvent) => void>;
-  startedAtMs: number;
-  lastProgress: number;
-  cancelSolve?: () => void;
-};
-
-const LOCAL_RUN_EVENT_BUFFER_LIMIT = 200;
-
-function createLocalRunRecord(runId: string, status: LocalRunStatus = "running"): LocalRunRecord {
-  const record: LocalRunRecord = {
-    runId,
-    status,
-    events: [],
-    listeners: new Set(),
-    startedAtMs: Date.now(),
-    lastProgress: 0
-  };
-  setCappedRunEntry(localRunsByRunId, runId, record);
-  return record;
-}
-
-function activeLocalRun(): LocalRunRecord | undefined {
-  for (const record of localRunsByRunId.values()) {
-    if (record.status === "running") return record;
-  }
-  return undefined;
-}
-
-function emitLocalRunEvent(
-  record: LocalRunRecord,
-  event: { type: RunEvent["type"]; progress?: number; message: string; estimatedRemainingMs?: number }
-): void {
-  const progress = typeof event.progress === "number"
-    ? Math.max(record.lastProgress, Math.min(100, Math.max(0, Math.round(event.progress))))
-    : record.lastProgress;
-  record.lastProgress = progress;
-  const runEvent: RunEvent = {
-    runId: record.runId,
-    type: event.type,
-    progress,
-    message: event.message,
-    elapsedMs: Math.max(0, Date.now() - record.startedAtMs),
-    ...(event.estimatedRemainingMs !== undefined ? { estimatedRemainingMs: Math.max(0, Math.round(event.estimatedRemainingMs)) } : {}),
-    timestamp: new Date().toISOString()
-  };
-  record.events.push(runEvent);
-  // Bound the replay buffer: keep the initial state event, drop the oldest
-  // interim progress entries.
-  if (record.events.length > LOCAL_RUN_EVENT_BUFFER_LIMIT) record.events.splice(1, 1);
-  for (const listener of [...record.listeners]) listener(runEvent);
-}
-
-/** Terminal transition; guarantees exactly one terminal event per run. */
-function finishLocalRun(
-  record: LocalRunRecord,
-  status: Exclude<LocalRunStatus, "running">,
-  event: { type: RunEvent["type"]; progress?: number; message: string; estimatedRemainingMs?: number }
-): void {
-  if (record.status !== "running") return;
-  record.status = status;
-  record.cancelSolve = undefined;
-  emitLocalRunEvent(record, event);
-}
 
 /**
  * Maps real solver progress hooks onto the run progress contract:
@@ -488,10 +441,10 @@ export async function renameProject(projectId: string, name: string, currentProj
 
 export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
   // In-browser gmsh-wasm meshing (production default since A-M4). Returns
-  // null in opt-out builds or when the geometry has no wasm-meshable source,
-  // and falls through to the existing preset-estimate path on transient
-  // failure for preview/sample geometry. Uploaded STEP failures and typed
-  // quality/topology rejections are permanent: surface them instead of
+  // null in opt-out builds or when the geometry has no wasm-meshable source.
+  // Estimate fallback is quarantined behind options.allowEstimateFallback and
+  // only for preview/sample geometry: uploaded STEP failures and typed
+  // quality/topology rejections are permanent and always surface instead of
   // marking a fake estimate complete and failing again at Run.
   if (currentStudy) {
     try {
@@ -502,7 +455,7 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
         study: presetStudy,
         displayModel,
         geometry: geometry ? geometryWithMeshPreset(geometry, presetStudy) : null,
-        meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
+        meshSizeMm: meshTargetSizeMmForPreset(preset),
         onProgress,
         onPhaseProgress
       });
@@ -513,8 +466,13 @@ export async function generateMesh(studyId: string, preset: MeshQuality, current
         displayModel?.nativeCad?.format === "step" ||
         (error instanceof Error && (error.name === "MeshQualityError" || error.name === "StepGeometryError"))
       ) throw error;
+      if (!options.allowEstimateFallback) throw error;
       onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
     }
+  }
+  if (!options.allowEstimateFallback && !currentStudy) throw new Error("Could not generate mesh without an open study.");
+  if (!options.allowEstimateFallback) {
+    throw new Error("In-browser meshing is unavailable for this geometry (opt-out build or preview-only format).");
   }
   const localFallback = () => {
     if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
@@ -559,7 +517,7 @@ export async function runMeshConvergence(
         displayModel,
         options.onProgress,
         undefined,
-        { localOnly: true }
+        { localOnly: true, allowEstimateFallback: true }
       );
       if (generated.study.type !== "static_stress") throw new Error("Convergence meshing changed the static study type unexpectedly.");
       const coreStatistics = coreMeshStatisticsForStudy(generated.study, displayModel, options.customMaterials);
@@ -872,10 +830,6 @@ export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void
   return { close: () => globalThis.clearTimeout(timer) } as EventSource;
 }
 
-function syntheticRunErrorEvent(runId: string, message: string): RunEvent {
-  return { runId, type: "error", progress: 100, message, timestamp: new Date().toISOString() };
-}
-
 function messageFromUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : typeof error === "string" ? error : "";
 }
@@ -883,17 +837,7 @@ function messageFromUnknownError(error: unknown): string {
 // Gmsh characteristic length (mm) per mesh preset for procedural sample
 // geometry (bracket). Shared by the mesh step and the run flow's mesh-first
 // path; STEP uploads use the same map as a characteristic-length hint.
-/** The target element size a preset asks the browser mesher for (2026-09 review F5: shown in the Mesh panel). */
-export function meshTargetSizeMmForPreset(preset: MeshQuality): number {
-  return PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium;
-}
-
-const PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
-  coarse: 18,
-  medium: 12,
-  fine: 8,
-  ultra: 6
-};
+export { meshTargetSizeMmForPreset, PROCEDURAL_MESH_SIZE_MM } from "./meshEstimates";
 
 export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof geometrySourceForStudy>>, study: Study) {
   if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
@@ -1197,46 +1141,7 @@ function lerp(min: number, max: number, t: number): number {
   return min + (max - min) * t;
 }
 
-/**
- * EventSource-like adapter over a local run record: replays the buffered
- * events asynchronously (matching EventSource delivery semantics), then
- * streams live solver-driven events until closed.
- */
-function subscribeToLocalRunRecord(record: LocalRunRecord, onEvent: (event: RunEvent) => void): EventSource {
-  let closed = false;
-  const listener = (event: RunEvent) => {
-    if (!closed) onEvent(event);
-  };
-  const replayTimer = globalThis.setTimeout(() => {
-    // Replay + attach happen in one task, so no event is missed or duplicated:
-    // live emits append to record.events and cannot interleave with this loop.
-    for (let index = 0; index < record.events.length; index += 1) {
-      if (closed) return;
-      onEvent(record.events[index]!);
-    }
-    if (!closed) record.listeners.add(listener);
-  }, 0);
-  return {
-    close() {
-      closed = true;
-      globalThis.clearTimeout(replayTimer);
-      record.listeners.delete(listener);
-    }
-  } as EventSource;
-}
-
-const MESH_PRESET_ESTIMATE_WARNING = "Node and element counts are preset planning estimates, not a generated finite-element mesh. Surface analysis samples are heuristic; the solver reports actual mesh statistics with computed FEA results.";
-
-function meshSummaryForPreset(preset: MeshQuality, analysisMesh?: AnalysisMesh) {
-  const sampleCount = analysisMesh?.samples.length;
-  const summaryByPreset: Record<MeshQuality, NonNullable<Study["meshSettings"]["summary"]>> = {
-    coarse: { nodes: 12840, elements: 7320, warnings: [MESH_PRESET_ESTIMATE_WARNING], analysisSampleCount: sampleCount ?? 1200, quality: "coarse" as const, source: "preset_estimate" },
-    medium: { nodes: 42381, elements: 26944, warnings: [MESH_PRESET_ESTIMATE_WARNING, "Medium heuristic surface-sample density selected."], analysisSampleCount: sampleCount ?? 4800, quality: "medium" as const, source: "preset_estimate" },
-    fine: { nodes: 88420, elements: 57102, warnings: [MESH_PRESET_ESTIMATE_WARNING, "Fine heuristic surface-sample density selected."], analysisSampleCount: sampleCount ?? 19200, quality: "fine" as const, source: "preset_estimate" },
-    ultra: { nodes: 182400, elements: 119808, warnings: [MESH_PRESET_ESTIMATE_WARNING, "Ultra heuristic surface-sample density selected."], analysisSampleCount: sampleCount ?? 45000, quality: "ultra" as const, source: "preset_estimate" }
-  };
-  return summaryByPreset[preset];
-}
+export { MESH_PRESET_ESTIMATE_WARNING } from "./meshEstimates";
 
 function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
   return normalizeSolverBackend(study);

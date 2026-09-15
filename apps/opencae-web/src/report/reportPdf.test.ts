@@ -130,6 +130,7 @@ function fixtureReport(): ReportData {
       ]
     },
     mesh: [{ label: "Nodes", value: "42,381" }, { label: "Elements", value: "26,944" }, { label: "Element type", value: "Tet10" }],
+    meshConvergence: null,
     solver: rows,
     figures: {
       stress: { title: "Von Mises stress", png: ONE_PIXEL_PNG, unavailableLabel: "Not available (--)", legendMin: "0 MPa", legendMax: "142 MPa", caption: "Von Mises stress (MPa). Automatically selected peak von Mises stress frame (frame 17 of 21, 0.0800 s). Deformed shape, ×2,150 exaggeration at ×1.8 emphasis (display only)." },

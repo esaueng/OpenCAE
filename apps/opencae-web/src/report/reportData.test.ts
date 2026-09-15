@@ -185,8 +185,7 @@ describe("buildReportData", () => {
     expect(data.filename).toBe("OpenCAE-Report_bracket-demo_2026-07-10.pdf");
   });
 
-  test("uses the same US conversion pipeline as the results panel", () => {
-    const data = report({ unitSystem: "US" });
+  test("uses the same US conversion pipeline as the results panel", () => {    const data = report({ unitSystem: "US" });
 
     expect(data.pageFormat).toBe("letter");
     expect(data.keyResults).toContainEqual({ label: "Max von Mises stress", value: "20.6 ksi" });
@@ -401,6 +400,34 @@ describe("buildReportData", () => {
     expect(data.figures.stress.legendMax).toBe("142 MPa");
     expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
     expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
+  });
+
+  test("omits the convergence section when no ladder has run", () => {
+    expect(report().meshConvergence).toBeNull();
+  });
+
+  test("renders the latest ladder's rung table, verdict, and skipped rungs", () => {
+    const record = {
+      id: "convergence-1",
+      studyId: "study-1",
+      caseId: "case-default",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      completedAt: "2026-09-01T00:01:00.000Z",
+      probe: { point: [0, 0, 0] as [number, number, number], source: "explicit" as const },
+      rungs: [
+        { requestedPreset: "coarse" as const, status: "complete" as const, actualNodeCount: 1000, actualElementCount: 500, totalDofs: 3000, probeDisplacement: 0.1, displacementUnits: "mm", rawElementPeakVonMises: 100, stressUnits: "MPa" },
+        { requestedPreset: "medium" as const, status: "skipped" as const, skipReason: "150k DOF ceiling" },
+        { requestedPreset: "fine" as const, status: "complete" as const, actualNodeCount: 4000, actualElementCount: 2000, totalDofs: 12000, probeDisplacement: 0.11, displacementUnits: "mm", rawElementPeakVonMises: 105, stressUnits: "MPa" }
+      ],
+      classification: "apparent_convergence" as const,
+      lastStepChanges: { displacement: 0.1, stress: 0.05 }
+    };
+    const data = report({ convergenceRecords: [record] });
+
+    expect(data.meshConvergence?.headers).toEqual(["Rung", "Elements", "DOFs", "Probe displacement", "Peak von Mises", "Status"]);
+    expect(data.meshConvergence?.rows).toHaveLength(3);
+    expect(data.meshConvergence?.rows[1]).toContain("skipped: 150k DOF ceiling");
+    expect(data.meshConvergence?.footnote).toContain("Verdict: apparent convergence.");
   });
 });
 

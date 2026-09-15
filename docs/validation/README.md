@@ -59,8 +59,11 @@ Supported dynamic load profiles:
 
 - `ramp`: load scale is `0` at `startTime` and `1` at `endTime`.
 - `step`: load scale is `1` for the whole step.
-- `quasi_static`: currently shares step-load behavior in the Core CPU adapter.
-- `sinusoidal`: a single sine cycle over the selected time range.
+- `quasi_static`: smoothstep easing (`3s²−2s³`) over the time range — a slow
+  ramp intended to reduce inertial effects, not a step load.
+- `sinusoidal` (stored as `half_sine`): a half-sine lobe, `sin(πs)`, over the
+  selected time range — zero at both ends, peaking mid-window. Not a full
+  sine cycle.
 
 Choose `timeStep` small enough to resolve the fastest meaningful response change. Choose `outputInterval` for result and animation frame cadence; it is normalized to be greater than or equal to `timeStep`.
 

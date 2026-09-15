@@ -353,3 +353,61 @@ describe("projectFactory", () => {
     expect(project.name).toBe("Payload Calibration");
   });
 });
+
+describe("reference/backend parity (frozen reference contract)", () => {
+  // Source-text parity: the dev API is a frozen reference, not the production
+  // path. Importing web sources here would drag vite/jsx-typed modules into
+  // the api tsc program, so this pins the mirrored literals as text. If it
+  // fails, the two factories drifted: update both deliberately, not one.
+  test("reference sample ids match the browser workspace factory", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+    const webFactory = readFileSync(resolve(rootDir, "apps/opencae-web/src/localProjectFactory.ts"), "utf8");
+    // Beam ("plate") dimensions INTENTIONALLY differ: the browser factory
+    // derives structural dimensions from render proportions while the
+    // reference keeps nominal CAD metadata. Pin the known divergence.
+    expect(webFactory).toContain("BEAM_PHYSICAL_LENGTH_MM");
+    expect(webFactory).toContain('projectName: "Beam Demo"');
+    const { normalizeSampleId, sampleDisplayModelFor } = await import("./projectFactory");
+    const reference = sampleDisplayModelFor(normalizeSampleId("plate"));
+    expect(reference.dimensions).toEqual({ x: 160, y: 32, z: 36, units: "mm" });
+    for (const sample of ["bracket", "cantilever"] as const) {
+      expect(sampleDisplayModelFor(normalizeSampleId(sample)).name)
+        .toBe(sample === "bracket" ? "bracket demo body" : "cantilever demo body");
+    }
+  });
+
+  test("reference mesh estimates match the browser quarantined estimates", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+    const webEstimates = readFileSync(resolve(rootDir, "apps/opencae-web/src/lib/meshEstimates.ts"), "utf8");
+    const { MockMeshService } = await import("@opencae/mesh-service");
+    class MemoryStorage {
+      objects = new Map<string, Buffer>();
+      async putObject(key: string, data: string | Buffer | Uint8Array): Promise<string> {
+        this.objects.set(key, Buffer.from(data));
+        return key;
+      }
+    }
+    const service = new MockMeshService(new MemoryStorage() as never);
+    const study = { projectId: "project-1", id: "study-1" } as never;
+    const expected: Record<string, { nodes: number; elements: number }> = {
+      coarse: { nodes: 12840, elements: 7320 },
+      medium: { nodes: 42381, elements: 26944 },
+      fine: { nodes: 88420, elements: 57102 },
+      ultra: { nodes: 182400, elements: 119808 }
+    };
+    for (const [preset, counts] of Object.entries(expected)) {
+      const { summary } = await service.generateMesh(study, preset as never);
+      expect(summary.nodes, `nodes drift for ${preset}`).toBe(counts.nodes);
+      expect(summary.elements, `elements drift for ${preset}`).toBe(counts.elements);
+      // The browser twin must carry the same literals.
+      expect(webEstimates).toContain(`nodes: ${counts.nodes}, elements: ${counts.elements}`);
+    }
+  });
+});
+
