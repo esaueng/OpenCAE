@@ -32,8 +32,7 @@ describe("encrypted cloud backup", () => {
     expect(restored).toEqual(snapshot);
   });
 
-  test("does not restore a backup for a different run", async () => {
-    const storage = memoryStorage();
+  test("does not restore a backup for a different run", async () => {    const storage = memoryStorage();
     await saveEncryptedCloudBackup({ version: 1 } as AutosavedWorkspace, "run-local-1", {
       storage,
       fetch: vi.fn(async () => Response.json({ expiresAt: "2099-01-01T00:00:00.000Z" }, { status: 201 })) as typeof fetch
@@ -42,6 +41,25 @@ describe("encrypted cloud backup", () => {
 
     await expect(restoreEncryptedCloudBackup("run-local-2", { storage, fetch: fetchMock as typeof fetch })).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("deletes the server object when the local recovery key cannot be saved", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      return Response.json({ expiresAt: "2099-01-01T00:00:00.000Z" }, { status: 201 });
+    });
+    const failingStorage = {
+      getItem: () => null,
+      setItem: () => { throw new Error("quota exceeded"); }
+    };
+
+    await expect(saveEncryptedCloudBackup({ version: 1 } as AutosavedWorkspace, "run-local-1", {
+      storage: failingStorage,
+      fetch: fetchMock as typeof fetch
+    })).rejects.toThrow(/local recovery key could not be saved/);
+
+    const deletes = fetchMock.mock.calls.filter(([, init]) => (init as RequestInit)?.method === "DELETE");
+    expect(deletes).toHaveLength(1);
   });
 
   test("requests persistent local storage when the browser supports it", async () => {

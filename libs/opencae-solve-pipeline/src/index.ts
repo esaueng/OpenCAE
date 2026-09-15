@@ -59,6 +59,13 @@ export type CorePipelineSolverSettings = Record<string, unknown> & {
   outputInterval?: number;
   allowPreview?: boolean;
   modeCount?: number;
+  /**
+   * Populated by boundedSolverSettings whenever a requested dynamic setting was
+   * clamped by resource limits. Each entry records { requested, applied } so
+   * callers can surface "the solve was shortened/coarsened" instead of silently
+   * delivering fewer frames or a shorter interval than asked.
+   */
+  truncation?: Partial<Record<"maxFrames" | "endTime" | "timeStep" | "outputInterval" | "tolerance", { requested: number; applied: number }>>;
 };
 
 /**
@@ -467,28 +474,65 @@ export function boundedSolverSettings(
     tolerance: Math.max(finiteNumber(input?.tolerance) ?? limits.tolerance, limits.tolerance)
   };
   if (analysisType === "dynamic_structural") {
+    const requestedMaxFrames = positiveInteger(input?.maxFrames);
     settings.maxFrames = Math.min(
-      positiveInteger(input?.maxFrames) ?? limits.maxFrames,
+      requestedMaxFrames ?? limits.maxFrames,
       limits.maxFrames,
       transientFrameBudget(model, limits.transientFieldBytes)
     );
+    if (requestedMaxFrames !== undefined && settings.maxFrames < requestedMaxFrames) {
+      settings.truncation = {
+        ...(settings.truncation ?? {}),
+        maxFrames: { requested: requestedMaxFrames, applied: settings.maxFrames }
+      };
+    }
+    const requestedEndTime = finiteNumber(input?.endTime) ?? finiteNumber(dynamicStep?.endTime);
     settings.endTime = Math.min(
-      finiteNumber(input?.endTime) ?? finiteNumber(dynamicStep?.endTime) ?? limits.endTimeSeconds,
+      requestedEndTime ?? limits.endTimeSeconds,
       limits.endTimeSeconds
     );
+    const requestedTimeStep = finiteNumber(input?.timeStep) ?? finiteNumber(dynamicStep?.timeStep);
     settings.timeStep = Math.max(
-      finiteNumber(input?.timeStep) ?? finiteNumber(dynamicStep?.timeStep) ?? limits.minTimeStepSeconds,
+      requestedTimeStep ?? limits.minTimeStepSeconds,
       limits.minTimeStepSeconds
     );
+    if (requestedTimeStep !== undefined && settings.timeStep > requestedTimeStep) {
+      settings.truncation = {
+        ...(settings.truncation ?? {}),
+        timeStep: { requested: requestedTimeStep, applied: settings.timeStep }
+      };
+    }
+    const requestedOutputInterval = finiteNumber(input?.outputInterval) ?? finiteNumber(dynamicStep?.outputInterval);
     settings.outputInterval = Math.max(
-      finiteNumber(input?.outputInterval) ?? finiteNumber(dynamicStep?.outputInterval) ?? settings.timeStep,
+      requestedOutputInterval ?? settings.timeStep,
       limits.minOutputIntervalSeconds,
       settings.timeStep
     );
+    if (requestedOutputInterval !== undefined && settings.outputInterval > requestedOutputInterval) {
+      settings.truncation = {
+        ...(settings.truncation ?? {}),
+        outputInterval: { requested: requestedOutputInterval, applied: settings.outputInterval }
+      };
+    }
     const startTime = finiteNumber(input?.startTime) ?? finiteNumber(dynamicStep?.startTime) ?? 0;
     const maxFrameEndTime = startTime + Math.max((settings.maxFrames ?? limits.maxFrames) - 2, 0) * settings.outputInterval;
     settings.startTime = startTime;
+    const preFrameEndTime = settings.endTime;
     settings.endTime = Math.min(settings.endTime, maxFrameEndTime);
+    if (settings.endTime < preFrameEndTime) {
+      settings.truncation = {
+        ...(settings.truncation ?? {}),
+        endTime: { requested: preFrameEndTime, applied: settings.endTime }
+      };
+    }
+    const requestedTolerance = finiteNumber(input?.tolerance);
+    const appliedTolerance = settings.tolerance ?? limits.tolerance;
+    if (requestedTolerance !== undefined && appliedTolerance > requestedTolerance) {
+      settings.truncation = {
+        ...(settings.truncation ?? {}),
+        tolerance: { requested: requestedTolerance, applied: appliedTolerance }
+      };
+    }
   }
   if (analysisType === "modal_analysis") {
     const modalStep = selectedStep?.type === "modal" ? selectedStep : undefined;
@@ -533,7 +577,8 @@ function resourceLimitsDiagnostic(
           maxFrames: settings.maxFrames,
           endTime: settings.endTime,
           timeStep: settings.timeStep,
-          outputInterval: settings.outputInterval
+          outputInterval: settings.outputInterval,
+          ...(settings.truncation ? { truncation: settings.truncation } : {})
         }
       : analysisType === "modal_analysis"
         ? { modeCount: settings.modeCount }

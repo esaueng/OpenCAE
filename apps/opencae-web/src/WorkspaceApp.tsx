@@ -198,6 +198,9 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // the loss is announced on every step instead of one line in the collapsed
   // log drawer (2026-09 review D4).
   const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(restoredUi?.resultsOutdatedBy ?? null);
+  // Sequence counter for staleness edits: repeating the same edit after a
+  // dismissal must re-raise the banner (the notice key includes it).
+  const [resultsOutdatedSequence, setResultsOutdatedSequence] = useState(0);
   const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
   // Geometry replacement waits for confirmation when it would clear the study
   // setup (2026-09 review D5).
@@ -564,7 +567,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   // One notice for the whole workspace (2026-09 review D7): a failed mesh or
   // run, or results cleared by an edit, used to be visible only on the panel
   // where it happened and as a footer pill.
-  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, openNote, dismissedKey: dismissedNoticeKey });
+  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, resultsOutdatedSequence, openNote, dismissedKey: dismissedNoticeKey });
   const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
   // The generated volume mesh's boundary, for the Mesh step's viewer. "Toggle
   // mesh" used to draw nothing for uploads and a decorative box for samples
@@ -1890,7 +1893,10 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
     if (resultFields.length && !resultsOutdatedBy) {
       pushMessage("Results are now outdated: the study changed since the last run.");
     }
-    if (resultFields.length) setResultsOutdatedBy(response.message);
+    if (resultFields.length) {
+      setResultsOutdatedBy(response.message);
+      setResultsOutdatedSequence((sequence) => sequence + 1);
+    }
     pushMessage(response.message);
     if (nextStep) navigateToStep(nextStep);
   }
@@ -2599,14 +2605,14 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         {showRunButton ? (
           <button
             className={`primary topbar-action ${solverRunning ? "running" : ""}`}
-            onClick={handleRunSimulation}
-            disabled={!effectiveCanRunSimulation}
-            title={effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
-            aria-label={solverRunning ? `Running simulation: ${runButtonProgress}%` : "Run simulation"}
+            onClick={solverRunning ? () => void handleCancelSimulation() : handleRunSimulation}
+            disabled={solverRunning ? false : !effectiveCanRunSimulation}
+            title={solverRunning ? "Stop the running simulation" : effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
+            aria-label={solverRunning ? `Stop simulation: ${runButtonProgress}% complete` : "Run simulation"}
             aria-busy={solverRunning}
             style={{ "--run-progress": `${runButtonProgress}%` } as CSSProperties}
           >
-            <span aria-hidden="true">▶</span><span className="topbar-action-label">{solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"}</span>
+            <span aria-hidden="true">{solverRunning ? "■" : "▶"}</span><span className="topbar-action-label">{solverRunning ? `Stop ${runButtonProgress}%` : "Run simulation"}</span>
           </button>
         ) : null}
       </header>

@@ -13,6 +13,8 @@ import {
 import { createHexBarModel, createStructuredCantileverModel, dynamicLoadedModel } from "./helpers";
 import {
   solveDynamicLinearTetMDOF,
+  solveModalLinearTet,
+  solveSteadyStateThermal,
   recoverNodalVonMisesFromElements,
   solveStaticLinearTet,
   solveStaticLinearTet4Cpu
@@ -74,6 +76,144 @@ describe("Core validation suite static benchmarks", () => {
     );
     expect(millimeterSolve.diagnostics.reactionBalance?.relativeError)
       .toBeCloseTo(meterSolve.diagnostics.reactionBalance?.relativeError ?? Number.NaN, 10);
+  });
+
+  test("produces equivalent physical dynamics in m and mm-MPa solver units", () => {
+    const meterModel: OpenCAEModelJson = {
+      ...dynamicLoadedModel("ramp"),
+      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
+      materials: [{ ...dynamicLoadedModel("ramp").materials[0], density: 2700, yieldStrength: 250e6 }]
+    };
+    const millimeterModel: OpenCAEModelJson = {
+      ...meterModel,
+      coordinateSystem: { solverUnits: "mm-N-s-MPa", renderCoordinateSpace: "solver" },
+      nodes: { coordinates: meterModel.nodes.coordinates.map((coordinate) => coordinate * 1_000) },
+      materials: meterModel.materials.map((material) => ({
+        ...material,
+        youngModulus: material.youngModulus / 1_000_000,
+        yieldStrength: material.yieldStrength === undefined ? undefined : material.yieldStrength / 1_000_000,
+        density: (material.density ?? 0) / 1e12
+      }))
+    };
+
+    const meterSolve = solveDynamicLinearTetMDOF(meterModel);
+    const millimeterSolve = solveDynamicLinearTetMDOF(millimeterModel);
+    expect(meterSolve.ok, meterSolve.ok ? undefined : meterSolve.error.message).toBe(true);
+    expect(millimeterSolve.ok, millimeterSolve.ok ? undefined : millimeterSolve.error.message).toBe(true);
+    if (!meterSolve.ok || !millimeterSolve.ok) return;
+
+    expect(meterSolve.diagnostics.frameCount).toBe(millimeterSolve.diagnostics.frameCount);
+    // Raw solver diagnostics are in solver units (mass kg vs tonne, length m
+    // vs mm, stress Pa vs MPa). Convert the mm run back to m-based units
+    // (1 tonne = 1000 kg). Solver-internal quantities converge to ~1e-5
+    // relative on this coarse hex-bar fixture (CG + Newmark tolerances); the
+    // coreResult display summaries below assert physical agreement tightly.
+    expectRelativeClose((millimeterSolve.diagnostics.totalMass ?? 0) * 1000, meterSolve.diagnostics.totalMass, 1e-5);
+    expectRelativeClose((millimeterSolve.diagnostics.peakDisplacement ?? 0) / 1000, meterSolve.diagnostics.peakDisplacement, 1e-5);
+    expectRelativeClose((millimeterSolve.diagnostics.peakStress ?? 0) * 1e6, meterSolve.diagnostics.peakStress, 1e-5);
+    expectRelativeClose(millimeterSolve.diagnostics.rayleighAlpha, meterSolve.diagnostics.rayleighAlpha, 1e-5);
+    expectRelativeClose(millimeterSolve.diagnostics.rayleighBeta, meterSolve.diagnostics.rayleighBeta, 1e-5);
+    // Display-facing summaries are physical: mm displacement, MPa stress.
+    expectRelativeClose(
+      millimeterSolve.result.coreResult?.summary.maxDisplacement,
+      meterSolve.result.coreResult?.summary.maxDisplacement,
+      1e-9
+    );
+    expectRelativeClose(
+      millimeterSolve.result.coreResult?.summary.maxStress,
+      meterSolve.result.coreResult?.summary.maxStress,
+      1e-9
+    );
+  });
+
+  test("produces equivalent physical modal frequencies in m and mm-MPa solver units", () => {
+    const density = 2700;
+    const meterModel: OpenCAEModelJson = {
+      ...singleTetStaticFixture,
+      schemaVersion: "0.3.0",
+      coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
+      materials: [{ ...singleTetStaticFixture.materials[0], density, yieldStrength: 250e6 }],
+      loads: [],
+      steps: [{
+        name: "modes",
+        type: "modal",
+        boundaryConditions: ["fixedSupport", "settlement", "supportY", "supportZ"],
+        modeCount: 1
+      }]
+    };
+    const millimeterModel: OpenCAEModelJson = {
+      ...meterModel,
+      coordinateSystem: { solverUnits: "mm-N-s-MPa", renderCoordinateSpace: "solver" },
+      nodes: { coordinates: meterModel.nodes.coordinates.map((coordinate) => coordinate * 1_000) },
+      materials: meterModel.materials.map((material) => ({
+        ...material,
+        youngModulus: material.youngModulus / 1_000_000,
+        yieldStrength: material.yieldStrength === undefined ? undefined : material.yieldStrength / 1_000_000,
+        density: (material.density ?? 0) / 1e12
+      }))
+    };
+
+    const meterSolve = solveModalLinearTet(meterModel, { modeCount: 1 });
+    const millimeterSolve = solveModalLinearTet(millimeterModel, { modeCount: 1 });
+    expect(meterSolve.ok, meterSolve.ok ? undefined : meterSolve.error.message).toBe(true);
+    expect(millimeterSolve.ok, millimeterSolve.ok ? undefined : millimeterSolve.error.message).toBe(true);
+    if (!meterSolve.ok || !millimeterSolve.ok) return;
+
+    expect(meterSolve.result.modes.length).toBeGreaterThan(0);
+    expect(millimeterSolve.result.modes.length).toBe(meterSolve.result.modes.length);
+    for (let index = 0; index < meterSolve.result.modes.length; index += 1) {
+      // Frequencies are physical (Hz): identical geometry in mm must agree.
+      expectRelativeClose(
+        millimeterSolve.result.modes[index]?.frequencyHz,
+        meterSolve.result.modes[index]?.frequencyHz,
+        1e-6
+      );
+    }
+    // totalMass is reported in solver mass units (kg vs tonne: 1 tonne = 1000 kg);
+    // the coarse single-tet modal fixture converges to ~1e-5 relative.
+    expectRelativeClose((millimeterSolve.diagnostics.totalMass ?? 0) * 1000, meterSolve.diagnostics.totalMass, 1e-5);
+  });
+
+  test("produces equivalent physical conduction in m and mm-MPa solver units", () => {
+    const build = (solverUnits: "m-N-s-Pa" | "mm-N-s-MPa", lengthScale: number, conductivity: number): OpenCAEModelJson => ({
+      schema: "opencae.model",
+      schemaVersion: "0.4.0",
+      nodes: { coordinates: [0, 0, 0, lengthScale, 0, 0, 0, lengthScale, 0, 0, 0, lengthScale] },
+      materials: [{
+        name: "thermal-solid",
+        type: "isotropicLinearElastic",
+        youngModulus: 1,
+        poissonRatio: 0.25,
+        thermalConductivity: conductivity
+      }],
+      elementBlocks: [{ name: "solid", type: "Tet4", material: "thermal-solid", connectivity: [0, 1, 2, 3] }],
+      nodeSets: [{ name: "cold", nodes: [0, 2, 3] }, { name: "hot", nodes: [1] }],
+      elementSets: [],
+      boundaryConditions: [
+        { name: "cold-temperature", type: "prescribedTemperature", nodeSet: "cold", value: 0 },
+        { name: "hot-temperature", type: "prescribedTemperature", nodeSet: "hot", value: 100 }
+      ],
+      loads: [],
+      steps: [{
+        name: "conduction",
+        type: "steadyStateThermal",
+        boundaryConditions: ["cold-temperature", "hot-temperature"],
+        loads: []
+      }],
+      coordinateSystem: { solverUnits, renderCoordinateSpace: "solver" }
+    });
+    const meterSolve = solveSteadyStateThermal(build("m-N-s-Pa", 1, 10));
+    const millimeterSolve = solveSteadyStateThermal(build("mm-N-s-MPa", 1000, 0.01));
+    expect(meterSolve.ok, meterSolve.ok ? undefined : meterSolve.error.message).toBe(true);
+    expect(millimeterSolve.ok, millimeterSolve.ok ? undefined : millimeterSolve.error.message).toBe(true);
+    if (!meterSolve.ok || !millimeterSolve.ok) return;
+
+    expect(Array.from(millimeterSolve.result.temperature)).toEqual(Array.from(meterSolve.result.temperature));
+    // Heat flux magnitude scales with W/mm^2 vs W/m^2: 1 W/m^2 = 1e-6 W/mm^2.
+    for (let node = 0; node < 4; node += 1) {
+      expect(millimeterSolve.result.heatFluxMagnitude[node]).toBeCloseTo((meterSolve.result.heatFluxMagnitude[node] ?? 0) / 1e6, 8);
+    }
+    expect(millimeterSolve.diagnostics.energyBalanceRelativeError).toBeLessThan(1e-9);
   });
 
   test("axial bar tension tracks F/A stress, FL/AE displacement, and reaction balance", () => {

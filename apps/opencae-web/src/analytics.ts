@@ -11,8 +11,9 @@ export function isAnalyticsEnabled(): boolean {
   try {
     return window.localStorage.getItem(ANALYTICS_OPT_OUT_KEY) !== "1";
   } catch {
-    // Storage can be unavailable (private browsing); default stays enabled.
-    return true;
+    // Storage can be unavailable (private browsing); without a durable opt-out
+    // record, fail closed and do not track.
+    return false;
   }
 }
 

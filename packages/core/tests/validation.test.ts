@@ -264,6 +264,30 @@ describe("validateModelJson", () => {
     expect(codes).toContain("missing-load-reference");
   });
 
+  test("rejects a zero pressure direction instead of permitting a silent zero load", () => {
+    const model = createSingleTetModel();
+    model.surfaceFacets = extractBoundarySurfaceFacets(model);
+    model.surfaceSets = [{ name: "face", facets: model.surfaceFacets.map((facet) => facet.id) }];
+    model.loads = [{
+      name: "pressurePush",
+      type: "pressure",
+      surfaceSet: "face",
+      pressure: 100,
+      direction: [0, 0, 0]
+    }];
+    model.steps = [{
+      name: "loadStep",
+      type: "staticLinear",
+      boundaryConditions: ["fixedSupport", "settlement"],
+      loads: ["pressurePush"]
+    }];
+
+    const report = validateModelJson(model);
+
+    expect(report.ok).toBe(false);
+    expect(report.errors.map((issue) => issue.code)).toContain("zero-pressure-direction");
+  });
+
   test("accepts v0.2.0 models with surface loads and dynamic steps", () => {
     const dynamicStep: DynamicLinearStepJson = {
       name: "transient",

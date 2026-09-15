@@ -49,8 +49,44 @@ describe("assembly mesh connections", () => {
     if (!assembly.ok) return;
     const matrix = toCsrMatrix(builder);
     expect(assembly.diagnostics.equationCount).toBe(3);
+    expect(assembly.diagnostics.unmatchedSourceNodes).toBe(0);
     const xRows = [4 * 3, 5 * 3, 6 * 3];
     expect(xRows.every((row) => matrix.rowPtr[row] === matrix.rowPtr[row + 1])).toBe(true);
     expect(matrix.values.length).toBeGreaterThan(0);
+  });
+
+  test("contact diagnostics count partially matched source nodes", () => {
+    // Shift the source interface far off the target plane: one corner node may
+    // still project within tolerance, but most source nodes must miss.
+    const shifted = assemblyModel({ type: "contact", source: "upper-bottom", target: "lower-top", searchTolerance: 1e-6 });
+    shifted.nodes.coordinates = [
+      0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, -1,
+      0, 0, 5, 1, 0, 5, 0, 1, 5, 0, 0, 6
+    ];
+    const normalized = normalizeModelJson(shifted);
+    expect(normalized.ok).toBe(true);
+    if (!normalized.ok) return;
+    const builder = createSparseMatrixBuilder(normalized.model.counts.nodes * 3);
+    const assembly = assembleMeshConnectionStiffness(builder, normalized.model);
+    // Matched-nothing fails; mostly-unmatched succeeds but must be counted.
+    if (!assembly.ok) {
+      expect(assembly.error.code).toBe("connection-search-failed");
+      return;
+    }
+    expect(assembly.diagnostics.unmatchedSourceNodes).toBeGreaterThan(0);
+  });
+
+  test("static solves surface connection diagnostics for contact interfaces", () => {
+    const solved = solveStaticLinearTet4Cpu(assemblyModel({ type: "contact", source: "upper-bottom", target: "lower-top", searchTolerance: 1e-6 }), {
+      solverMode: "sparse",
+      tolerance: 1e-9
+    });
+    expect(solved.ok).toBe(true);
+    if (!solved.ok) return;
+    expect(solved.diagnostics.connections).toMatchObject({
+      connectionCount: 1,
+      equationCount: 3,
+      unmatchedSourceNodes: 0
+    });
   });
 });

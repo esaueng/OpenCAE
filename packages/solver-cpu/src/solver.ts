@@ -12,7 +12,7 @@ import { computeTet10ElementStiffness, computeTet10Volume, recoverTet10CentroidS
 import { solveDenseLinearSystem } from "./linear-solve";
 import { boundedStructuralMaxDofs, structuralDofCount, structuralDofLimitError } from "./limits";
 import { computeLinearElasticDMatrix } from "./material";
-import { assembleMeshConnectionStiffness } from "./connections";
+import { assembleMeshConnectionStiffness, type ConnectionAssemblyDiagnostics } from "./connections";
 import { staticCoreResultFromSolve } from "./results";
 import {
   addSparseEntry,
@@ -49,6 +49,7 @@ export type PreparedStaticLinearTetSystem = {
   constraints: Map<number, number>;
   free: Int32Array;
   dofs: number;
+  connections?: ConnectionAssemblyDiagnostics;
 };
 
 export type PreparedStaticLinearTetResult =
@@ -134,7 +135,7 @@ export function solveStaticLinearTet4Cpu(
 
   const assembly = assembleSparseStiffness(model, options.hooks);
   if (!assembly.ok) return failure(assembly.error.code, assembly.error.message, { dofs });
-  return solveSparseSystem(model, assembly.stiffness, loads, constraints.values, free, options, reportedLoadAssembly);
+  return solveSparseSystem(model, assembly.stiffness, loads, constraints.values, free, options, reportedLoadAssembly, assembly.connections);
 }
 
 function hasAdvancedLoadPrimitives(model: NormalizedOpenCAEModel, loadNames: string[]): boolean {
@@ -192,7 +193,8 @@ export function prepareStaticLinearTetSystem(
       reducedStiffness: reduced.matrix,
       constraints: constraints.values,
       free,
-      dofs
+      dofs,
+      ...(assembled.connections ? { connections: assembled.connections } : {})
     }
   };
 }
@@ -248,7 +250,8 @@ export function solvePreparedStaticLoadCase(
       preconditioner: resolvePreconditioner(options),
       estimatedMatrixBytes: estimateCsrMemoryBytes(prepared.stiffness),
       visualizationSmoothing: options.visualizationSmoothing,
-      ...(hasAdvancedLoadPrimitives(prepared.model, loadNames) ? { loadAssembly: loadAssembly.diagnostics } : {})
+      ...(hasAdvancedLoadPrimitives(prepared.model, loadNames) ? { loadAssembly: loadAssembly.diagnostics } : {}),
+      ...(prepared.connections ? { connections: prepared.connections } : {})
     }
   );
   return finished.ok ? { ...finished, reducedSolution: solve.solution } : finished;
@@ -353,8 +356,13 @@ export function getNormalizedModel(input: CpuSolverInput):
     const densityError = result.report.errors.find((issue) =>
       issue.code === "missing-dynamic-material-density" || issue.code === "missing-inertial-material-density"
     );
-    const modalSupportError = result.report.errors.find((issue) => issue.code === "missing-modal-support");
     const hasModalStep = Array.isArray(input.steps) && input.steps.some((step) => step.type === "modal");
+    // Only modal solves are gated on modal supports: a model carrying an
+    // incomplete modal step alongside a valid static step must still solve
+    // statically. The modal entry points surface this error for modal steps.
+    const modalSupportError = hasModalStep
+      ? result.report.errors.find((issue) => issue.code === "missing-modal-support")
+      : undefined;
     return {
       ok: false,
       error: {
@@ -389,7 +397,7 @@ export function assembleDenseStiffness(model: NormalizedOpenCAEModel, hooks?: So
 }
 
 export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: SolverHooks):
-  | { ok: true; stiffness: CsrMatrix }
+  | { ok: true; stiffness: CsrMatrix; connections?: ConnectionAssemblyDiagnostics }
   | { ok: false; error: CpuSolverError } {
   const dofs = model.counts.nodes * 3;
   // Element and penalty-equation scatter counts are known before assembly.
@@ -407,7 +415,7 @@ export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: S
   const connections = assembleMeshConnectionStiffness(builder, model);
   if (!connections.ok) return connections;
 
-  return { ok: true, stiffness: toCsrMatrix(builder) };
+  return { ok: true, stiffness: toCsrMatrix(builder), connections: connections.diagnostics };
 }
 
 function sparseStiffnessTripletCapacity(model: NormalizedOpenCAEModel): number {
@@ -601,7 +609,8 @@ function solveSparseSystem(
   constraints: Map<number, number>,
   free: Int32Array,
   options: CpuSolverOptions,
-  loadAssembly: LoadAssemblyDiagnostics | undefined
+  loadAssembly: LoadAssemblyDiagnostics | undefined,
+  connections?: ConnectionAssemblyDiagnostics
 ): StaticLinearTet4CpuSolveResult {
   const reduced = reduceCsrSystem(stiffness, loads, free, constraints);
   const solve = conjugateGradient(reduced.matrix, reduced.rhs, {
@@ -632,7 +641,8 @@ function solveSparseSystem(
     preconditioner: resolvePreconditioner(options),
     estimatedMatrixBytes: estimateCsrMemoryBytes(stiffness),
     visualizationSmoothing: options.visualizationSmoothing,
-    ...(loadAssembly ? { loadAssembly } : {})
+    ...(loadAssembly ? { loadAssembly } : {}),
+    ...(connections ? { connections } : {})
   });
 }
 
@@ -649,7 +659,7 @@ function finishSolve(
   free: Int32Array,
   freeSolution: Float64Array,
   multiplyFull: (displacement: Float64Array) => Float64Array,
-  diagnostics: Pick<CpuSolverDiagnostics, "solverMode" | "iterations" | "converged" | "matrixRows" | "matrixNonZeros" | "preconditioner" | "estimatedMatrixBytes" | "visualizationSmoothing" | "loadAssembly">
+  diagnostics: Pick<CpuSolverDiagnostics, "solverMode" | "iterations" | "converged" | "matrixRows" | "matrixNonZeros" | "preconditioner" | "estimatedMatrixBytes" | "visualizationSmoothing" | "loadAssembly" | "connections">
 ): StaticLinearTet4CpuSolveResult {
   const dofs = model.counts.nodes * 3;
   const displacement = new Float64Array(dofs);

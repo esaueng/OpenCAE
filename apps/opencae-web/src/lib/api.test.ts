@@ -177,6 +177,25 @@ describe("api", () => {
     expect(response.project.geometryFiles[0]?.metadata.embeddedModel).toEqual(expectedEmbeddedModel);
   });
 
+  test("rejects unsupported upload extensions before embedding bytes", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new TestFile([new Uint8Array([1, 2, 3])], "payload.exe", { type: "application/octet-stream" });
+    await expect(uploadModel("project-1", file, project)).rejects.toThrow(/unsupported geometry format/i);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("accepts uppercase STEP extensions", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("NetworkError when attempting to fetch resource."))));
+
+    const file = new TestFile(["ISO-10303-21"], "bracket.STEP", { type: "model/step" });
+    const response = await uploadModel("project-1", file, project);
+
+    expect(response.project.geometryFiles[0]?.filename).toBe("bracket.STEP");
+  });
+
   test("does not persist a model upload after its workspace generation is superseded", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

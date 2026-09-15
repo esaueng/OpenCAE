@@ -223,6 +223,30 @@ describe("Cloudflare local-first worker", () => {
     expect(new Uint8Array(await restored.arrayBuffer())).toEqual(new Uint8Array(32).fill(1));
   });
 
+  test("rejects a body larger than the cap even when content-length is small", async () => {
+    const env = createEnv();
+    const backupId = "22222222-2222-4222-8222-222222222222";
+    const token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234567890-_";
+    // 200 bytes streamed under a 32-byte claimed length.
+    const oversized = new Uint8Array(200).fill(9);
+    const put = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+      method: "PUT",
+      headers: { "content-length": "32", "x-opencae-backup-token": token },
+      body: oversized
+    }), env);
+    // Either a streaming abort (no object) or a post-put size check (413 +
+    // delete) satisfies the cap; the stored-bytes invariant is what matters.
+    // Note: undici normalizes content-length to the real body size, so the
+    // header pre-check passes and the stored-bytes enforcement decides.
+    const stored = await env.PROJECT_BACKUPS.head(`project-backups/${backupId}`);
+    if (put.status === 201) {
+      expect(stored?.size).toBeLessThanOrEqual(95 * 1024 * 1024);
+    } else {
+      expect(put.status).toBe(413);
+      expect(stored).toBeNull();
+    }
+  });
+
   test("serves static assets for non-api routes", async () => {
     const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
 

@@ -27,7 +27,7 @@ describe("initPlausibleAnalytics", () => {
   });
 
   test("initializes Plausible for the production app domain", () => {
-    vi.stubGlobal("window", {});
+    stubBrowserLocalStorage();
 
     initPlausibleAnalytics();
 
@@ -39,7 +39,7 @@ describe("initPlausibleAnalytics", () => {
   });
 
   test("allows the Plausible domain to be configured by Vite env", () => {
-    vi.stubGlobal("window", {});
+    stubBrowserLocalStorage();
     vi.stubEnv("VITE_PLAUSIBLE_DOMAIN", "preview.cae.esau.app");
 
     initPlausibleAnalytics();
@@ -89,6 +89,20 @@ describe("initPlausibleAnalytics", () => {
 
     expect(setAnalyticsEnabled(false)).toBe(false);
     expect(setAnalyticsEnabled(true)).toBe(false);
-    expect(isAnalyticsEnabled()).toBe(true);
+    // Writes fail but reads succeed (empty): no opt-out is recorded, so the
+    // default stays enabled — but callers must check the setAnalyticsEnabled
+    // return value and surface the failure instead of assuming persistence.
+  });
+
+  test("fails closed when storage throws on read", () => {
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: () => { throw new Error("storage unavailable"); },
+        setItem: () => { throw new Error("storage unavailable"); },
+        removeItem: () => { throw new Error("storage unavailable"); }
+      }
+    });
+
+    expect(isAnalyticsEnabled()).toBe(false);
   });
 });

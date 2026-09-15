@@ -841,7 +841,11 @@ export function buildOpenCaeCoreModelForStudy(
   const coreLoadNameByStudyLoadId = new Map<string, string>();
 
   for (const [index, constraint] of study.constraints.entries()) {
-    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") continue;
+    if (constraint.type !== "fixed" && constraint.type !== "prescribed_temperature") {
+      throw new Error(
+        `OpenCAE Core browser solve does not support ${constraint.type} constraints yet (constraint ${constraint.id}). Change it to a fixed support or remove it.`
+      );
+    }
     const surfaceSet = ensureSurfaceSetForSelection({
       model,
       renderNodePoints,
@@ -876,12 +880,15 @@ export function buildOpenCaeCoreModelForStudy(
       const direction = normalize(vector3(load.parameters.direction) ?? [0, 0, -1]);
       const magnitude = forceDensityNewtonsPerCubicMeter(load);
       if (!direction || !(magnitude > 0)) continue;
+      const mm = model.coordinateSystem?.solverUnits === "mm-N-s-MPa";
+      // Catalog/study magnitudes resolve to N/m^3; mm solver units need N/mm^3.
+      const solverMagnitude = mm ? magnitude / 1_000_000_000 : magnitude;
       const name = `bodyForceDensity${index}`;
       loads.push({
         name,
         type: "bodyForceDensity",
         elementSet: elementSet.name,
-        forceDensity: roundVector(displayDirectionToSolverFrame(scaleVector(direction, magnitude), displayModel), 9)
+        forceDensity: roundVector(displayDirectionToSolverFrame(scaleVector(direction, solverMagnitude), displayModel), 9)
       });
       coreLoadNameByStudyLoadId.set(load.id, name);
       continue;

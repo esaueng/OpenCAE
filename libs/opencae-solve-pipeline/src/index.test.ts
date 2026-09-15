@@ -83,6 +83,21 @@ describe("browser solve limits", () => {
     expect(settings.maxFrames).toBe(3);
   });
 
+  test("flags truncated dynamic settings instead of silently clamping them", () => {
+    const model = fixtureModel("beam-dynamic");
+    const settings = boundedSolverSettings(
+      "dynamic_structural",
+      { maxFrames: 100, endTime: 10, timeStep: 1e-9, tolerance: 1e-12 },
+      model,
+      BROWSER_SOLVE_LIMITS
+    );
+    // timeStep floors at the minimum, tolerance floors at the limit floor.
+    expect(settings.truncation?.timeStep).toMatchObject({ requested: 1e-9 });
+    expect(settings.truncation?.tolerance).toMatchObject({ requested: 1e-12 });
+    expect((settings.truncation?.timeStep?.applied ?? 0)).toBeGreaterThan(1e-9);
+    expect((settings.truncation?.tolerance?.applied ?? 0)).toBeGreaterThan(1e-12);
+  });
+
   test("threads the 150k browser limit and bounded mode count into modal solves", () => {
     const dynamic = fixtureModel("beam-dynamic");
     const step = dynamic.steps[0];

@@ -131,8 +131,11 @@ describe("App workflow layout", () => {
   test("renders live solver progress inside the topbar run button", () => {
     expect(appSource).toContain("const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));");
     expect(appSource).toContain('style={{ "--run-progress": `${runButtonProgress}%` } as CSSProperties}');
-    expect(appSource).toContain('aria-label={solverRunning ? `Running simulation: ${runButtonProgress}%` : "Run simulation"}');
-    expect(appSource).toContain('solverRunning ? `Running… ${runButtonProgress}%` : "Run simulation"');
+    // While running, the topbar button becomes a stop control (not disabled).
+    expect(appSource).toContain("onClick={solverRunning ? () => void handleCancelSimulation() : handleRunSimulation}");
+    expect(appSource).toContain("disabled={solverRunning ? false : !effectiveCanRunSimulation}");
+    expect(appSource).toContain('aria-label={solverRunning ? `Stop simulation: ${runButtonProgress}% complete` : "Run simulation"}');
+    expect(appSource).toContain('solverRunning ? `Stop ${runButtonProgress}%` : "Run simulation"');
   });
 
   test("passes measured viewer render bounds into browser-local runs", () => {

@@ -37,4 +37,12 @@ describe("workspaceNoticeFor", () => {
     expect(workspaceNoticeFor({ ...quiet, resultsOutdatedBy: "Load updated.", dismissedKey: first.key })).toBeNull();
     expect(workspaceNoticeFor({ ...quiet, resultsOutdatedBy: "Support removed.", dismissedKey: first.key })).not.toBeNull();
   });
+
+  test("re-raises a repeated identical edit after dismissal via the sequence counter", () => {
+    const first = workspaceNoticeFor({ ...quiet, resultsOutdatedBy: "Load updated.", resultsOutdatedSequence: 1 })!;
+    expect(workspaceNoticeFor({ ...quiet, resultsOutdatedBy: "Load updated.", resultsOutdatedSequence: 1, dismissedKey: first.key })).toBeNull();
+    const repeated = workspaceNoticeFor({ ...quiet, resultsOutdatedBy: "Load updated.", resultsOutdatedSequence: 2, dismissedKey: first.key });
+    expect(repeated).not.toBeNull();
+    expect(repeated?.key).not.toBe(first.key);
+  });
 });
