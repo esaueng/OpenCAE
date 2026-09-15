@@ -1,6 +1,6 @@
 /* Step panel extracted from RightPanel.tsx: file move only, no behavior change.
    Shared contracts live in ./RightPanelProps; panels never import each other. */
-import { useCallback, useEffect, useId, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import { AlertTriangle, Check, Play, X } from "lucide-react";
 
@@ -12,7 +12,6 @@ import { type SettingHelpId } from "../../settingHelp";
 
 import { defaultSolverMethodForStudy } from "../../unitDisplay";
 
-const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 import type { RightPanelProps, SolverSettingsPatch } from "./RightPanelProps";
 import { Panel } from "./PanelChrome";
 import { DEFAULT_DYNAMIC_LOAD_PROFILE_HELPER, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, DYNAMIC_LOAD_PROFILE_OPTIONS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS, SIMULATION_FIDELITIES } from "./RightPanelProps";

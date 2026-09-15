@@ -1,6 +1,6 @@
 /* Step panel extracted from RightPanel.tsx: file move only, no behavior change.
    Shared contracts live in ./RightPanelProps; panels never import each other. */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AlertTriangle, ArrowDown, Atom, Eye, Factory, Maximize2, RotateCcw, Ruler, ScanLine, Upload, Wrench } from "lucide-react";
 
@@ -22,7 +22,6 @@ import { SampleOptionCard } from "../SampleOptionCard";
 import { SAMPLE_ANALYSIS_OPTIONS, sampleAnalysisOptionFor } from "../sampleAnalysisOptions";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "../sampleOptions";
 
-const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 import type { RightPanelProps } from "./RightPanelProps";
 import { Panel } from "./PanelChrome";
 import { Callout, Collapsible, ConceptCard, HelpLabel, HelpNote, Info, ModelDimensions, SectionTitle, SupportIcon, formatEquivalentForce } from "./PanelChrome";

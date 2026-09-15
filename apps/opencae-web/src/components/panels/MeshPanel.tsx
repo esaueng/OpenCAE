@@ -1,6 +1,6 @@
 /* Step panel extracted from RightPanel.tsx: file move only, no behavior change.
    Shared contracts live in ./RightPanelProps; panels never import each other. */
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AlertTriangle, Eye, Grid3X3, Plus, ScanLine, Wrench, X } from "lucide-react";
 
@@ -15,7 +15,6 @@ import { stepGeometryMetadataForProject } from "../../stepGeometryState";
 
 import { formatDisplayNumber } from "../../unitDisplay";
 
-const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 import type { RightPanelProps } from "./RightPanelProps";
 import { Panel, meshPresetDescription, seedProbeCoordinate, structuralLoadCasesForPanel } from "./PanelChrome";
 import { MESH_PRESETS } from "./RightPanelProps";

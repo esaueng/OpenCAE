@@ -45,14 +45,10 @@ import {
 } from "./topology-policy";
 
 import {
-  autoSolverBackend,
   COMPLEX_CORE_MESH_REQUIRED_REASON,
   DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS,
-  explicitSolverBackend,
   MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS,
-  normalizeSolverBackend,
   OPENCAE_CORE_MESH_REQUIRED_REASON,
-  resolveSolverBackend,
   STANDARD_GRAVITY,
   type CoreSolveCapabilities,
   type NormalizedBrowserSolverBackend,

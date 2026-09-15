@@ -1,6 +1,6 @@
 /* Step panel extracted from RightPanel.tsx: file move only, no behavior change.
    Shared contracts live in ./RightPanelProps; panels never import each other. */
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Gauge, Plus, ScanLine, Weight, X } from "lucide-react";
 
@@ -15,7 +15,6 @@ import { supportDisplayLabel } from "../../supportLabels";
 
 import { formatDensity, formatMass, formatVolume, loadValueForUnits, type UnitSystem } from "../../unitDisplay";
 
-const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 import type { RightPanelProps } from "./RightPanelProps";
 import { noopDraftPayloadPreviewChange } from "./RightPanelProps";
 import { Panel, sameLoadDirection, structuralLoadCasesForPanel } from "./PanelChrome";

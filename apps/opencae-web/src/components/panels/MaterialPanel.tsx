@@ -1,6 +1,6 @@
 /* Step panel extracted from RightPanel.tsx: file move only, no behavior change.
    Shared contracts live in ./RightPanelProps; panels never import each other. */
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { AlertTriangle, Atom, Check, ChevronRight, Factory, Layers3, Wrench } from "lucide-react";
 
@@ -12,7 +12,6 @@ import { formatDensity, formatMaterialStress } from "../../unitDisplay";
 
 import { MaterialLibraryModal } from "../SimulationWorkflow";
 
-const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 import type { RightPanelProps } from "./RightPanelProps";
 import { Panel } from "./PanelChrome";
 import { EMPTY_PARAMETERS } from "./RightPanelProps";
