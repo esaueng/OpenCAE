@@ -1,49 +1,29 @@
 /* Step panel extracted from RightPanel.tsx: file move only, no behavior change.
    Shared contracts live in ./RightPanelProps; panels never import each other. */
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { AlertTriangle, Anchor, ArrowDown, Atom, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Eye, Factory, FileCode2, FileDown, FileImage, FolderDown, Gauge, Grid3X3, Layers3, Maximize2, Pause, Play, Plus, RotateCcw, Ruler, ScanLine, ShieldCheck, Table2, Upload, Weight, Wrench, X } from "lucide-react";
-import { finiteExtrema } from "@opencae/core";
-import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor, defaultManufacturingProcessIdFor, effectiveMaterialProperties, fdmPropertyFactorsFor, isManufacturingProcessCompatible, manufacturingParametersForAssignment, manufacturingProcessForId, massKgForPayloadMaterial, materialCatalog, materialCategoryLabel, normalizeManufacturingParameters, payloadMaterialForId, payloadMaterials, type ManufacturingParameters, type ManufacturingProcessId, type PayloadMaterialCategory } from "@opencae/materials";
-import { assessResultFailure, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isThermalResultSummary } from "@opencae/schema";
-import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, LoadCase, LoadCombination, Material, MeshConnection, MeshConvergenceRecord, MeshQuality, ModalResultSummary, ModalSolverSettings, Project, ResultField, ResultSummary, RunTimingEstimate, RunVariantRef, SimulationFidelity, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
-import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
-import type { RunReadinessItem } from "../../runReadiness";
-import type { WorkspaceNotice } from "../../workspaceNotice";
-import { STUDY_TYPE_LABELS, studyTypeSwitchConsequence } from "../../studyTypeSwitch";
-import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, SUPPORTED_GEOMETRY_FORMAT_LABEL, isPreviewOnlyGeometry } from "../../geometryFormats";
-import type { StepId } from "../StepBar";
-import { applicationPointForLoad, createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, equivalentForceForLoad, LOAD_DIRECTION_LABELS, loadMagnitudeError, loadMarkerOrdinalLabel, payloadObjectForLoad, unitsForLoadType, type LoadApplicationPoint, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata, type PayloadMassMode } from "../../loadPreview";
-import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type ResultMode, type SectionPlaneState, type StressComponent, type ViewMode } from "../../workspaceViewTypes";
-import { availableStressComponents, type ResolvedResultProbe } from "../../resultSelection";
-import { meshTargetSizeMmForPreset, type SampleAnalysisType, type SampleModelId } from "../../lib/api";
-import type { WasmMeshPhaseProgress } from "../../lib/wasmMeshing";
-import { defaultConvergenceProbe, type ConvergenceProbe } from "../../meshConvergence";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+
+import { AlertTriangle, ArrowDown, Atom, Eye, Factory, Maximize2, RotateCcw, Ruler, ScanLine, Upload, Wrench } from "lucide-react";
+
+import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../../geometryFormats";
+
+import { DEFAULT_SECTION_PLANE } from "../../workspaceViewTypes";
+
+import { type SampleAnalysisType, type SampleModelId } from "../../lib/api";
+
 import { stepGeometryMetadataForProject } from "../../stepGeometryState";
-import { dimensionValuesForDisplayModel } from "../../modelDimensions";
-import { formatModelOrientation, getModelOrientation, type RotationAxis } from "../../modelOrientation";
+
+import { formatModelOrientation, getModelOrientation } from "../../modelOrientation";
 import { shouldShowSampleModelPicker } from "../../modelPanelState";
-import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../../settingHelp";
-import { supportDisplayLabel } from "../../supportLabels";
-import { getViewportTooltipPosition } from "../../tooltipPosition";
-import { defaultSolverMethodForStudy, forceForUnits, formatDensity, formatDisplayNumber, formatMass, formatMaterialStress, formatMeshSourceLabel, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatVolume, hasResultUnit, legacyResultWarningForProvenance, loadValueForUnits, solverMethodForResult, solverRunnerLabelForResult, type UnitSystem } from "../../unitDisplay";
-import { canNavigateToStep } from "../../appShellState";
-import { useFocusTrap } from "../../hooks/useFocusTrap";
-import { MaterialLibraryModal } from "../SimulationWorkflow";
+
+import { formatMass, formatVolume } from "../../unitDisplay";
+
 import { ParametricPartBuilder } from "../ParametricPartBuilder";
 import { SampleOptionCard } from "../SampleOptionCard";
 import { SAMPLE_ANALYSIS_OPTIONS, sampleAnalysisOptionFor } from "../sampleAnalysisOptions";
 import { SAMPLE_OPTIONS, sampleOptionFor } from "../sampleOptions";
-import { dynamicPlaybackFrames } from "../../resultFields";
-import { resultScaleCssGradient, validManualResultRange, type ResolvedResultColorScale, type ResultColorScaleSetting } from "../../resultColorScale";
-import { INVALID_REACTION_WARNING, PREVIEW_GEOMETRY_WARNING, canShowReverseLoadCapacity, hasInvalidReactionForce, hasUnavailableReactionDiagnostic, shouldBlockPreviewResultsForDisplayModel } from "../../resultProvenance";
-import {
-  frameIndexForRoundedPlaybackOrdinal,
-  playbackOrdinalForSolverFramePosition
-} from "../../resultPlaybackTimeline";
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
-import type { RightPanelProps, SolverSettingsPatch } from "./RightPanelProps";
+import type { RightPanelProps } from "./RightPanelProps";
 import { Panel } from "./PanelChrome";
 import { Callout, Collapsible, ConceptCard, HelpLabel, HelpNote, Info, ModelDimensions, SectionTitle, SupportIcon, formatEquivalentForce } from "./PanelChrome";
 export function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sectionPlane = DEFAULT_SECTION_PLANE, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onSectionPlaneChange, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false }: RightPanelProps) {
