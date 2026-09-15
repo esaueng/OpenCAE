@@ -1,5 +1,5 @@
 import { assessResultFailure, classifyResultProvenance, estimateAllowableLoadForSafetyFactor, isModalResultSummary, isStructuralResultSummary, isThermalResultSummary } from "@opencae/schema";
-import type { DisplayModel, FailureAssessment, Material, ModalResultSummary, Project, ResultField, ResultSummary, RunTimingEstimate, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
+import type { DisplayModel, FailureAssessment, Material, MeshConvergenceRecord, ModalResultSummary, Project, ResultField, ResultSummary, RunTimingEstimate, StructuralResultSummary, Study, ThermalResultSummary } from "@opencae/schema";
 import {
   effectiveMaterialProperties,
   manufacturingProcessForId,
@@ -49,6 +49,7 @@ export interface ReportTable {
   headers: string[];
   rows: string[][];
   emptyMessage?: string;
+  footnote?: string;
 }
 
 export interface ReportFigure {
@@ -91,6 +92,7 @@ export interface ReportData {
   loads: ReportTable;
   boundaryFigure: ReportBoundaryFigure;
   mesh: ReportRow[];
+  meshConvergence: ReportTable | null;
   solver: ReportRow[];
   figures: {
     stress: ReportFigure;
@@ -129,6 +131,8 @@ export interface BuildReportDataInput {
   showDeformed?: boolean;
   /** Reverse-check target from the results panel; defaults to 1.5 like the panel. */
   targetSafetyFactor?: number;
+  /** Mesh-convergence ladder records for this project (newest last); the report renders the latest. */
+  convergenceRecords?: MeshConvergenceRecord[];
 }
 
 const MISSING = "--";
@@ -201,6 +205,7 @@ export function buildReportData(input: BuildReportDataInput): ReportData {
       { label: "Source", value: input.solverMeshSummary ? "Core solver" : formatMeshSourceLabel(provenance?.meshSource, input.displayModel ?? undefined) },
       { label: "Warnings", value: input.study.meshSettings.summary?.warnings.length ? input.study.meshSettings.summary.warnings.map(userFacingMeshWarning).join("; ") : "None" }
     ],
+    meshConvergence: meshConvergenceTable(input.convergenceRecords),
     solver: solverRows(input, summary),
     figures: {
       stress: figureData("Von Mises stress", stressField, input.captures.stress, fields, input),
@@ -275,6 +280,7 @@ function buildModalReportData(input: BuildReportDataInput, summary: ModalResultS
       { label: "Element type", value: elementTypeForMesh(provenance?.meshSource) },
       { label: "Source", value: input.solverMeshSummary ? "Core solver" : formatMeshSourceLabel(provenance?.meshSource, input.displayModel ?? undefined) }
     ],
+    meshConvergence: meshConvergenceTable(input.convergenceRecords),
     solver: solverRows(input, summary),
     figures: {
       stress: { title: "Natural frequencies", unavailableLabel: "See modal results table", legendMin: MISSING, legendMax: MISSING, caption: "Natural frequencies are listed in the results table." },
@@ -348,6 +354,7 @@ function buildThermalReportData(input: BuildReportDataInput, summary: ThermalRes
       { label: "Element type", value: elementTypeForMesh(provenance?.meshSource) },
       { label: "Source", value: input.solverMeshSummary ? "Core solver" : formatMeshSourceLabel(provenance?.meshSource, input.displayModel ?? undefined) }
     ],
+    meshConvergence: meshConvergenceTable(input.convergenceRecords),
     solver: solverRows(input, summary),
     figures: {
       stress: figureData("Temperature", temperatureField, input.captures.stress, fields, input),
@@ -685,7 +692,19 @@ function legendValueWithUnits(value: number, units: string): string {
 
 function collectDiagnostics(input: BuildReportDataInput, summary: ResultSummary, fields: ResultField[]): string[] {
   const entries = new Set<string>();
-  for (const diagnostic of summary.diagnostics ?? []) entries.add(diagnostic.message);
+  for (const diagnostic of summary.diagnostics ?? []) {
+    entries.add(diagnostic.message);
+    // Solver-confessed approximations (modal Tet10→Tet4 projection, partial
+    // convergence) are computed but historically never displayed. Surface the
+    // structured payloads, not just the free-text message.
+    const detail = diagnostic as { approximationWarning?: unknown; meshProjection?: unknown; partialConvergenceWarning?: unknown };
+    if (typeof detail.approximationWarning === "string" && detail.approximationWarning) entries.add(detail.approximationWarning);
+    if (typeof detail.partialConvergenceWarning === "string" && detail.partialConvergenceWarning) entries.add(detail.partialConvergenceWarning);
+    if (detail.meshProjection && typeof detail.meshProjection === "object") {
+      const projection = detail.meshProjection as { sourceElementOrder?: unknown; solveElementOrder?: unknown; reason?: unknown };
+      entries.add(`Mesh projection for solve: ${String(projection.sourceElementOrder ?? "?")} → ${String(projection.solveElementOrder ?? "?")}${projection.reason ? ` (${String(projection.reason)})` : ""}. Results are computed on the projected mesh.`);
+    }
+  }
   if (input.displayModel && shouldBlockPreviewResultsForDisplayModel(input.displayModel, summary, fields, input.study)) entries.add(PREVIEW_GEOMETRY_WARNING);
   const legacyWarning = legacyResultWarningForProvenance(summary.provenance);
   if (legacyWarning) entries.add(legacyWarning);
@@ -752,6 +771,35 @@ function elementTypeForMesh(meshSource: ResultSummary["provenance"] extends infe
   if (meshSource === "actual_volume_mesh" || meshSource === "structured_block_core") return "Tet10";
   if (meshSource === "opencae_core_tet4") return "Tet4";
   return MISSING;
+}
+
+/**
+ * Convergence ladder section: rung table (preset, elements, DOFs, probe
+ * displacement, peak stress) plus the verdict, from the latest record for
+ * this study. Null when no ladder has run — the Mesh panel remains the only
+ * convergence surface. Skipped rungs render as capped markers with reasons.
+ */
+export function meshConvergenceTable(records: MeshConvergenceRecord[] | undefined): ReportTable | null {
+  const record = records?.filter((candidate) => candidate.rungs?.length === 3).at(-1);
+  if (!record) return null;
+  return {
+    headers: ["Rung", "Elements", "DOFs", "Probe displacement", "Peak von Mises", "Status"],
+    rows: record.rungs.map((rung) => [
+      rung.requestedPreset,
+      rung.actualElementCount?.toLocaleString() ?? MISSING,
+      rung.totalDofs?.toLocaleString() ?? MISSING,
+      rung.probeDisplacement !== undefined ? `${rung.probeDisplacement} ${rung.displacementUnits ?? ""}`.trim() : MISSING,
+      rung.rawElementPeakVonMises !== undefined ? `${rung.rawElementPeakVonMises} ${rung.stressUnits ?? ""}`.trim() : MISSING,
+      rung.status === "complete" ? "complete" : `${rung.status}${rung.skipReason ? `: ${rung.skipReason}` : ""}`
+    ]),
+    emptyMessage: "No convergence rungs recorded.",
+    ...(record.classification || record.lastStepChanges ? {
+      footnote: [
+        record.classification ? `Verdict: ${record.classification.replace(/_/g, " ")}.` : "",
+        record.lastStepChanges ? `Last-step change: displacement ${record.lastStepChanges.displacement}, stress ${record.lastStepChanges.stress}.` : ""
+      ].filter(Boolean).join(" ")
+    } : {})
+  };
 }
 
 function selectionLabel(study: Study, selectionRef: string): string {

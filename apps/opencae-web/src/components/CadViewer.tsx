@@ -16,7 +16,7 @@ import { faceForModelHit, type SampleModelKind } from "../modelSelection";
 import { baseModelRotationRadians, modelRotationRadians, modelToViewerMatrix, viewerNormalToModelSpace, viewerPointToModelSpace, type RotationAxis } from "../modelOrientation";
 import { dimensionValuesForDisplayModel } from "../modelDimensions";
 import { formatResultValue, normalizeValueForRender, resultProbeSamplesForFaces, resultSamplesForFaces, type FaceResultSample, type FieldResultSample, type ResultProbeTone } from "../resultFields";
-import { barycentricPoint, interpolateScalarFromSamples, resolveResultProbe, selectActiveResultField, stressComponentForField, type ResolvedResultProbe, type ResultProbeAnchor, type ResultProbePin } from "../resultSelection";
+import { barycentricPoint, resolveResultProbe, selectActiveResultField, type ResolvedResultProbe, type ResultProbeAnchor, type ResultProbePin } from "../resultSelection";
 import { packedPreparedPlaybackFieldSlot, packedPreparedPlaybackFrameOrdinal, type PackedPreparedPlaybackCache } from "../resultPlaybackCache";
 import { createVertexResultMapping, type VertexResultMapping } from "../resultVertexMapping";
 import { shouldBlockPreviewResultsForDisplayModel } from "../resultProvenance";
@@ -29,7 +29,9 @@ import { layoutOutsideModelLabels, payloadMassLabelOffset, type LabelAnchor } fr
 import { getSnapSuggestion } from "../snapping/snapController";
 import type { SolverSurfaceMesh } from "../projectFile";
 export { finalVisualScaleForDisplacementField } from "../resultDeformation";
-import { RESULT_DEFORMATION_CAP_FRACTION as SHARED_DEFORMATION_CAP_FRACTION, finalVisualScaleForDisplacementField, isSolverSurfaceNodeField, maxDisplacementMagnitude, resolvedDeformation, transientDisplacementPeakMagnitude } from "../resultDeformation";
+import { RESULT_DEFORMATION_CAP_FRACTION as SHARED_DEFORMATION_CAP_FRACTION, finalVisualScaleForDisplacementField, maxDisplacementMagnitude, resolvedDeformation, transientDisplacementPeakMagnitude } from "../resultDeformation";
+import { isSolverSurfaceNodeField, recoverSurfaceNodeScalarField, resultFieldValuesAlignedToGeometry, solverSurfaceResultFields } from "../solverSurfaceFields";
+export { recoverSurfaceNodeScalarField, resultFieldValuesAlignedToGeometry, solverSurfaceResultFields };
 import { resultColorAtNormalized, resultColorForValue as colorForScaleValue, resultScaleCssGradient, type ResolvedResultColorScale } from "../resultColorScale";
 import { isSnapOverlayObject, SnapVisualization } from "../snapping/Visualization";
 import type { CursorRay, FaceSnapAxis, SnapMeasurement, SnapResult, Vec3 } from "../snapping/types";
@@ -410,6 +412,8 @@ export function CadViewer(props: CadViewerProps) {
                   deformationScale={props.stressExaggeration}
                   displacementPeakMagnitude={solverSurfaceResult.displacementPeakMagnitude}
                   resultPlaybackPlaying={props.resultPlaybackPlaying}
+                  playbackController={props.resultPlaybackFrameController}
+                  playbackCache={props.resultPlaybackBufferCache}
                   onAddResultProbe={props.onAddResultProbe}
                 />
               </group>
@@ -3715,12 +3719,6 @@ export function shouldDisableResultDeformation(displayModel: DisplayModel, resul
   return shouldBlockPreviewResultsForDisplayModel(displayModel, undefined, resultFields);
 }
 
-type SolverSurfaceResultFields = {
-  scalarField: ResultField;
-  displacementField?: ResultField;
-  displacementPeakMagnitude: number;
-};
-
 // Uniform scale + recentering translation that places the solver surface mesh (solver space,
 // meters) into the display model's visual footprint. Derived deterministically from the two
 // bounds — no scale-ratio heuristic — because cloud surface meshes are always solver-space
@@ -3762,83 +3760,6 @@ export function solverSurfaceDisplayFootprint(
   };
 }
 
-export function solverSurfaceResultFields(surfaceMesh: SolverSurfaceMesh | undefined, fields: ResultField[], resultMode: ResultMode, stressComponent: StressComponent = "von_mises"): SolverSurfaceResultFields | null {
-  if (!surfaceMesh || !surfaceMesh.nodes.length || !surfaceMesh.triangles.length) return null;
-  const deformationMode = resultMode === "mode_shape" ? "mode_shape" : "displacement";
-  const displacementFields = fields.filter((field) => isSolverSurfaceNodeField(field, surfaceMesh, deformationMode));
-  const selected = selectActiveResultField({ fields, resultMode, stressComponent, surfaceMesh });
-  const scalarField = selected.scalarField && isSolverSurfaceNodeField(selected.scalarField, surfaceMesh, resultMode)
-    ? selected.scalarField
-    // The solver emits stress/safety_factor per element (no node field), so those modes fall to
-    // the procedural IDW render and show streaks instead of a smooth contour. Recover them onto
-    // the surface nodes so they render through this same smooth nodal path. Gate on a node
-    // displacement field existing, which confirms the result is already surface-renderable — so
-    // we never downgrade a procedural-tier result's deformation to an undeformed surface.
-    : (displacementFields.length ? recoverSurfaceNodeScalarField(surfaceMesh, fields, resultMode, stressComponent) : null);
-  if (!scalarField) return null;
-  const displacementField = displacementFields[0];
-  // Run-wide peak across every transient frame so the deformation scale stays constant and a
-  // near-zero opening frame is not self-normalized into a torn shape (see procedural path).
-  const displacementPeakMagnitude = transientDisplacementPeakMagnitude(displacementFields, displacementField);
-  return { scalarField, ...(displacementField ? { displacementField } : {}), displacementPeakMagnitude };
-}
-
-// Recovers an element-located scalar contour (stress / safety_factor) onto the solver surface
-// mesh nodes via inverse-distance interpolation from the field's samples, returning a node field
-// aligned to surfaceMesh so the smooth SolverSurfaceResultMesh path can render it. Sample points
-// and surface nodes are both in solver space (the cloud emits sample.point = surface-node point),
-// so no coordinate reconciliation is needed here. Returns null when nothing is recoverable, so
-// callers fall back to the procedural render unchanged.
-export function recoverSurfaceNodeScalarField(
-  surfaceMesh: SolverSurfaceMesh,
-  fields: ResultField[],
-  resultMode: ResultMode,
-  stressComponent: StressComponent = "von_mises"
-): ResultField | null {
-  // Only the scalar contour modes the solver emits per element. displacement/velocity/
-  // acceleration already arrive as smooth node fields carrying their own vectors.
-  if (resultMode !== "stress" && resultMode !== "safety_factor") return null;
-  if (!surfaceMesh.nodes.length) return null;
-  if (fields.some((field) => isSolverSurfaceNodeField(field, surfaceMesh, resultMode))) return null;
-  const source = fields.find(
-    (field) =>
-      field.type === resultMode &&
-      (resultMode !== "stress" || stressComponentForField(field) === stressComponent) &&
-      (field.samples?.some((sample) => Number.isFinite(sample.value) && sample.point.length === 3 && sample.point.every(Number.isFinite)) ?? false)
-  );
-  const samples = source?.samples?.filter(
-    (sample) => Number.isFinite(sample.value) && sample.point.length === 3 && sample.point.every(Number.isFinite)
-  );
-  if (!source || !samples || !samples.length) return null;
-  if (surfaceMesh.nodes.length * samples.length > 5_000_000) return null;
-
-  const values = surfaceMesh.nodes.map((node) =>
-    interpolateScalarFromSamples(node, samples)
-  );
-  if (!values.some(Number.isFinite)) return null;
-  // Loop instead of Math.min(...spread): surface-node arrays can exceed the V8 argument limit.
-  let finiteMin = Number.POSITIVE_INFINITY;
-  let finiteMax = Number.NEGATIVE_INFINITY;
-  for (const value of values) {
-    if (!Number.isFinite(value)) continue;
-    if (value < finiteMin) finiteMin = value;
-    if (value > finiteMax) finiteMax = value;
-  }
-  return {
-    ...source,
-    id: `${source.id}-surface-node`,
-    location: "node",
-    surfaceMeshRef: surfaceMesh.id,
-    values,
-    // Reuse the source field's range so the legend and color scale stay consistent with the
-    // element field's reported peak; interpolated node values fall within that range anyway.
-    min: Number.isFinite(source.min) ? source.min : finiteMin,
-    max: Number.isFinite(source.max) ? source.max : finiteMax,
-    samples: undefined,
-    vectors: undefined
-  };
-}
-
 function SolverSurfaceResultMesh({
   surfaceMesh,
   scalarField,
@@ -3848,6 +3769,8 @@ function SolverSurfaceResultMesh({
   deformationScale,
   displacementPeakMagnitude,
   resultPlaybackPlaying,
+  playbackController,
+  playbackCache,
   onAddResultProbe
 }: {
   surfaceMesh: SolverSurfaceMesh;
@@ -3858,13 +3781,26 @@ function SolverSurfaceResultMesh({
   deformationScale: number;
   displacementPeakMagnitude?: number;
   resultPlaybackPlaying: boolean;
+  playbackController?: ResultPlaybackFrameController;
+  playbackCache?: PackedPreparedPlaybackCache | null;
   onAddResultProbe?: (anchor: ResultProbeAnchor) => void;
 }) {
   const resultColorScale = useContext(ResultColorScaleContext) ?? resultColorScaleForField(scalarField, resultMode);
-  const geometry = useMemo(
+  const staticGeometry = useMemo(
     () => buildSolverSurfaceResultGeometry({ surfaceMesh, scalarField, displacementField, resultMode, showDeformed, deformationScale, displacementPeakMagnitude, resultColorScale }),
     [deformationScale, displacementField, displacementPeakMagnitude, resultColorScale, resultMode, scalarField, showDeformed, surfaceMesh]
   );
+  const geometry = usePackedSolverSurfacePlaybackGeometry({
+    staticGeometry,
+    surfaceMesh,
+    resultMode,
+    showDeformed,
+    deformationScale,
+    displacementPeakMagnitude,
+    resultColorScale,
+    playbackController,
+    playbackCache
+  });
   const outlineGeometry = useMemo(() => buildSolverSurfaceOutlineGeometry(surfaceMesh), [surfaceMesh]);
   return (
     <group userData={{ opencaeSectionClippable: true }}>
@@ -4442,14 +4378,6 @@ function applyResultColorsToArray(
     const scalar = mappedScalarValue(index, scalarField, scalarMapping, directValuesAligned);
     writeResultColorForValue(colorArray, index * 3, scalar, scale);
   }
-}
-
-// A field's values array may only be indexed by procedural vertex index when it is actually
-// aligned to that geometry. Surface-node fields (surfaceMeshRef) are aligned to the solver
-// surface mesh, never to procedural geometry — indexing them by vertex index painted
-// meaningless near-uniform colors with vertex-order streaks.
-export function resultFieldValuesAlignedToGeometry(field: ResultField, vertexCount: number): boolean {
-  return !field.surfaceMeshRef && field.values.length === vertexCount;
 }
 
 function mappedScalarValue(vertexIndex: number, field: ResultField | undefined, mapping: VertexResultMapping | null, directValuesAligned: boolean) {
@@ -5180,6 +5108,123 @@ function SampleResultProbeMarkers({
   });
 }
 
+function usePackedSolverSurfacePlaybackGeometry({
+  staticGeometry,
+  surfaceMesh,
+  resultMode,
+  showDeformed,
+  deformationScale,
+  displacementPeakMagnitude,
+  resultColorScale,
+  playbackController,
+  playbackCache
+}: {
+  staticGeometry: THREE.BufferGeometry;
+  surfaceMesh: SolverSurfaceMesh;
+  resultMode: ResultMode;
+  showDeformed: boolean;
+  deformationScale: number;
+  displacementPeakMagnitude?: number;
+  resultColorScale?: ResolvedResultColorScale;
+  playbackController?: ResultPlaybackFrameController;
+  playbackCache?: PackedPreparedPlaybackCache | null;
+}): THREE.BufferGeometry {
+  const { invalidate } = useThree();
+  // A live clone that playback ticks mutate in place: positions/colors are
+  // rewritten per frame without rebuilding the geometry, recomputing normals,
+  // or reallocating buffers. The static geometry stays untouched so pausing
+  // (or unmounting playback) renders the identical selected-frame mesh.
+  const playbackGeometry = useMemo(() => {
+    const live = new THREE.BufferGeometry();
+    const position = staticGeometry.getAttribute("position");
+    const color = staticGeometry.getAttribute("color");
+    const index = staticGeometry.getIndex();
+    if (position instanceof THREE.BufferAttribute) {
+      live.setAttribute("position", new THREE.BufferAttribute(new Float32Array(position.array), 3));
+    }
+    if (color instanceof THREE.BufferAttribute) {
+      live.setAttribute("color", new THREE.BufferAttribute(new Float32Array(color.array), 3));
+    }
+    if (index) live.setIndex(index.clone());
+    const normal = staticGeometry.getAttribute("normal");
+    if (normal instanceof THREE.BufferAttribute) {
+      live.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(normal.array), 3));
+    }
+    const sphere = staticGeometry.boundingSphere;
+    if (sphere) live.boundingSphere = sphere.clone();
+    return live;
+  }, [staticGeometry]);
+  const stateRef = useRef({ resultMode, showDeformed, deformationScale, displacementPeakMagnitude, resultColorScale });
+  useEffect(() => {
+    stateRef.current = { resultMode, showDeformed, deformationScale, displacementPeakMagnitude, resultColorScale };
+  }, [resultMode, showDeformed, deformationScale, displacementPeakMagnitude, resultColorScale]);
+  useEffect(() => {
+    if (!playbackController || !playbackCache) return undefined;
+    const applySnapshot = (snapshot: ResultPlaybackFrameSnapshot) => {
+      const latest = stateRef.current;
+      const frameOrdinal = packedPreparedPlaybackFrameOrdinal(snapshot.cache, snapshot.framePosition);
+      const slot = packedPreparedPlaybackFieldSlot(snapshot.cache, frameOrdinal, latest.resultMode);
+      if (!slot || slot.descriptor.location !== "node") return;
+      const displacementSlot = packedPreparedPlaybackFieldSlot(snapshot.cache, frameOrdinal, latest.resultMode === "mode_shape" ? "mode_shape" : "displacement");
+      const nodeCount = surfaceMesh.nodes.length;
+      const position = playbackGeometry.getAttribute("position");
+      const color = playbackGeometry.getAttribute("color");
+      if (!(position instanceof THREE.BufferAttribute) || !(color instanceof THREE.BufferAttribute)) return;
+      const positionArray = position.array as Float32Array;
+      const colorArray = color.array as Float32Array;
+      if (positionArray.length < nodeCount * 3 || colorArray.length < nodeCount * 3) return;
+      const scale = latest.resultColorScale ?? resultColorScaleForField({ values: [], min: slot.min, max: slot.max } as unknown as ResultField, latest.resultMode);
+      const modelExtent = playbackGeometry.boundingSphere?.radius ? playbackGeometry.boundingSphere.radius * 2 : 1;
+      const visualScale = latest.showDeformed && displacementSlot?.vectorLength
+        ? finiteOr0(finalVisualScaleForDisplacementField(
+            modelExtent,
+            undefined,
+            latest.deformationScale,
+            RESULT_DEFORMATION_CAP_FRACTION,
+            // The packed tick always carries the run-wide peak when the
+            // static path computed one; fall back to the slot max below.
+            latest.displacementPeakMagnitude ?? packedSlotVectorPeak(displacementSlot)
+          ).finalVisualScale)
+        : 0;
+      for (let index = 0; index < nodeCount; index += 1) {
+        const node = surfaceMesh.nodes[index];
+        if (!node) continue;
+        const vectorBase = (displacementSlot?.vectorOffset ?? 0) * 3 + index * 3;
+        const ux = displacementSlot ? finiteOr0(snapshot.cache.vectors[vectorBase]) : 0;
+        const uy = displacementSlot ? finiteOr0(snapshot.cache.vectors[vectorBase + 1]) : 0;
+        const uz = displacementSlot ? finiteOr0(snapshot.cache.vectors[vectorBase + 2]) : 0;
+        const offset = index * 3;
+        positionArray[offset] = finiteOr0(node[0]) + (latest.showDeformed ? ux * visualScale : 0);
+        positionArray[offset + 1] = finiteOr0(node[1]) + (latest.showDeformed ? uy * visualScale : 0);
+        positionArray[offset + 2] = finiteOr0(node[2]) + (latest.showDeformed ? uz * visualScale : 0);
+        writeResultColorForValue(colorArray, offset, finiteOr0(snapshot.cache.values[slot.offset + index]), scale);
+      }
+      position.needsUpdate = true;
+      color.needsUpdate = true;
+      invalidate();
+    };
+    const snapshot = playbackController.getSnapshot();
+    if (snapshot) applySnapshot(snapshot);
+    return playbackController.subscribe(applySnapshot);
+  }, [invalidate, playbackCache, playbackController, playbackGeometry, surfaceMesh.nodes]);
+  useEffect(() => () => {
+    playbackGeometry.dispose();
+  }, [playbackGeometry]);
+  // Render the static geometry when no playback cache is driving; the live
+  // clone only takes over while a controller + packed cache are attached.
+  return playbackController && playbackCache ? playbackGeometry : staticGeometry;
+}
+
+function packedSlotVectorPeak(slot: { vectors: Float32Array; vectorOffset: number; vectorLength: number }): number {
+  let peak = 0;
+  for (let index = 0; index < slot.vectorLength; index += 1) {
+    const base = (slot.vectorOffset + index) * 3;
+    const magnitude = Math.hypot(slot.vectors[base] ?? 0, slot.vectors[base + 1] ?? 0, slot.vectors[base + 2] ?? 0);
+    if (magnitude > peak) peak = magnitude;
+  }
+  return peak;
+}
+
 function usePackedPlaybackGeometry(
   geometry: THREE.BufferGeometry | null,
   options: {
@@ -5377,7 +5422,23 @@ function usePlaybackProbeFields(
   useEffect(() => {
     setSnapshot(controller?.getSnapshot() ?? null);
     if (!controller) return undefined;
-    return controller.subscribe(setSnapshot);
+    // Probe markers update on the 250 ms UI cadence, not the per-frame viewer
+    // cadence: throttle the subscription so playback at 30-60 fps does not
+    // re-render probe subtrees and inflate packed fields every tick.
+    let pending: ResultPlaybackFrameSnapshot | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      timer = null;
+      if (pending) {
+        const next = pending;
+        pending = null;
+        setSnapshot(next);
+      }
+    };
+    return controller.subscribe((next) => {
+      pending = next;
+      if (timer === null) timer = setTimeout(flush, 250);
+    });
   }, [controller]);
   return useMemo(() => {
     if (!snapshot) return fallbackFields;

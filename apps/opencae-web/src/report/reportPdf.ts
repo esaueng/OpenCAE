@@ -95,6 +95,16 @@ class PdfReport {
 
     this.sectionHeading(4, "Mesh");
     this.keyValueRows(this.data.mesh);
+    if (this.data.meshConvergence) {
+      this.subheading("Mesh convergence (coarse → medium → fine)");
+      this.table(this.data.meshConvergence);
+      if (this.data.meshConvergence.footnote) {
+        const lines = this.splitText(this.data.meshConvergence.footnote, this.contentWidth, REPORT_TYPE.caption);
+        this.ensureSpace(lines.length * 3.5 + 4);
+        this.text(lines, REPORT_LAYOUT.margin, this.y, REPORT_TYPE.caption, REPORT_THEME.inkMuted);
+        this.y += lines.length * 3.5 + 5;
+      }
+    }
 
     this.sectionHeading(5, "Solver");
     this.keyValueRows(this.data.solver);

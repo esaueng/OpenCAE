@@ -11,7 +11,17 @@ import { StudySchema } from "@opencae/schema";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
 import type { StepGeometryMetadata } from "../lib/api";
 
-const rightPanelSource = readFileSync(resolve(__dirname, "RightPanel.tsx"), "utf8");
+const rightPanelSource = [
+  "RightPanel.tsx",
+  "panels/ModelPanel.tsx",
+  "panels/MaterialPanel.tsx",
+  "panels/SupportsLoadsPanels.tsx",
+  "panels/MeshPanel.tsx",
+  "panels/RunPanel.tsx",
+  "panels/ResultsPanels.tsx",
+  "panels/PanelChrome.tsx",
+  "panels/RightPanelProps.tsx"
+].map((relative) => readFileSync(resolve(__dirname, relative), "utf8")).join("\n");
 
 const project: Project = {
   id: "project-1",
@@ -818,7 +828,7 @@ describe("RightPanel payload mass controls", () => {
     expect(dynamicHtml).toContain("Ramp to full load");
     expect(dynamicHtml).toContain("Step load");
     expect(dynamicHtml).toContain("Quasi-static ramp");
-    expect(dynamicHtml).toContain("Sinusoidal");
+    expect(dynamicHtml).toContain("Half-sine pulse");
     expect(dynamicHtml).toContain("Ramp: load starts at 0 and reaches full value at end time.");
     expect(dynamicHtml).toContain("Estimated frames");
     expect(renderPanel("run")).not.toContain("Start time");
@@ -881,7 +891,7 @@ describe("RightPanel payload mass controls", () => {
 
     const dynamicHtml = renderPanel("run", { study: dynamicStudy });
 
-    expect(dynamicHtml).toContain("Quasi-static ramp: slow ramp profile intended to reduce inertial effects.");
+    expect(dynamicHtml).toContain("Quasi-static: smooth eased ramp (3s²−2s³) that reduces inertial effects; not a step load.");
   });
 
   test("keeps partial dynamic number edits from committing a coerced zero", () => {

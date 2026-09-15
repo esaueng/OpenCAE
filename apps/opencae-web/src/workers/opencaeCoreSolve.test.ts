@@ -265,7 +265,9 @@ describe("OpenCAE Core browser solver adapter", () => {
       resultSource: "computed",
       runnerVersion: "browser-0.1.0"
     });
-    expect(outcome.result.artifacts?.meshConnectivity?.connectedComponents).toBe(1);
+    expect(outcome.result.artifacts?.meshConnectivity && typeof outcome.result.artifacts.meshConnectivity === "object"
+      ? (outcome.result.artifacts.meshConnectivity as { connectedComponents?: unknown }).connectedComponents
+      : undefined).toBe(1);
   });
 
   test("builds a valid v0.4 local Core model for a simple block study", () => {

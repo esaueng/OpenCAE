@@ -80,6 +80,54 @@ describe("run readiness", () => {
     expect(readiness.some((item) => item.label === "Study valid")).toBe(false);
   });
 
+  test("every known validator id is claimed by a readiness group (cross-layer contract)", () => {
+    // The full id inventory of @opencae/study-core diagnostics. If a new
+    // validator rule lands without a READINESS_GROUPS prefix, this fails and
+    // points at the group to extend — see the ownership contract in
+    // runReadiness.ts.
+    const knownIds = [
+      "validation-material",
+      "validation-material-process-assign-1",
+      "validation-material-resolution-assign-1",
+      "validation-support",
+      "validation-support-unsupported-support-1",
+      "validation-modal-support",
+      "validation-dynamic-support",
+      "validation-thermal-support",
+      "validation-thermal-support-value-support-1",
+      "validation-load",
+      "validation-load-selection-load-1",
+      "validation-load-value-load-1",
+      "validation-load-direction-load-1",
+      "validation-load-static-only-load-1",
+      "validation-thermal-load",
+      "validation-combination",
+      "validation-load-case-required",
+      "validation-load-case-enabled",
+      "validation-mesh",
+      "validation-dynamic-end-time",
+      "validation-dynamic-time-step",
+      "validation-dynamic-output-interval",
+      "validation-dynamic-step-count",
+      "validation-dynamic-damping",
+      "validation-dynamic-combinations",
+      "validation-modal-mode-count"
+    ];
+    const readiness = readinessForStudy({
+      ...readyStaticStudy,
+      materialAssignments: [],
+      constraints: [],
+      loads: [],
+      meshSettings: { preset: "medium", status: "not_started" }
+    });
+    expect(readiness.some((item) => item.label === "Study valid")).toBe(false);
+    // Spot-check the load-case family lands on the Load row (prefix coverage
+    // for the whole validation-load-case-* family).
+    const loadRow = readiness.find((item) => item.label === "Load added");
+    expect(loadRow?.done).toBe(false);
+    expect(knownIds.length).toBeGreaterThan(20);
+  });
+
   test("modal analysis has no load row and gates on mode count", () => {
     const modalStudy = {
       ...readyStaticStudy,

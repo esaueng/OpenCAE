@@ -1831,6 +1831,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
         resultSummary: sourceSummary,
         resultFields,
         solverMeshSummary,
+        convergenceRecords: project.convergenceRecords,
         // A report is always generated after the run finished, so runTiming is null by
         // then; the completed elapsed time is what the "Solve wall time" row needs.
         runTiming: runTiming ?? (solveElapsedMs === null ? null : { elapsedMs: solveElapsedMs }),
@@ -2463,6 +2464,8 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             pushMessage("Completed results exceeded or could not use IndexedDB storage.");
             setOverflowRecoveryRequest((request) => request + 1);
           }
+          const truncation = truncationMessageForDiagnostics(results.summary.diagnostics);
+          if (truncation) pushMessage(truncation);
         } catch (error) {
           if (processingRunIdRef.current !== response.run.id) return;
           processingRunIdRef.current = null;
@@ -3074,6 +3077,37 @@ function runDiagnosticsMessage(study: Study, displayModel?: DisplayModel): strin
 function solverFidelityForDiagnostics(study: Study): SimulationFidelity {
   const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
   return fidelity === "detailed" || fidelity === "ultra" || fidelity === "standard" ? fidelity : "standard";
+}
+
+/**
+ * Surface pipeline resource-limit clamping in the run log. boundedSolverSettings
+ * records { requested, applied } per clamped dynamic setting; without this the
+ * user asks for N frames / a fine step and silently gets fewer/coarser.
+ */
+export function truncationMessageForDiagnostics(diagnostics: unknown): string | null {
+  if (!Array.isArray(diagnostics)) return null;
+  for (const diagnostic of diagnostics) {
+    if (!diagnostic || typeof diagnostic !== "object") continue;
+    const record = diagnostic as { id?: unknown; truncation?: unknown };
+    if (record.id !== "core-local-resource-limits" && record.id !== "core-cloud-resource-limits") continue;
+    const truncation = record.truncation as Record<string, { requested?: unknown; applied?: unknown }> | undefined;
+    if (!truncation || typeof truncation !== "object") continue;
+    const parts: string[] = [];
+    const describe = (label: string, key: string, format: (value: number) => string) => {
+      const entry = truncation[key];
+      const requested = typeof entry?.requested === "number" ? entry.requested : undefined;
+      const applied = typeof entry?.applied === "number" ? entry.applied : undefined;
+      if (requested === undefined || applied === undefined) return;
+      parts.push(`${label} ${format(requested)} reduced to ${format(applied)} to fit browser memory`);
+    };
+    describe("frames", "maxFrames", (value) => `${Math.round(value)}`);
+    describe("end time", "endTime", (value) => `${value}s`);
+    describe("time step", "timeStep", (value) => `${value}s`);
+    describe("output interval", "outputInterval", (value) => `${value}s`);
+    describe("tolerance", "tolerance", (value) => `${value}`);
+    if (parts.length) return `Resource limits applied: ${parts.join("; ")}.`;
+  }
+  return null;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
