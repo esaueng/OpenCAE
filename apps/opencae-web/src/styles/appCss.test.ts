@@ -369,6 +369,11 @@ describe("app CSS", () => {
     expect(playbackMozThumb).toMatch(/width:\s*4px/);
     expect(playbackMozThumb).toMatch(/border-radius:\s*3px/);
   });
+  test("sets status bar links in sentence case beside Buy me a coffee", () => {
+    // They were forced lowercase ("feedback", "github") next to a capitalised donate link.
+    expect(baseRule(".status-link")).not.toMatch(/text-transform:\s*lowercase/);
+  });
+
   test("gives compact controls a 24px minimum target", () => {
     // WCAG 2.5.8. Measured before this: camera presets ~22px, the brand
     // control 18px, footer links 16-17px.
