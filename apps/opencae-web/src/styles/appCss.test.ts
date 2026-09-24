@@ -42,6 +42,20 @@ function cssRule(selector: string) {
   return css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{(?<body>[\\s\\S]*?)\\n\\}`))?.groups?.body ?? "";
 }
 
+/** The rule whose selector list starts a line with exactly `selector`, so a longer
+ *  selector that merely ends the same way (a theme override) cannot shadow it. */
+function baseRule(selector: string) {
+  return css.match(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{(?<body>[\\s\\S]*?)\\n\\}`, "m"))?.groups?.body ?? "";
+}
+
+/** A control dimension in px, resolving `var(--control-h-*)` through tokens.css. */
+function resolvedControlPx(rule: string, property: "min-height" | "height" | "width"): number {
+  const value = rule.match(new RegExp(`(?:^|[\\s;])${property}:\\s*([^;]+);`))?.[1]?.trim() ?? "";
+  const token = value.match(/^var\((--control-h-[a-z]+)\)$/)?.[1];
+  const resolved = token ? tokens.match(new RegExp(`${token}:\\s*([^;]+);`))?.[1]?.trim() ?? "" : value;
+  return Number.parseFloat(resolved.replace(/px$/, ""));
+}
+
 describe("app CSS", () => {
   test("centers model import progress over the viewer", () => {
     const importOverlay = cssRule(".viewer-import-overlay");
@@ -154,9 +168,12 @@ describe("app CSS", () => {
   });
 
   test("keeps compact interactive controls at least 24px high", () => {
-    expect(css).toMatch(/\.unit-switch\s+\.unit-toggle\s*\{[^}]*min-height:\s*24px/);
-    expect(css).toMatch(/\.tooltip-trigger\s*\{[^}]*width:\s*24px[^}]*height:\s*24px/);
-    expect(css).toMatch(/\.status-tabs\s+button\s*\{[^}]*min-height:\s*24px/);
+    // Resolved through the control tier, so the guarantee holds whether a rule states
+    // the size or takes --control-h-sm.
+    expect(resolvedControlPx(baseRule(".unit-switch .unit-toggle"), "min-height")).toBeGreaterThanOrEqual(24);
+    expect(resolvedControlPx(baseRule(".tooltip-trigger"), "width")).toBeGreaterThanOrEqual(24);
+    expect(resolvedControlPx(baseRule(".tooltip-trigger"), "height")).toBeGreaterThanOrEqual(24);
+    expect(resolvedControlPx(baseRule(".status-tabs button"), "min-height")).toBeGreaterThanOrEqual(24);
   });
 
   test("keeps the Results export menu in the viewport instead of clipping it inside the mobile panel", () => {
@@ -355,10 +372,11 @@ describe("app CSS", () => {
   test("gives compact controls a 24px minimum target", () => {
     // WCAG 2.5.8. Measured before this: camera presets ~22px, the brand
     // control 18px, footer links 16-17px.
-    expect(css).toContain(".brand-button {\n  min-height: 24px;");
-    expect(css).toContain(".viewer-view-presets button {\n  min-height: 24px;");
-    expect(css).toContain(".status-link {\n  min-height: 24px;");
-    expect(css).toContain(".status-attribution {\n  min-height: 24px;");
+    for (const selector of [".brand-button", ".viewer-view-presets button", ".status-link", ".status-attribution"]) {
+      expect(resolvedControlPx(baseRule(selector), "min-height"), selector).toBeGreaterThanOrEqual(24);
+    }
+    // The resolver itself: the tier's small step is the WCAG 2.5.8 floor.
+    expect(resolvedControlPx("min-height: var(--control-h-sm);", "min-height")).toBe(24);
   });
 
   test("styles the load row summary as a real button rather than a clickable row", () => {
@@ -481,10 +499,31 @@ describe("app CSS", () => {
     expect(narrowTier).toMatch(/\.result-headline \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
   });
 
+  test("sizes every control from the control-height tier", () => {
+    // Seven literal heights (24/26/28/30/32/34/44px) were in use against three tokens,
+    // so neighbouring controls drifted: the top bar alone ran 24, 28, 32 and 34px.
+    const controls: Array<[string, "min-height" | "height" | "width"]> = [
+      [".brand-button", "min-height"], [".breadcrumb-button", "min-height"], [".breadcrumb-input", "min-height"],
+      [".icon-button", "height"], [".icon-button", "width"], [".topbar-action", "min-height"],
+      [".storage-status-button", "min-height"], [".storage-recovery-close", "height"], [".shortcut-popover-close", "height"],
+      [".stepbar-collapse", "height"], [".stepbar-link", "min-height"], [".unit-switch .unit-toggle", "min-height"],
+      [".tooltip-trigger", "height"], [".segmented button", "min-height"], [".text-button", "min-height"],
+      [".remove-glyph", "height"], [".status-tabs button", "min-height"], [".status-link", "min-height"],
+      [".log-copy-button,\n.log-clear-button", "min-height"], [".viewer-view-presets button", "min-height"],
+      [".start-action", "min-height"], [".start-menu-back", "min-height"]
+    ];
+    for (const [selector, property] of controls) {
+      expect(baseRule(selector), `${selector} ${property}`).toMatch(new RegExp(`(?:^|\\s)${property}:\\s*var\\(--control-h-(sm|md|lg|xl|touch)\\);`));
+    }
+    const primaryGroup = css.match(/\.primary,\n\.secondary,\n\.outline-action \{[^}]*\}/)?.[0] ?? "";
+    expect(primaryGroup).toMatch(/min-height:\s*var\(--control-h-lg\)/);
+    expect(tokens).toMatch(/input, select, textarea \{[^}]*height:\s*var\(--control-h-md\)/);
+  });
+
   test("keeps a component tier between the primitives and the components", () => {
     // tokens.css had primitives and app.css had components with nothing in between, so
     // every rule re-derived its own box and the UI could express value but not rank.
-    for (const name of ["--sp-15", "--sp-25", "--control-h-sm", "--control-h-md", "--control-h-lg",
+    for (const name of ["--sp-15", "--sp-25", "--control-h-sm", "--control-h-md", "--control-h-lg", "--control-h-xl", "--control-h-touch",
       "--card-pad", "--card-pad-tight", "--card-radius", "--gap-block", "--gap-section",
       "--fw-semibold", "--lh-snug"]) {
       expect(tokens, `missing component token ${name}`).toMatch(new RegExp(`${name}:\\s*[^;]+;`));
@@ -560,12 +599,9 @@ describe("app CSS", () => {
     expect(tooltip).toMatch(/max-height:\s*min\(/);
     expect(tooltip).toMatch(/overflow-y:\s*auto/);
     // It toggles on click, so it is a control: pointer cursor at the 24px minimum target.
-    // The literal (not --control-h-sm) matches the pinned WCAG 2.5.8 target-size test
-    // above, which regexes this exact rule for `width: 24px` — both encode the same
-    // 24px guarantee, and this rule keeps the literal so the two pins do not fight.
     const trigger = cssRule(".tooltip-trigger");
     expect(trigger).toMatch(/cursor:\s*pointer/);
-    expect(trigger).toMatch(/width:\s*24px/);
+    expect(trigger).toMatch(/width:\s*var\(--control-h-sm\)/);
 
     // The grace period spans the gap, and Escape dismisses.
     expect(rightPanel).toMatch(/TOOLTIP_CLOSE_DELAY_MS = \d+/);

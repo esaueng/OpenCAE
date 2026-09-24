@@ -187,7 +187,7 @@ img {
 }
 
 .start-menu-back {
-  min-height: 30px;
+  min-height: var(--control-h-md);
   justify-self: start;
   padding: 0 var(--sp-25);
   color: var(--color-text-muted);
@@ -336,7 +336,7 @@ img {
 
 .start-action {
   width: 100%;
-  min-height: 44px;
+  min-height: var(--control-h-xl);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1288,7 +1288,7 @@ img {
 /* Compact controls still need a 24px target (WCAG 2.5.8). Padding grows the
    hit area without moving the 18px mark itself; the 44px topbar absorbs it. */
 .brand-button {
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   display: inline-flex;
   align-items: center;
   padding: 0 2px;
@@ -1353,7 +1353,7 @@ img {
 }
 
 .breadcrumb-button {
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   cursor: text;
   text-align: left;
 }
@@ -1365,7 +1365,7 @@ img {
 
 .breadcrumb-input {
   width: min(260px, 28vw);
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   outline: none;
 }
 
@@ -1437,8 +1437,8 @@ img {
 .storage-recovery-close {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   margin-left: auto;
   color: var(--color-text-muted);
   border-radius: var(--radius-sm);
@@ -1618,8 +1618,8 @@ img {
   right: 20px;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   color: var(--color-text-muted);
   border-radius: var(--radius-sm);
 }
@@ -1671,8 +1671,8 @@ img {
 }
 
 .icon-button {
-  width: 34px;
-  height: 34px;
+  width: var(--control-h-lg);
+  height: var(--control-h-lg);
   display: grid;
   place-items: center;
   color: var(--color-text-muted);
@@ -1975,8 +1975,8 @@ img {
 }
 
 .stepbar-collapse {
-  width: 24px;
-  height: 24px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   display: inline-grid;
   flex: 0 0 auto;
   place-items: center;
@@ -2108,7 +2108,7 @@ img {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   padding: 0;
   justify-self: center;
   color: var(--color-text-muted);
@@ -2151,7 +2151,7 @@ img {
   justify-content: center;
   gap: 7px;
   min-width: 0;
-  min-height: 30px;
+  min-height: var(--control-h-md);
   padding: 0 var(--sp-2);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.28);
@@ -2223,8 +2223,8 @@ img {
 }
 
 .stepbar.collapsed .stepbar-link {
-  width: 34px;
-  min-height: 30px;
+  width: var(--control-h-lg);
+  min-height: var(--control-h-md);
   padding: 0;
   gap: 0;
   font-size: 0;
@@ -2250,8 +2250,8 @@ img {
 
 .stepbar.collapsed .unit-switch .unit-toggle {
   grid-column: auto;
-  width: 34px;
-  min-height: 24px;
+  width: var(--control-h-lg);
+  min-height: var(--control-h-sm);
   border: var(--border-thin);
   border-radius: var(--radius-md);
   background: rgba(11, 15, 20, 0.28);
@@ -2746,8 +2746,8 @@ img {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   color: var(--color-text-subtle);
   /* It toggles on click as well as opening on hover, so it is a control, not an
      annotation. 24px is the minimum target size. */
@@ -2988,7 +2988,7 @@ img {
 
 .range-field input[type="range"] {
   width: 100%;
-  height: 24px;
+  height: var(--control-h-sm);
   margin: 0;
   padding: 0;
   border: none;
@@ -3347,7 +3347,7 @@ img {
 }
 
 .segmented button {
-  min-height: 30px;
+  min-height: var(--control-h-md);
   color: var(--color-text-muted);
   border-right: var(--border-thin);
   font-size: var(--fs-sm);
@@ -3656,7 +3656,7 @@ input {
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
-  min-height: 34px;
+  min-height: var(--control-h-lg);
   padding: 7px 11px;
   border-radius: var(--radius-md);
   border: var(--border-thin);
@@ -3713,7 +3713,7 @@ input {
 /* Quiet inline action inside a section header ("Reset", "Clear All"). It carries no
    chrome until hover, so the padding is what makes it a target rather than bare text. */
 .text-button {
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   padding: var(--sp-1) var(--sp-2);
   color: var(--color-accent);
   font-size: var(--fs-xs);
@@ -4223,7 +4223,7 @@ button:disabled {
 .load-case-row,
 .load-combination-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto 28px;
+  grid-template-columns: minmax(0, 1fr) auto auto var(--control-h-sm);
   align-items: center;
   gap: 7px;
   padding: var(--card-pad);
@@ -4575,8 +4575,8 @@ button:disabled {
   grid-row: 1 / span 2;
   align-self: center;
   justify-self: center;
-  width: 28px;
-  height: 28px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   display: inline-grid;
   place-items: center;
   color: var(--color-text-subtle);
@@ -4913,7 +4913,7 @@ input[aria-invalid="true"] {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   padding: 0 var(--sp-2);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.24);
@@ -4970,7 +4970,7 @@ input[aria-invalid="true"] {
 }
 
 .status-attribution {
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   display: inline-flex;
   align-items: center;
   color: var(--color-text-subtle);
@@ -4987,7 +4987,7 @@ input[aria-invalid="true"] {
 }
 
 .status-link {
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -5159,7 +5159,7 @@ input[aria-invalid="true"] {
 
 .log-copy-button,
 .log-clear-button {
-  min-height: 26px;
+  min-height: var(--control-h-sm);
   padding: 0 var(--sp-25);
   color: var(--color-text-muted);
   background: rgba(11, 15, 20, 0.32);
@@ -5470,7 +5470,7 @@ input[aria-invalid="true"] {
 }
 
 .viewer-view-presets button {
-  min-height: 24px;
+  min-height: var(--control-h-sm);
   padding: var(--sp-1) var(--sp-2);
   font-size: var(--fs-xs);
   color: var(--color-text-muted);
@@ -5618,8 +5618,8 @@ input[aria-invalid="true"] {
   }
 
   .stepbar .stepbar-link {
-    width: 34px;
-    min-height: 30px;
+    width: var(--control-h-lg);
+    min-height: var(--control-h-md);
     padding: 0;
     gap: 0;
     font-size: 0;
@@ -5631,8 +5631,8 @@ input[aria-invalid="true"] {
   }
 
   .stepbar .unit-switch .unit-toggle {
-    width: 34px;
-    min-height: 24px;
+    width: var(--control-h-lg);
+    min-height: var(--control-h-sm);
     border: var(--border-thin);
     border-radius: var(--radius-md);
   }
@@ -5756,8 +5756,8 @@ input[aria-invalid="true"] {
   }
 
   .storage-status-button {
-    width: 34px;
-    min-width: 34px;
+    width: var(--control-h-touch);
+    min-width: var(--control-h-touch);
     justify-content: center;
     padding: 0;
   }
@@ -5866,7 +5866,7 @@ input[aria-invalid="true"] {
   .start-menu-back,
   .start-analysis-type button,
   .workflow-nav button {
-    min-height: 40px;
+    min-height: var(--control-h-touch);
   }
 
   /* The legend covered ~35% of a 312x490 viewer. The reading (field, bar, ticks, peak)
@@ -6151,7 +6151,7 @@ input[aria-invalid="true"] {
 
 .app-crash-actions .primary {
   padding: 0 var(--sp-4);
-  min-height: 34px;
+  min-height: var(--control-h-lg);
   border: var(--border-thin);
   border-radius: var(--radius-md);
 }
