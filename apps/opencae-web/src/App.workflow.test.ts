@@ -24,6 +24,18 @@ describe("App workflow layout", () => {
     expect(appSource).toContain("applyStep(options.nextStep);");
   });
 
+  test("re-runs the start-screen action after a StrictMode remount", () => {
+    // The unmount cleanup aborts the running project action. StrictMode's
+    // simulated unmount aborted the sample load the start screen had just
+    // requested, and the consumed-ref guard stopped the remount from starting
+    // it again, so every start-screen action silently fell back to the start
+    // screen in the dev server.
+    const start = appSource.indexOf("if (!initialAction || initialActionConsumedRef.current) return;");
+    const effect = appSource.slice(start, appSource.indexOf("}, [initialAction]);", start));
+    expect(effect).not.toMatch(/\n\s*return;\n/);
+    expect(effect).toContain("initialActionConsumedRef.current = false;");
+  });
+
   test("does not wire sample selectors directly to project reloads", () => {
     expect(appSource).not.toContain("onSampleModelChange={handleLoadSample}");
     expect(appSource).not.toContain("onSampleAnalysisTypeChange={(analysisType) => void handleLoadSample");
