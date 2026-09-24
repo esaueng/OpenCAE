@@ -51,9 +51,9 @@ describe("BottomPanel", () => {
     expect(html).toContain('href="https://form.esauengineering.com/opencae-feedback"');
     expect(html).toContain('href="https://ko-fi.com/esau"');
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
-    expect(html).toContain(">feedback</a>");
+    expect(html).toContain(">Feedback</a>");
     expect(textContent(html)).toContain("Buy me a coffee");
-    expect(html).toContain(">github</a>");
+    expect(html).toContain(">GitHub</a>");
     expect(html).toContain('class="status-attribution"');
     expect(html).toContain('href="https://esauengineering.com/"');
     expect(html).toContain("Built by Esau Engineering");

@@ -314,11 +314,11 @@ export function BottomPanel({ status, logs, meshStatus, solverStatus, onClearLog
           </a>
           <a className="status-link" href="https://form.esauengineering.com/opencae-feedback" target="_blank" rel="noreferrer">
             <MessageSquare size={13} aria-hidden="true" />
-            feedback
+            Feedback
           </a>
           <a className="status-link" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">
             <Github size={13} aria-hidden="true" />
-            github
+            GitHub
           </a>
         </div>
       </div>
