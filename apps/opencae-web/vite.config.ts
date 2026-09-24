@@ -168,11 +168,10 @@ function offlineAssetCaching(): PluginOption {
       maximumFileSizeToCacheInBytes: MAX_PRECACHE_FILE_BYTES,
       navigateFallback: "index.html",
       cleanupOutdatedCaches: true,
-      // The 3D viewer's text labels (troika-three-text) resolve fonts from
-      // cdn.jsdelivr.net at runtime; cache them opportunistically so label
-      // rendering keeps working offline after the viewer has been used once
-      // online. (Precache can't cover this — the font set is codepoint
-      // dependent. The core offline flows do not depend on it.)
+      // The 3D viewer's labels set a self-hosted, precached Plex face
+      // (SCENE_LABEL_FONT_URL). Only glyphs outside it (Greek, arrows) make
+      // troika resolve a fallback font from cdn.jsdelivr.net; cache those
+      // opportunistically so they keep working offline after one online use.
       runtimeCaching: [
         {
           urlPattern: /^https:\/\/cdn\.jsdelivr\.net\/.*/i,

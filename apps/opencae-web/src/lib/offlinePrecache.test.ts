@@ -114,6 +114,9 @@ describe("workbox settings", () => {
     // UI typeface: offline readiness must include the WOFF2 faces or the app
     // shell swaps to system-ui the moment the network drops.
     expect(PRECACHE_GLOB_PATTERNS[0]).toContain("woff2");
+    // The viewer's scene-label face is WOFF (troika cannot read WOFF2); without it the
+    // labels fell back to a runtime CDN font that is missing offline.
+    expect(PRECACHE_GLOB_PATTERNS[0]).toMatch(/[{,]woff[,}]/);
   });
 
   test("service-worker updates import the stale-client refresh hook", () => {

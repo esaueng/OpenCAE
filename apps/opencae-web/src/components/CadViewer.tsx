@@ -3,6 +3,7 @@ import type { CSSProperties, ElementRef, MouseEvent as ReactMouseEvent, MutableR
 import { Billboard, Bounds, Edges, GizmoHelper, Html, Line, OrbitControls, Text, useBounds } from "@react-three/drei";
 import { addAfterEffect, Canvas, useFrame, useThree } from "@react-three/fiber";
 import { configureTextBuilder } from "troika-three-text";
+import sceneLabelFontUrl from "../assets/fonts/ibm-plex-sans-latin-500-normal.woff";
 import type { ThreeEvent } from "@react-three/fiber";
 import { finiteExtrema } from "@opencae/core";
 import type { DisplayFace, DisplayModel, MeshSummary, ResultField, ResultRenderBounds } from "@opencae/schema";
@@ -95,6 +96,18 @@ interface CadViewerProps {
 // the gizmo <Text> labels would suspend forever and hide the whole viewer
 // behind the Suspense fallback. Typeset on the main thread instead.
 configureTextBuilder({ useWorker: false });
+
+/**
+ * Every in-scene label (load and support callouts, probes, dimensions, the axis
+ * triad and the view cube) sets this. Without a `font`, troika resolves glyphs
+ * through unicode-font-resolver, which fetched Noto Sans from cdn.jsdelivr.net
+ * at runtime: labels rendered in a face the rest of the UI never uses, and a
+ * user offline before the viewer's first online use had none. Self-hosted and
+ * precached; WOFF because troika 0.52 rejects WOFF2. Weight 500 because scene
+ * labels render at ~9-12px. Glyphs outside Latin-1 (Greek, arrows) still fall
+ * back to the resolver.
+ */
+export const SCENE_LABEL_FONT_URL = sceneLabelFontUrl;
 
 const BRACKET_DEPTH = 1.1;
 const RIB_DEPTH = 0.38;
@@ -842,6 +855,7 @@ function OpenSectionLabel({ bounds, state }: { bounds: THREE.Box3; state: Sectio
   return (
     <Billboard position={center.toArray() as [number, number, number]} follow>
       <Text
+        font={SCENE_LABEL_FONT_URL}
         color="#f8fafc"
         fontSize={0.11 * boundaryMarkerScale(bounds)}
         anchorX="center"
@@ -1361,6 +1375,7 @@ function AxisCap({
         <meshBasicMaterial color={VIEWER_AXIS_LABEL_BADGE_COLOR} depthTest={false} toneMapped={false} />
       </mesh>
       <Text
+        font={SCENE_LABEL_FONT_URL}
         anchorX="center"
         anchorY="middle"
         color={VIEWER_AXIS_LABEL_COLOR}
@@ -1374,6 +1389,7 @@ function AxisCap({
         {label}
       </Text>
       <Text
+        font={SCENE_LABEL_FONT_URL}
         anchorX="center"
         anchorY="middle"
         color="#d7e3ee"
@@ -1680,6 +1696,7 @@ function GizmoTextLabel({
 }) {
   return (
     <Text
+      font={SCENE_LABEL_FONT_URL}
       anchorX="center"
       anchorY="middle"
       color={color}
@@ -2430,6 +2447,7 @@ function DimensionLineLabel({ label, position, tangent, scale }: { label: string
   return (
     <group ref={groupRef} position={position}>
       <Text
+        font={SCENE_LABEL_FONT_URL}
         anchorX="center"
         anchorY="middle"
         renderOrder={50}
@@ -6569,6 +6587,7 @@ function SceneLabel({
   return (
     <Billboard position={position} renderOrder={50}>
       <Text
+        font={SCENE_LABEL_FONT_URL}
         anchorX="center"
         anchorY="middle"
         color={colors.text}
