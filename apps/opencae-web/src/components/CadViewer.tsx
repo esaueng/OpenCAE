@@ -187,8 +187,10 @@ export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
  */
 export function viewCubePalette(themeMode: ThemeMode = "dark") {
   return themeMode === "light"
-    ? { body: "#dfe8f2", face: "#c5d5e6", faceHover: "#8fb4d6", label: "#1f3347", labelHover: "#0b1a2a", edge: "#6f8dab", edgeActive: "#0b63b6" }
-    : { body: "#1d2b3d", face: "#31516b", faceHover: "#6da4c9", label: "#e4eef8", labelHover: "#ffffff", edge: VIEWER_VIEW_CUBE_EDGE_COLOR, edgeActive: "#d9ecff" };
+    // The label outline is a halo in the ground colour: a near-black outline around
+    // the dark light-theme lettering merged the two into blobs.
+    ? { body: "#dfe8f2", face: "#c5d5e6", faceHover: "#8fb4d6", label: "#1f3347", labelHover: "#0b1a2a", labelOutline: "#eef3f8", edge: "#6f8dab", edgeActive: "#0b63b6" }
+    : { body: "#1d2b3d", face: "#31516b", faceHover: "#6da4c9", label: "#e4eef8", labelHover: "#ffffff", labelOutline: "#07111d", edge: VIEWER_VIEW_CUBE_EDGE_COLOR, edgeActive: "#d9ecff" };
 }
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.32;
 export const VIEWER_VIEW_CUBE_CORNER_RADIUS = 0.082;
@@ -1571,6 +1573,7 @@ function ViewCubeFace({
       <group ref={labelRef} position={[0, 0, 0.075]} renderOrder={4}>
         <GizmoTextLabel
           color={hovered ? palette.labelHover : palette.label}
+          outlineColor={palette.labelOutline}
           fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
           opacity={hovered ? 1 : 0.95}
           depthTest
@@ -1685,11 +1688,13 @@ function GizmoTextLabel({
   fontSize,
   depthTest = false,
   opacity = 1,
-  position = [0, 0, 0.01]
+  position = [0, 0, 0.01],
+  outlineColor = "#07111d"
 }: {
   children: string;
   color: string;
   fontSize: number;
+  outlineColor?: string;
   depthTest?: boolean;
   opacity?: number;
   position?: [number, number, number];
@@ -1707,7 +1712,7 @@ function GizmoTextLabel({
       material-depthTest={depthTest}
       material-side={THREE.DoubleSide}
       material-toneMapped={false}
-      outlineColor="#07111d"
+      outlineColor={outlineColor}
       outlineOpacity={opacity}
       outlineWidth={0.014}
       position={position}
@@ -2341,9 +2346,38 @@ const DIMENSION_LABEL_FONT_SIZE = 0.095;
 // Approximate troika glyph advance per character, used to decide whether the
 // label fits inside its dimension line.
 const DIMENSION_LABEL_GLYPH_ASPECT = 0.62;
+// Clear space on each side of an inline label, so the broken line stops short of
+// the text's outline instead of touching it.
+const DIMENSION_LABEL_GAP_PADDING = 0.05;
 
 export function dimensionAnnotationScale(bounds: THREE.Box3 | null): number {
   return boundaryMarkerScale(bounds);
+}
+
+/**
+ * The drawn pieces of a dimension line. An inline label sits at the midpoint, so
+ * the line breaks around it the way a drawing sets dimension text: one unbroken
+ * segment ran straight through "X 120 mm" and struck the text out. A label that
+ * does not fit sits past the end instead, and the line stays whole.
+ */
+export function dimensionLineSegments(
+  start: [number, number, number],
+  end: [number, number, number],
+  labelWidth: number,
+  inline: boolean,
+  padding: number
+): Array<[[number, number, number], [number, number, number]]> {
+  if (!inline) return [[start, end]];
+  const startVec = new THREE.Vector3(...start);
+  const endVec = new THREE.Vector3(...end);
+  const length = startVec.distanceTo(endVec);
+  const halfGap = Math.min(labelWidth / 2 + padding, length / 2);
+  if (halfGap >= length / 2) return [];
+  const tangent = endVec.clone().sub(startVec).normalize();
+  const mid = startVec.clone().add(endVec).multiplyScalar(0.5);
+  const gapStart = mid.clone().addScaledVector(tangent, -halfGap).toArray() as [number, number, number];
+  const gapEnd = mid.clone().addScaledVector(tangent, halfGap).toArray() as [number, number, number];
+  return [[start, gapStart], [gapEnd, end]];
 }
 
 function DimensionLine({ start, end, label, scale }: { start: [number, number, number]; end: [number, number, number]; label: string; scale: number }) {
@@ -2360,9 +2394,12 @@ function DimensionLine({ start, end, label, scale }: { start: [number, number, n
   const labelPosition = inline
     ? startVec.clone().add(endVec).multiplyScalar(0.5)
     : endVec.clone().add(tangent.clone().multiplyScalar(estimatedLabelWidth / 2 + 0.14 * scale));
+  const segments = dimensionLineSegments(start, end, estimatedLabelWidth, inline, DIMENSION_LABEL_GAP_PADDING * scale);
   return (
     <group>
-      <Line points={[start, end]} color="#4da3ff" lineWidth={1.3} transparent opacity={0.9} />
+      {segments.map((points, index) => (
+        <Line key={index} points={points} color="#4da3ff" lineWidth={1.3} transparent opacity={0.9} />
+      ))}
       <DimensionArrowhead position={startVec} direction={tangent.clone().negate()} scale={scale} />
       <DimensionArrowhead position={endVec} direction={tangent} scale={scale} />
       <DimensionLineLabel label={label} position={labelPosition.toArray() as [number, number, number]} tangent={tangent.toArray() as [number, number, number]} scale={scale} />
