@@ -71,7 +71,7 @@ export function RunPanel({ study, displayModel, runProgress, runError, runTiming
       <div className="checklist">
         {runReadiness.map(({ label, done, blockers }) => (
           <div key={label} className={done ? "check done" : "check"}>
-            <span>{done ? <Check size={18} /> : null}</span>
+            <span className="check-mark" aria-hidden="true">{done ? <Check size={14} strokeWidth={2.4} /> : null}</span>
             <span className="check-copy">
               {label}
               {/* Blockers used to live only in a title tooltip (2026-09 review F7). */}

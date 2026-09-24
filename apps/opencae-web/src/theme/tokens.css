@@ -24,6 +24,12 @@
   --color-error: #ef4444;
   --color-success: #22c55e;
   --color-viewport-bg: #070b10;
+  /* Ink on an accent fill (primary buttons, selected radios). */
+  --color-on-accent: #06111e;
+  /* Chart series that must read on both surfaces; ramp colours are tuned for the
+     dark viewport and fall to ~2:1 on the light panel. */
+  --color-series-1: #38bdf8;
+  --color-series-2: #fb923c;
 
   /* ── General-purpose result accents. The actual WebGL and HTML contour
      ramps are generated together by resultColorScale.ts. ── */
@@ -96,10 +102,9 @@
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-pill: 10px;
-
-  /* ── Borders (composed) ───────────────────────────────── */
-  --border-thin: 1px solid var(--color-border);
-  --border-strong: 1px solid var(--color-border-strong);
+  /* Floating surfaces (dialogs, popovers, the gallery). Controls and cards stay at
+     --radius-md; overlays ranged 4-18px with no rule between them. */
+  --radius-overlay: 8px;
 
   /* ── Shadows ──────────────────────────────────────────── */
   --shadow-panel: 0 14px 38px rgba(0, 0, 0, 0.32);
@@ -108,7 +113,9 @@
   --topbar-h: 44px;
   --statusbar-h: 30px;
   --stepbar-w: 124px;
-  --context-w: 344px;
+  /* Grows past 1560px wide so the panel keeps pace with a large viewer; at
+     1920 the fixed 344px left it 18% of the screen and wrapped its headline. */
+  --context-w: clamp(344px, 22vw, 420px);
 
   /* ── Motion ───────────────────────────────────────────── */
   --dur-fast: 100ms;
@@ -154,12 +161,26 @@
   --color-accent: #0b63b6;
   --color-accent-dim: rgba(22, 119, 210, 0.12);
   --color-accent-border: rgba(22, 119, 210, 0.42);
-  --color-warning: #a16207;
+  --color-warning: #854d0e; /* #a16207 fell to 3.7-4.0:1 on its own 12% warning tint */
   --color-error: #b91c1c;
   --color-success: #15803d;
   --color-viewport-bg: #f7f9fc;
+  --color-on-accent: #f8fbff;
+  --color-series-1: #0369a1;
+  --color-series-2: #c2410c;
   --shadow-panel: 0 12px 30px rgba(37, 54, 73, 0.14);
   color-scheme: light;
+}
+
+/* ── Borders (composed) ─────────────────────────────────────
+   A custom property that references another resolves where it is declared,
+   so these must be declared again in every scope that re-themes the colours.
+   Declared only in :root, light mode inherited the dark #2a3441 into all 94
+   borders drawn with them. */
+:root,
+.theme-light {
+  --border-thin: 1px solid var(--color-border);
+  --border-strong: 1px solid var(--color-border-strong);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -196,6 +217,18 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Hover and press states snapped: 10 transitions in the whole stylesheet, none on
+   the shared buttons. Components that animate something else still override this. */
+button,
+a,
+summary {
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
 /* There is zero relative font sizing anywhere in this app's CSS, which makes the browser
    default `small { font-size: smaller }` (0.8333em) provably the only source of the
    sub-11px text the interface was rendering — the legend's Low/High at 9.58px and the
@@ -217,6 +250,8 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
 input:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
@@ -239,6 +274,26 @@ input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-dim);
+}
+
+/* The text-field box above is wrong for native ticks: every checkbox inherited a
+   30px height and 6px/8px padding, so a list of them ran ~66px per row. */
+input[type="checkbox"],
+input[type="radio"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+input[type="checkbox"]:focus,
+input[type="radio"]:focus {
+  box-shadow: none;
 }
 
 /* ─────────────────────────────────────────────────────────────

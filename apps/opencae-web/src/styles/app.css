@@ -55,7 +55,7 @@ img {
   overflow: hidden;
   background:
     radial-gradient(ellipse 80% 50% at 50% 0%, rgba(77, 163, 255, 0.06), transparent 70%),
-    linear-gradient(#0b0f14, #080c10);
+    linear-gradient(var(--color-bg), color-mix(in srgb, var(--color-bg) 92%, #000));
   padding: var(--sp-5);
 }
 
@@ -168,7 +168,6 @@ img {
 .panel-eyebrow,
 .editable-list h3,
 .section-title,
-.collapsible-subtitle,
 .app-crash-eyebrow,
 .app-crash-detail span {
   font-family: var(--font-mono);
@@ -195,8 +194,7 @@ img {
   background: rgba(17, 24, 33, 0.72);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
 }
 
 .start-menu-back:hover,
@@ -234,8 +232,10 @@ img {
   gap: var(--sp-25);
 }
 
+/* Same column as the actions above it; at 430px (capped to the brand's 340) it
+   overhung the 320px buttons by 10px a side. */
 .recent-projects {
-  width: min(430px, 100%);
+  width: min(320px, 100%);
   margin-top: var(--sp-4);
   padding: var(--sp-25);
   color: var(--color-text-muted);
@@ -348,12 +348,13 @@ img {
   transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
-.start-actions .start-action {
+.start-actions .start-action,
+.start-menu-load {
   justify-content: space-between;
 }
 
 .start-action.primary {
-  color: #06111e;
+  color: var(--color-on-accent);
   background: var(--color-accent);
   border-color: var(--color-accent);
 }
@@ -384,7 +385,7 @@ img {
 
 .start-action small {
   margin-top: 1px;
-  color: rgba(6, 17, 30, 0.72);
+  color: rgba(6, 17, 30, 0.85);
   font-size: var(--fs-xs);
 }
 
@@ -680,8 +681,7 @@ img {
   grid-template-columns: 1fr;
   gap: 3px;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
   line-height: 1.25;
 }
 
@@ -767,7 +767,7 @@ img {
   color: var(--color-text);
   background: var(--color-surface);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-panel);
 }
 
@@ -787,6 +787,11 @@ img {
 .material-preview-pane h3 {
   margin: 0;
   color: var(--color-text);
+}
+
+/* A dialog title set at body size read as one more line of copy. */
+.workflow-modal-header h2 {
+  font-size: var(--fs-lg);
 }
 
 .workflow-modal-footer {
@@ -1115,8 +1120,7 @@ img {
 .material-list button small {
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
 }
 
 .material-list-empty {
@@ -1344,7 +1348,6 @@ img {
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   text-overflow: ellipsis;
 }
@@ -1384,7 +1387,7 @@ img {
 }
 
 .storage-status-button {
-  min-height: 28px;
+  min-height: var(--control-h-lg);
   display: inline-flex;
   align-items: center;
   gap: var(--sp-15);
@@ -1393,8 +1396,7 @@ img {
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 
@@ -1421,7 +1423,7 @@ img {
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-surface) 96%, transparent);
   border: 1px solid var(--color-accent-border);
-  border-radius: 8px;
+  border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-panel);
   backdrop-filter: blur(12px);
 }
@@ -1459,7 +1461,9 @@ img {
   border-radius: var(--radius-md);
 }
 
-.storage-recovery-header > span:last-child {
+/* Was `> span:last-child`, which never matched: the close button is the last child,
+   so the eyebrow and title ran together on one line. */
+.storage-recovery-heading {
   display: grid;
   gap: 1px;
 }
@@ -1603,7 +1607,7 @@ img {
   color: var(--color-text-muted);
   background: var(--color-surface);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-panel);
 }
 
@@ -1709,7 +1713,7 @@ img {
   --run-progress: 0%;
   position: relative;
   isolation: isolate;
-  min-height: 32px;
+  min-height: var(--control-h-lg);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1935,7 +1939,7 @@ img {
 }
 
 .theme-light .topbar-action.running {
-  color: #06111e;
+  color: var(--color-text);
 }
 
 .workspace {
@@ -1960,6 +1964,9 @@ img {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  /* Text in the rail starts on the step icons' left edge (step padding + its
+     2px active border), not 8px outside it. */
+  padding-left: calc(var(--sp-15) + 2px);
 }
 
 .stepbar-eyebrow,
@@ -2056,10 +2063,10 @@ img {
   height: 18px;
 }
 
+/* Done reads from the glyph alone. Seven green-filled tiles made a finished
+   setup the loudest thing on screen and drowned the accent of the active step. */
 .step-icon.done {
   color: var(--color-success);
-  border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.08);
 }
 
 .step.active .step-icon {
@@ -2086,6 +2093,7 @@ img {
   justify-content: space-between;
   gap: var(--sp-15);
   min-width: 0;
+  padding-inline: calc(var(--sp-15) + 2px) var(--sp-15);
 }
 
 .stepbar-footer > .unit-switch {
@@ -2176,6 +2184,7 @@ img {
 
 .stepbar.collapsed .stepbar-header {
   justify-content: center;
+  padding-left: 0;
 }
 
 .stepbar.collapsed .stepbar-eyebrow,
@@ -2489,7 +2498,7 @@ img {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: 2px;
   color: var(--color-text-muted);
-  font-size: calc(var(--fs-mini) * 0.9 * var(--analysis-legend-scale, 1));
+  font-size: calc(var(--fs-mini) * var(--analysis-legend-scale, 1));
   line-height: 1.15;
 }
 
@@ -2509,13 +2518,35 @@ img {
   text-align: right;
 }
 
-.legend-extrema {
+.legend-heading {
   grid-column: 1 / -1;
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  padding-right: 20px;
+  gap: calc(var(--sp-2) * var(--analysis-legend-scale, 1));
+  min-width: 0;
+}
+
+.analysis-legend .legend-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: calc(var(--fs-sm) * var(--analysis-legend-scale, 1));
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-legend .legend-unit {
+  flex: none;
   color: var(--color-text-muted);
-  line-height: 1.15;
+}
+
+/* Mesh counts are provenance, not the reading: last, muted, clear of the resize grip. */
+.analysis-legend .legend-meta {
+  padding-right: calc(var(--sp-5) * var(--analysis-legend-scale, 1));
+  color: var(--color-text-subtle);
 }
 
 .side-panel {
@@ -2571,6 +2602,13 @@ img {
   color: var(--color-text-muted);
   font-size: var(--fs-sm);
   line-height: 1.55;
+}
+
+/* Prose, callouts and warnings sat flush on the control below them (measured 0px in
+   Dynamic Run, Results and Beam Model). In the panel's block flow this margin
+   collapses into a following section title's larger one, so only the flush cases move. */
+.panel-body > :is(.panel-copy, .muted, .callout, .panel-warning) {
+  margin-bottom: var(--gap-block);
 }
 
 .panel-warning {
@@ -2673,12 +2711,12 @@ img {
   min-width: 18px;
   padding: 1px 5px;
   color: var(--color-text-muted);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
   line-height: var(--lh-tight);
   text-align: center;
 }
@@ -2731,8 +2769,8 @@ img {
   width: min(440px, calc(100vw - 24px));
   padding: 11px;
   color: var(--color-text);
-  background: rgba(11, 17, 24, 0.94);
-  border: var(--border-thin);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  border: var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-panel);
   font-size: var(--fs-xs);
@@ -2775,44 +2813,6 @@ img {
 .field-tooltip > span:last-child {
   grid-column: 2;
   color: var(--color-text-muted);
-}
-
-.help-note {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 22px;
-  align-items: center;
-  gap: var(--sp-25);
-  margin: 0 0 14px;
-  padding: var(--card-pad);
-  color: var(--color-text-muted);
-  background: var(--color-surface-2);
-  border: var(--border-thin);
-  border-radius: var(--card-radius);
-}
-
-.help-note--collapsed {
-  display: flex;
-  justify-content: flex-end;
-  margin: -4px 0 var(--sp-25);
-  padding: 0;
-  background: transparent;
-  border: 0;
-}
-
-.help-note strong,
-.help-note small {
-  display: block;
-}
-
-.help-note strong {
-  color: var(--color-text);
-  font-size: var(--fs-sm);
-}
-
-.help-note small {
-  margin-top: 2px;
-  font-size: var(--fs-xs);
-  line-height: 1.4;
 }
 
 .help-visual {
@@ -3272,6 +3272,29 @@ img {
   border-bottom: var(--border-thin);
 }
 
+/* Count-aware layouts. The base grid is three columns, so a two-option control
+   (thermal Temperature / Heat flux) left a dead third of its width, and the five
+   dynamic result modes laid out 3+2 with an empty cell. */
+.segmented:has(> button:nth-child(2):last-child) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) > button {
+  grid-column: span 2;
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) > button:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) > button:nth-child(-n + 3) {
+  border-bottom: var(--border-thin);
+}
+
 .modal-mode-table {
   display: grid;
   gap: var(--sp-2);
@@ -3286,9 +3309,23 @@ img {
   text-align: left;
 }
 
+/* The selected mode used the primary fill, so the list read as six buttons with one
+   call to action. Selection matches every other picker: accent tint and inset rule. */
+.modal-mode-table button[aria-pressed="true"] {
+  color: var(--color-text);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.modal-mode-table button[aria-pressed="true"] > strong {
+  color: var(--color-accent);
+}
+
 .modal-mode-table button > span {
   justify-self: end;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .modal-mode-table button > small {
@@ -3367,6 +3404,17 @@ input {
   background: color-mix(in srgb, var(--color-border) 45%, transparent);
   border-left: var(--border-thin);
   font-family: var(--font-mono);
+}
+
+/* Section boundaries measure --gap-section (28px) everywhere else. These two titles sit
+   inside grid containers, where the block above's margin cannot collapse into theirs,
+   so they read 42px and 36px. */
+.segmented.result-mode + .field > .section-title:first-child {
+  margin-top: calc(var(--gap-section) - 14px);
+}
+
+.load-case-editor > .section-title {
+  margin-top: calc(var(--gap-section) - var(--sp-2));
 }
 
 .panel-body > .section-title:first-child {
@@ -3512,7 +3560,7 @@ input {
   height: 20px;
   display: grid;
   place-items: center;
-  color: #06111e;
+  color: var(--color-on-accent);
   border: 1px solid var(--color-text-subtle);
   border-radius: 50%;
 }
@@ -3622,6 +3670,19 @@ input {
   border-color: var(--color-accent);
 }
 
+/* Destructive confirm. The replace dialog's "Replace and clear setup" wore the
+   accent, so the irreversible choice looked like the recommended one. */
+.primary.danger {
+  color: #fff;
+  background: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.primary.danger:hover,
+.theme-light .primary.danger:hover {
+  background: color-mix(in srgb, var(--color-error) 86%, #000);
+}
+
 .secondary {
   color: var(--color-text);
   background: var(--color-surface-2);
@@ -3639,10 +3700,6 @@ input {
 
 /* Light-theme accent is dark (#0b63b6), so primary buttons need light text
    and a darkened (not lightened) hover to hold WCAG AA contrast. */
-.theme-light .primary {
-  color: #f8fbff;
-}
-
 .theme-light .primary:hover {
   background: color-mix(in srgb, var(--color-accent) 85%, #06111e);
 }
@@ -3665,6 +3722,14 @@ input {
 
 .text-button:hover {
   background: var(--color-accent-dim);
+}
+
+.text-button.danger-text {
+  color: var(--color-error);
+}
+
+.text-button.danger-text:hover {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
 button:disabled {
@@ -3874,6 +3939,10 @@ button:disabled {
 }
 
 .result-headline-item strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--sp-1);
   overflow-wrap: anywhere;
   min-width: 0;
   color: var(--color-text);
@@ -3885,6 +3954,14 @@ button:disabled {
 }
 
 /* A single headline figure gets the full width rather than a stranded half. */
+.result-headline-unit {
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+}
+
 .result-headline:has(> .result-headline-item:only-child) {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -3969,9 +4046,24 @@ button:disabled {
   display: none;
 }
 
+/* The title wrapped to two lines ("Load / cases") because the mono subtitle took
+   the row; the title keeps its line and the subtitle truncates instead. */
+.collapsible-title {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* A quiet sentence-case note, not an eyebrow: tracked uppercase mono truncated
+   "Sample and analysis type" to "SAMPLE AND ANALYS…" beside the title. */
 .collapsible-subtitle {
+  min-width: 0;
   margin-left: auto;
+  overflow: hidden;
   color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .collapsible-chevron {
@@ -4037,6 +4129,7 @@ button:disabled {
 
 .failure-assessment {
   margin-top: 0;
+  margin-bottom: var(--sp-2);
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: var(--sp-25);
@@ -4130,7 +4223,7 @@ button:disabled {
 .load-case-row,
 .load-combination-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 28px;
+  grid-template-columns: minmax(0, 1fr) auto auto 28px;
   align-items: center;
   gap: 7px;
   padding: var(--card-pad);
@@ -4139,24 +4232,29 @@ button:disabled {
   border-radius: var(--card-radius);
 }
 
+/* One row per case: name, load count, Enabled, delete. The count used to sit alone
+   on a second row with the delete glyph centred across both. */
 .load-case-row > small {
-  grid-column: 1 / span 2;
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
+  white-space: nowrap;
 }
 
-.load-case-row > .remove-glyph {
-  grid-column: 3;
-  grid-row: 1 / span 2;
+.load-case-row > small.load-case-empty {
+  color: var(--color-warning);
 }
 
 .load-combination-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.load-combination-row > .secondary,
+.load-combination-row > .load-combination-delete,
 .combination-factor {
   grid-column: 1 / -1;
+}
+
+.load-combination-delete {
+  justify-self: end;
 }
 
 .combination-factor {
@@ -4277,17 +4375,17 @@ button:disabled {
 }
 
 .convergence-chart .chart-displacement {
-  stroke: #38bdf8;
+  stroke: var(--color-series-1);
   fill: var(--color-surface-2);
 }
 
 .convergence-chart .chart-stress {
-  stroke: #fb923c;
+  stroke: var(--color-series-2);
   fill: var(--color-surface-2);
 }
 
 .convergence-chart .chart-skipped {
-  stroke: #f87171;
+  stroke: var(--color-error);
   stroke-width: 2;
 }
 
@@ -4297,11 +4395,11 @@ button:disabled {
 }
 
 .convergence-chart .chart-displacement-label {
-  fill: #38bdf8;
+  fill: var(--color-series-1);
 }
 
 .convergence-chart .chart-stress-label {
-  fill: #fb923c;
+  fill: var(--color-series-2);
 }
 
 .convergence-rungs {
@@ -4384,8 +4482,11 @@ button:disabled {
   cursor: pointer;
 }
 
+/* Disabled only while its own edit form is open. The global disabled fade made the
+   item being edited look like the one thing on the panel that was unavailable. */
 .editable-summary-trigger:disabled {
   cursor: default;
+  opacity: 1;
 }
 
 .editable-item:has(.editable-summary-trigger:hover:not(:disabled)),
@@ -4423,6 +4524,10 @@ button:disabled {
   color: #39c8c8;
 }
 
+.theme-light .editable-summary .load-type-icon.pressure {
+  color: #0f766e;
+}
+
 .editable-summary .load-type-icon.gravity {
   color: var(--color-success);
 }
@@ -4443,7 +4548,6 @@ button:disabled {
   min-width: 0;
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -4489,6 +4593,10 @@ button:disabled {
   gap: var(--sp-2);
 }
 
+.edit-form .placement-chip {
+  margin: 0;
+}
+
 .edit-form .field {
   margin-bottom: 0;
 }
@@ -4520,18 +4628,22 @@ input[aria-invalid="true"] {
 
 .check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-25);
   color: var(--color-text-muted);
   font-size: var(--fs-md);
+  line-height: var(--lh-tight);
 }
 
-.check > span {
+/* The tick box only. `.check > span` used to style every child span, so the
+   done state painted the label itself green-on-green (2026-09 refinement). */
+.check-mark {
+  flex: none;
   width: 18px;
   height: 18px;
   display: grid;
   place-items: center;
-  border: var(--border-thin);
+  border: var(--border-strong);
   border-radius: var(--radius-md);
 }
 
@@ -4539,17 +4651,49 @@ input[aria-invalid="true"] {
   color: var(--color-text);
 }
 
-.check.done > span {
+.check.done > .check-mark {
   color: var(--color-success);
-  background: rgba(34, 197, 94, 0.14);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
   border-color: var(--color-success);
 }
 
 .placement-chip {
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   margin-bottom: 14px;
+}
+
+.placement-field .placement-chip {
+  margin: 0;
+}
+
+/* Model step view tools: four peers in one grid instead of four lone rows. */
+.view-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.view-tool-grid button {
+  min-width: 0;
+  justify-content: flex-start;
+  padding-inline: var(--sp-25);
+}
+
+.view-tool-detail {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--gap-block);
+}
+
+.view-tool-detail > .field-label-with-help {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.view-tool-detail .dimension-box {
+  margin: 0;
 }
 
 .placement-chip.ready {
@@ -4597,6 +4741,56 @@ input[aria-invalid="true"] {
   line-height: 16px;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+/* Additional faces for multi-face supports and loads. */
+.face-picker {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.face-picker > legend {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--sp-15);
+}
+
+.face-picker-meta {
+  color: var(--color-text-subtle);
+  font-weight: var(--fw-regular);
+}
+
+.face-picker-list {
+  display: grid;
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--card-radius);
+}
+
+.face-picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-25);
+  min-height: 32px;
+  padding: 0 var(--card-pad);
+  color: var(--color-text);
+  font-weight: var(--fw-regular);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.face-picker-row + .face-picker-row {
+  border-top: var(--border-thin);
+}
+
+.face-picker-row:hover {
+  background: var(--color-surface-hover);
 }
 
 .toggle {
@@ -4670,7 +4864,6 @@ input[aria-invalid="true"] {
 .concept-card small {
   margin-top: 2px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -4766,7 +4959,6 @@ input[aria-invalid="true"] {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-15);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -4800,8 +4992,7 @@ input[aria-invalid="true"] {
   align-items: center;
   gap: 5px;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
   text-transform: lowercase;
   text-decoration: none;
 }
@@ -4974,7 +5165,6 @@ input[aria-invalid="true"] {
   background: rgba(11, 15, 20, 0.32);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -5030,7 +5220,6 @@ input[aria-invalid="true"] {
 
 .tips-drawer-header strong {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
 }
@@ -5061,6 +5250,11 @@ input[aria-invalid="true"] {
   margin-bottom: var(--sp-2);
 }
 
+/* Clear the popover's absolutely placed close button, which the label ran under. */
+.shortcut-popover .shortcut-guide-header {
+  padding-right: var(--sp-6);
+}
+
 .shortcut-guide-header strong {
   color: var(--color-text);
   font-size: var(--fs-sm);
@@ -5068,7 +5262,6 @@ input[aria-invalid="true"] {
 
 .shortcut-guide-header span {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -5311,6 +5504,40 @@ input[aria-invalid="true"] {
   outline-offset: 1px;
 }
 
+/* Short screens: with the sample menu open the masthead took ~170px above Back and
+   pushed "Load sample project" below the fold at 600-700px tall. */
+@media (max-height: 760px) {
+  .start-brand.sample-menu-open .start-mark {
+    width: 36px;
+    height: 36px;
+    margin-bottom: var(--sp-2);
+  }
+
+  .start-brand.sample-menu-open h1 {
+    font-size: var(--fs-xl);
+  }
+
+  .start-brand.sample-menu-open .start-tagline {
+    display: none;
+  }
+
+  .start-brand.sample-menu-open .start-sample-grid .sample-option-card {
+    min-height: 0;
+  }
+
+  .start-brand.sample-menu-open .start-sample-grid .sample-thumbnail {
+    height: 64px;
+  }
+
+  /* The primary action stays on screen while the cards scroll under it. */
+  .start-menu-load {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    box-shadow: 0 -12px 24px 4px #0b0f14;
+  }
+}
+
 @media (max-width: 980px) {
   .storage-recovery-card {
     right: var(--sp-3);
@@ -5331,8 +5558,11 @@ input[aria-invalid="true"] {
     overflow: auto;
   }
 
+  /* Sticky belongs on the grid items. .status-strip used to carry it, but its
+     parent .bottom-panel is exactly 30px tall, so it had nowhere to stick and
+     Tips/Logs scrolled off with the page. */
   .topbar,
-  .status-strip {
+  .bottom-panel {
     position: sticky;
     z-index: 1;
     background: var(--color-surface);
@@ -5342,7 +5572,7 @@ input[aria-invalid="true"] {
     top: 0;
   }
 
-  .status-strip {
+  .bottom-panel {
     bottom: 0;
   }
 
@@ -5355,15 +5585,60 @@ input[aria-invalid="true"] {
     grid-template-rows: minmax(440px, 58vh) auto;
   }
 
+  /* The rail spans the viewer and the panel rows; unstuck, the steps scrolled
+     away as soon as the reader reached the form, leaving an empty column. */
   .stepbar {
     grid-row: 1 / span 2;
+    position: sticky;
+    top: var(--topbar-h);
+    align-self: start;
+    max-height: calc(100dvh - var(--topbar-h) - var(--statusbar-h));
     padding: var(--sp-3) var(--sp-2);
     overflow-y: auto;
   }
 
-  .stepbar-eyebrow,
-  .stepbar-footer {
+  .stepbar-eyebrow {
     display: none;
+  }
+
+  /* The footer holds the only theme and unit controls. It used to be hidden here
+     unless the rail was collapsed; show it in the collapsed rail's icon form. */
+  .stepbar .stepbar-footer {
+    justify-items: center;
+    gap: var(--sp-15);
+    width: 100%;
+    margin-top: var(--sp-3);
+  }
+
+  .stepbar .stepbar-footer > div:not(.stepbar-actions):not(.unit-switch),
+  .stepbar .unit-switch > span,
+  .stepbar .unit-switch > strong,
+  .stepbar .unit-toggle-label {
+    display: none;
+  }
+
+  .stepbar .stepbar-link {
+    width: 34px;
+    min-height: 30px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+  }
+
+  .stepbar .unit-switch {
+    display: grid;
+    padding: 0;
+  }
+
+  .stepbar .unit-switch .unit-toggle {
+    width: 34px;
+    min-height: 24px;
+    border: var(--border-thin);
+    border-radius: var(--radius-md);
+  }
+
+  .stepbar .unit-toggle-short {
+    display: inline;
   }
 
   .stepbar.collapsed .stepbar-footer {
@@ -5399,7 +5674,8 @@ input[aria-invalid="true"] {
     gap: var(--sp-2);
   }
 
-  .topbar-tools,
+  /* .topbar-tools (undo, redo, Keys) stays until 640px: hiding it here left undo
+     with no pointer path at all while the bar had ~400px spare. */
   .breadcrumb-sep,
   .breadcrumb > span:last-child {
     display: none;
@@ -5416,8 +5692,6 @@ input[aria-invalid="true"] {
 
   .start-sample-grid {
     grid-template-columns: minmax(0, 1fr);
-    width: min(360px, 100%);
-    margin: 0 auto;
   }
 
   .sample-option-card:not(.compact) {
@@ -5492,12 +5766,23 @@ input[aria-invalid="true"] {
     display: none;
   }
 
-  .app-shell {
-    --stepbar-w: 78px;
-  }
-
+  /* Step labels are hidden at this width, so "expanded" was icon-only too and just
+     22px wider than collapsed. One width, and no toggle that does nothing. */
+  .app-shell,
   .app-shell.stepbar-collapsed {
     --stepbar-w: 56px;
+  }
+
+  .stepbar-collapse {
+    display: none;
+  }
+
+  .topbar-tools {
+    display: none;
+  }
+
+  .start-action kbd {
+    display: none;
   }
 
   .start-screen {
@@ -5572,6 +5857,36 @@ input[aria-invalid="true"] {
   .status-strip {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+
+  /* Touch targets: the top bar, start screen and sample menu controls ran 24-34px tall
+     on a phone. 40px is the floor here; desktop keeps its compact sizes. */
+  .topbar-action,
+  .storage-status-button,
+  .start-action,
+  .start-menu-back,
+  .start-analysis-type button,
+  .workflow-nav button {
+    min-height: 40px;
+  }
+
+  /* The legend covered ~35% of a 312x490 viewer. The reading (field, bar, ticks, peak)
+     stays; the mesh-count line goes. */
+  .analysis-legend .legend-meta {
+    display: none;
+  }
+
+  .analysis-legend {
+    min-height: 0;
+  }
+
+  /* "Orthographic" dropped to its own row and the strip covered 54px of a 490px viewer. */
+  .viewer-view-presets {
+    flex-wrap: nowrap;
+  }
+
+  .viewer-view-presets button {
+    padding-inline: var(--sp-15);
+  }
 }
 .validation-gallery-backdrop {
   z-index: var(--z-gallery-backdrop);
@@ -5584,7 +5899,7 @@ input[aria-invalid="true"] {
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: var(--border-strong);
-  border-radius: 18px;
+  border-radius: var(--radius-overlay);
   background: var(--color-surface);
   box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
 }
@@ -5616,7 +5931,7 @@ input[aria-invalid="true"] {
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
@@ -5642,7 +5957,7 @@ input[aria-invalid="true"] {
   gap: var(--sp-25);
   padding: var(--sp-3);
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   color: var(--color-text);
   text-align: left;
   background: transparent;
@@ -5732,7 +6047,7 @@ input[aria-invalid="true"] {
   gap: 5px;
   padding: 14px;
   border: var(--border-thin);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   background: var(--color-surface-2);
 }
 
@@ -5750,11 +6065,21 @@ input[aria-invalid="true"] {
 
 .validation-run-meta span { display: grid; gap: 2px; }
 
+/* A flex row put each marker in the gap, where it attached to the previous item
+   ("solver•"). Inline items with a leading separator instead. */
 .validation-detail-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2) 18px;
-  padding-left: 18px;
+  gap: var(--sp-1) 0;
+  margin: 0;
+  padding: 0;
+  color: var(--color-text-subtle);
+  list-style: none;
+}
+
+.validation-detail-list li + li::before {
+  content: "·";
+  margin: 0 var(--sp-2);
   color: var(--color-text-subtle);
 }
 
@@ -5926,20 +6251,11 @@ input[aria-invalid="true"] {
   background: var(--color-error);
 }
 
-.check {
-  align-items: flex-start;
-}
-
-/* Override the 18px tick box that `.check > span` gives every child. */
-.check > .check-copy {
-  width: auto;
-  height: auto;
-  border: 0;
-  border-radius: 0;
+.check-copy {
   display: grid;
-  place-items: start;
   gap: 2px;
   min-width: 0;
+  padding-top: 1px;
 }
 
 .check-blockers {

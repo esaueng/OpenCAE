@@ -6,6 +6,7 @@ import { bracketDisplayModel } from "@opencae/samples";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
+import { resultExportMenuItems } from "./panels/ResultsPanels";
 import { readinessForStudy } from "../runReadiness";
 import { StudySchema } from "@opencae/schema";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
@@ -639,8 +640,10 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).not.toContain('role="listitem"');
     expect(markup).toContain("Block shift-invert");
-    expect(markup).toContain("Export selected-mode CSV");
-    expect(markup).toContain("Export selected-mode VTU");
+    // Modal exports share the Results panel's Export menu; its items render only
+    // while open, so the labels are checked on the builder that feeds it.
+    expect(markup).toContain("export-menu-trigger");
+    expect(resultExportMenuItems({ onExportResultData: vi.fn() }, "mode").map((item) => item.label)).toEqual(["Selected-mode CSV", "Selected-mode VTU"]);
   });
 
   test("renders thermal results as the final workflow step with readable metrics", () => {
@@ -769,7 +772,9 @@ describe("RightPanel payload mass controls", () => {
     expect(supportsHtml).not.toContain("Select the actual model face");
     expect(loadsHtml).not.toContain("<strong>Load placement</strong>");
     expect(loadsHtml).not.toContain("Click the exact point for force");
-    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Overall dimensions help"');
+    // Dimensions, section, fit and mesh share one View section whose help covers all four;
+    // the dimensions-specific help sits on the panel the Show dimensions button opens.
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="View tools help"');
     expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Support placement help"');
     expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Load placement help"');
   });

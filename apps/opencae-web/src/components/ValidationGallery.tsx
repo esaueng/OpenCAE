@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, CheckCircle2, Gauge, Play, Square, X, XCircle } from "lucide-react";
+import { CheckCircle2, FlaskConical, Gauge, Play, Square, X, XCircle } from "lucide-react";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import {
   VALIDATION_BENCHMARKS,
@@ -53,7 +53,7 @@ export function ValidationGallery({ onClose }: { onClose: () => void }) {
     >
       <section ref={dialogRef} className="validation-gallery" role="dialog" aria-modal="true" aria-labelledby="validation-gallery-title">
         <header className="validation-gallery-header">
-          <span className="validation-gallery-heading-icon"><Activity size={20} aria-hidden="true" /></span>
+          <span className="validation-gallery-heading-icon"><FlaskConical size={20} aria-hidden="true" /></span>
           <span>
             <strong id="validation-gallery-title">Validation gallery</strong>
             <small>Release baselines and repeatable checks on this device</small>

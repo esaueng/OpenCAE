@@ -19,10 +19,21 @@ import { dimensionValuesForDisplayModel } from "../../modelDimensions";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../../settingHelp";
 
 import { getViewportTooltipPosition } from "../../tooltipPosition";
-import { forceForUnits, formatDisplayNumber, type UnitSystem } from "../../unitDisplay";
+import { displayUnitText, forceForUnits, formatDisplayNumber, type UnitSystem } from "../../unitDisplay";
 import { canNavigateToStep } from "../../appShellState";
 
 export const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+/**
+ * Where floating layers portal to. The theme class lives on `.app-shell`, not
+ * on <body>, so a layer portalled to <body> always rendered with the dark
+ * tokens — the export menu and every help tooltip stayed dark in light mode.
+ * `.app-shell` has no transform or containment, so `position: fixed` inside it
+ * still resolves against the viewport.
+ */
+export function themedPortalRoot(anchor: Element | null): Element {
+  return anchor?.closest(".app-shell") ?? document.body;
+}
 
 import { DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS } from "./RightPanelProps";
 export function WorkspaceNoticeBanner({ notice, activeStep, onDismiss, onGoToStep }: { notice: WorkspaceNotice; activeStep: StepId; onDismiss?: () => void; onGoToStep?: (step: StepId) => void }) {
@@ -157,14 +168,6 @@ export function HelpLabel({ children, helpId }: { children: ReactNode; helpId: S
   );
 }
 
-export function HelpNote({ helpId }: { helpId: SettingHelpId }) {
-  return (
-    <div className="help-note help-note--collapsed">
-      <SettingHelpTrigger helpId={helpId} />
-    </div>
-  );
-}
-
 export const TOOLTIP_CLOSE_DELAY_MS = 140;
 
 export function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
@@ -265,7 +268,7 @@ export function SettingHelpTrigger({ helpId }: { helpId: SettingHelpId }) {
             <strong>{help.title}</strong>
             <span>{help.body}</span>
           </span>,
-          document.body
+          themedPortalRoot(triggerRef.current)
         )}
     </span>
   );
@@ -282,7 +285,13 @@ export function HelpVisual({ kind }: { kind: SettingHelpVisual }) {
 }
 
 export function Info({ label, value }: { label: string; value: string }) {
-  return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
+  return <div className="info-row"><span>{label}</span><strong>{displayUnitText(value)}</strong></div>;
+}
+
+/** Splits "0.001433 mm" into its number and a trailing unit, so the unit can be set smaller. */
+export function splitHeadlineValue(value: string): { number: string; unit: string | null } {
+  const match = /^(.*\d\S*)\s+([^\d\s]\S*)$/.exec(value);
+  return match ? { number: match[1]!, unit: match[2]! } : { number: value, unit: null };
 }
 
 /* The one display level in the app. --fs-xl was defined in tokens.css and used nowhere,
@@ -292,12 +301,16 @@ export function Info({ label, value }: { label: string; value: string }) {
 export function Headline({ items }: { items: Array<{ label: string; value: string }> }) {
   return (
     <div className="result-headline">
-      {items.map((item) => (
-        <div className="result-headline-item" key={item.label}>
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-        </div>
-      ))}
+      {items.map((item) => {
+        // At 22px mono the unit made "0.001433 mm" wrap in a half-width column.
+        const { number, unit } = splitHeadlineValue(displayUnitText(item.value));
+        return (
+          <div className="result-headline-item" key={item.label}>
+            <span>{item.label}</span>
+            <strong aria-label={displayUnitText(item.value)}>{number}{unit && <small className="result-headline-unit">{unit}</small>}</strong>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -357,11 +370,19 @@ export function ConceptCard({ icon, title, detail, tone = "accent" }: { icon: Re
   );
 }
 
-export function PlacementReadout({ selectedRef, fallbackLabel, detail }: { selectedRef: ReturnType<typeof selectionForFace> | undefined; fallbackLabel?: string; detail?: string }) {
+export function PlacementReadout({ selectedRef, fallbackLabel, detail, helpId }: { selectedRef: ReturnType<typeof selectionForFace> | undefined; fallbackLabel?: string; detail?: string; helpId?: SettingHelpId }) {
   const label = selectedRef?.geometryRefs[0]?.label ?? fallbackLabel;
-  return (
+  const chip = (
     <div className={label ? "placement-chip ready" : "placement-chip"}>
       {label ? `Selected ${label}${detail ? ` · ${detail}` : ""}` : "Select a face in the model viewport"}
+    </div>
+  );
+  if (!helpId) return chip;
+  // The placement help used to render as a lone (?) on its own row above the chip.
+  return (
+    <div className="field placement-field">
+      <HelpLabel helpId={helpId}>Placement</HelpLabel>
+      {chip}
     </div>
   );
 }

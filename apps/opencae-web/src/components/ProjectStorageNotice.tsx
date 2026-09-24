@@ -36,7 +36,7 @@ export function ProjectStorageNotice({ preference, busy, recoveryNeeded, analyti
     <aside className="storage-recovery-card" id="project-storage-notice" aria-labelledby="project-storage-title">
       <header className="storage-recovery-header">
         <span className="storage-recovery-mark" aria-hidden="true"><ShieldCheck size={18} /></span>
-        <span>
+        <span className="storage-recovery-heading">
           <small>Project storage</small>
           <strong id="project-storage-title">{title}</strong>
         </span>

@@ -8,7 +8,7 @@ import { compatibleManufacturingProcessesFor, defaultManufacturingParametersFor,
 
 import { inferGlobalCriticalPrintAxis } from "@opencae/study-core";
 
-import { formatDensity, formatMaterialStress } from "../../unitDisplay";
+import { formatDensity, formatDisplayNumber, formatMaterialStress } from "../../unitDisplay";
 
 import { MaterialLibraryModal } from "../SimulationWorkflow";
 
@@ -130,10 +130,21 @@ export function MaterialPanel({ project, displayModel, study, onAssignMaterial, 
           <span className="base-material-change">Change <ChevronRight size={15} aria-hidden="true" /></span>
         </button>
         <div className="base-material-properties">
-          <Info label="Modulus" value={formatMaterialStress(selectedMaterial.youngsModulus, project.unitSystem)} />
-          <Info label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", project.unitSystem)} />
-          <Info label="Yield strength" value={formatMaterialStress(selectedMaterial.yieldStrength, project.unitSystem)} />
-          <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
+          {/* A thermal solve reads conductivity only; the card used to list the four
+              structural properties and leave conductivity to the picker. */}
+          {study.type === "steady_state_thermal" ? (
+            <>
+              <Info label="Thermal conductivity" value={selectedMaterial.thermalConductivity ? `${formatDisplayNumber(selectedMaterial.thermalConductivity)} W/(m·K)` : "Not specified"} />
+              <Info label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", project.unitSystem)} />
+            </>
+          ) : (
+            <>
+              <Info label="Modulus" value={formatMaterialStress(selectedMaterial.youngsModulus, project.unitSystem)} />
+              <Info label="Density" value={formatDensity(selectedMaterial.density, "kg/m^3", project.unitSystem)} />
+              <Info label="Yield strength" value={formatMaterialStress(selectedMaterial.yieldStrength, project.unitSystem)} />
+              <Info label="Poisson ratio" value={String(selectedMaterial.poissonRatio)} />
+            </>
+          )}
         </div>
         <p className={`base-material-status${selectionMatchesAssignment ? "" : " pending"}`} role="status">
           {selectionMatchesAssignment ? <Check size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}

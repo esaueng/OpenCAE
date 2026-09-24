@@ -18,7 +18,7 @@ import { formatDensity, formatMass, formatVolume, loadValueForUnits, type UnitSy
 import type { RightPanelProps } from "./RightPanelProps";
 import { noopDraftPayloadPreviewChange } from "./RightPanelProps";
 import { Panel, sameLoadDirection, structuralLoadCasesForPanel } from "./PanelChrome";
-import { Callout, Collapsible, EmptyEditableList, HelpLabel, HelpNote, Info, PlacementReadout, SectionTitle, SupportIcon, defaultValueForLoadType, directionOptionLabel, formatEquivalentForce, formatInputValue, formatNumber, loadTypeLabel, selectionForFace } from "./PanelChrome";
+import { Callout, Collapsible, EmptyEditableList, HelpLabel, Info, PlacementReadout, SectionTitle, SupportIcon, defaultValueForLoadType, directionOptionLabel, formatEquivalentForce, formatInputValue, formatNumber, loadTypeLabel, selectionForFace } from "./PanelChrome";
 export function SupportsPanel({ selectedFace, study, draftSupportTemperature, onDraftSupportTemperatureChange, onAddSupport, onUpdateSupport, onRemoveSupport }: RightPanelProps) {
   const selectedFromViewport = selectedFace ? selectionForFace(study, selectedFace.id) : undefined;
   const thermal = study.type === "steady_state_thermal";
@@ -53,8 +53,7 @@ export function SupportsPanel({ selectedFace, study, draftSupportTemperature, on
   );
   return (
     <Panel title={thermal ? "Temperature boundaries" : "Supports"} step="supports" helper={thermal ? "Select a face and prescribe its steady boundary temperature." : "Choose where the part is held fixed. Select a face, or click inside a cylindrical hole to constrain its wall. You can add more than one support."} study={study}>
-      <HelpNote helpId="supportPlacement" />
-      <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} />
+      <PlacementReadout selectedRef={selectedFromViewport} fallbackLabel={selectedFace?.label} helpId="supportPlacement" />
       {thermal && <label className="field">Temperature<span className="input-with-unit"><input type="number" value={temperature} onChange={(event) => setTemperature(Number(event.currentTarget.value))} /><span>°C</span></span></label>}
       {!thermal && !modal && (
         <label className="field">Support type
@@ -78,24 +77,40 @@ export function SupportsPanel({ selectedFace, study, draftSupportTemperature, on
       )}
       {duplicateSupportError && <p className="field-error" role="alert">{duplicateSupportError}</p>}
       {!thermal && !modal && faceOptions.length > 1 && (
-        <fieldset className="field">
-          <legend>Additional faces (optional)</legend>
-          {faceOptions.filter((selection) => selection.id !== selectedFromViewport?.id).map((selection) => (
-            <label className="toggle" key={selection.id}>
-              <input
-                type="checkbox"
-                checked={extraSelectionRefs.includes(selection.id)}
-                onChange={() => toggleExtraRef(selection.id)}
-              />
-              <span>{selection.name}</span>
-            </label>
-          ))}
-        </fieldset>
+        <AdditionalFacesPicker
+          options={faceOptions.filter((selection) => selection.id !== selectedFromViewport?.id)}
+          selectedRefs={extraSelectionRefs}
+          onToggle={toggleExtraRef}
+        />
       )}
       <button className="outline-action wide" disabled={!selectedFromViewport || Boolean(duplicateSupportError) || (thermal && !Number.isFinite(temperature)) || (prescribedDisplacement && !displacementValid)} title={duplicateSupportError ?? undefined} onClick={() => selectedFromViewport && !duplicateSupportError && onAddSupport(selectedFromViewport.id, thermal ? { type: "prescribed_temperature", value: temperature } : prescribedDisplacement ? { type: "prescribed_displacement", value: displacementValueMm, component: displacementComponent } : { type: "fixed" }, extraSelectionRefs.length ? { selectionRefs: extraSelectionRefs } : undefined)}><Plus size={18} />{addLabel}{appliedRefs.length > 1 ? ` (${appliedRefs.length} faces)` : ""}</button>
       <SupportEditorList study={study} retargetFace={selectedFace} onUpdateSupport={onUpdateSupport} onRemoveSupport={onRemoveSupport} />
       <Callout>{thermal ? "At least one prescribed temperature is required to make the conduction system unique." : "Fixed supports prevent any motion of the selected face."}</Callout>
     </Panel>
+  );
+}
+
+/**
+ * Extra faces for a multi-face support or load. A bounded, scrolling list so a
+ * model with many faces cannot push the Add button off the panel.
+ */
+function AdditionalFacesPicker({ options, selectedRefs, onToggle }: { options: ReadonlyArray<{ id: string; name: string }>; selectedRefs: readonly string[]; onToggle: (ref: string) => void }) {
+  const selectedCount = options.filter((option) => selectedRefs.includes(option.id)).length;
+  return (
+    <fieldset className="field face-picker">
+      <legend>
+        Additional faces
+        <span className="face-picker-meta">{selectedCount ? `${selectedCount} selected` : "Optional"}</span>
+      </legend>
+      <div className="face-picker-list">
+        {options.map((selection) => (
+          <label className="face-picker-row" key={selection.id}>
+            <input type="checkbox" checked={selectedRefs.includes(selection.id)} onChange={() => onToggle(selection.id)} />
+            <span>{selection.name}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -219,8 +234,8 @@ export function LoadsPanel({
   return (
     <Panel title={thermal ? "Thermal loads" : "Loads"} step="loads" helper={thermal ? (draftLoadType === "heat_generation" ? "Apply uniform heat generation throughout the selected body." : "Select a face and apply inward surface heat flux.") : draftLoadType === "gravity" ? "Choose the object carrying payload mass, then add its weight as a load." : draftLoadType === "volume_force" ? "Apply a force density to the selected structural body." : "Select a face on the model, then add the load."} study={study}>
       <div hidden={editingLoadId !== null}>
-      <HelpNote helpId="loadPlacement" />
       <PlacementReadout
+        helpId="loadPlacement"
         selectedRef={placementSelection}
         fallbackLabel={selectedPayloadObject?.label ?? selectedFace?.label}
         detail={selectedPayloadObject ? "object selected" : selectedLoadPoint ? "point picked" : undefined}
@@ -313,19 +328,11 @@ export function LoadsPanel({
       </label>}
       {hasDraftPlacement && draftAddError && <p className="field-error" role="alert">{draftAddError}</p>}
       {!thermal && draftLoadType !== "gravity" && draftLoadType !== "volume_force" && draftLoadType !== "heat_generation" && draftLoadType !== "bolt_preload" && faceOptionsForLoad.length > 1 && (
-        <fieldset className="field">
-          <legend>Additional faces (optional)</legend>
-          {faceOptionsForLoad.filter((selection) => selection.id !== placementSelection?.id).map((selection) => (
-            <label className="toggle" key={selection.id}>
-              <input
-                type="checkbox"
-                checked={extraLoadRefs.includes(selection.id)}
-                onChange={() => toggleExtraLoadRef(selection.id)}
-              />
-              <span>{selection.name}</span>
-            </label>
-          ))}
-        </fieldset>
+        <AdditionalFacesPicker
+          options={faceOptionsForLoad.filter((selection) => selection.id !== placementSelection?.id)}
+          selectedRefs={extraLoadRefs}
+          onToggle={toggleExtraLoadRef}
+        />
       )}
       <button className="outline-action wide" disabled={!canAddDraftLoad} title={draftAddError ?? undefined} onClick={() => canAddDraftLoad && onAddLoad(
         draftLoadType,
@@ -467,16 +474,17 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
         return (
           <div className="load-case-row" key={loadCase.id}>
             <input aria-label={`Load case name ${loadCase.name}`} value={loadCase.name} onChange={(event) => updateCase(loadCase.id, { name: event.currentTarget.value || "Untitled case" })} />
+            {/* An enabled empty case blocks the run; say so where it was made, not only on Run. */}
+            <small className={loadCase.enabled && loadCase.loadIds.length === 0 ? "load-case-empty" : undefined} title={loadCase.enabled && loadCase.loadIds.length === 0 ? "Enabled cases need at least one load. Assign a load or turn the case off." : undefined}>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
             <label className="toggle compact-toggle">
               <input type="checkbox" aria-label={`Enable load case ${loadCase.name}`} checked={loadCase.enabled} onChange={(event) => updateCase(loadCase.id, { enabled: event.currentTarget.checked })} />
               <span>Enabled</span>
             </label>
-            <small>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
             <button type="button" className="remove-glyph" aria-label={`Delete load case ${loadCase.name}`} disabled={!canDelete} onClick={() => onChange(loadCases.filter((candidate) => candidate.id !== loadCase.id), loadCombinations)}><X size={15} /></button>
           </div>
         );
       })}
-      <button className="secondary wide" type="button" onClick={() => onChange([
+      <button className="outline-action wide" type="button" onClick={() => onChange([
         ...loadCases,
         { id: `case-${crypto.randomUUID()}`, name: `Case ${loadCases.length + 1}`, enabled: true, loadIds: [] }
       ], loadCombinations)}><Plus size={16} />Add load case</button>
@@ -505,10 +513,10 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
                   />
                 </label>
               ))}
-              <button type="button" className="secondary" onClick={() => onChange(loadCases, loadCombinations.filter((candidate) => candidate.id !== combination.id))}>Delete combination</button>
+              <button type="button" className="text-button danger-text load-combination-delete" onClick={() => onChange(loadCases, loadCombinations.filter((candidate) => candidate.id !== combination.id))}>Delete combination</button>
             </div>
           ))}
-          <button className="secondary wide" type="button" disabled={!loadCases.length} onClick={() => onChange(loadCases, [
+          <button className="outline-action wide" type="button" disabled={!loadCases.length} onClick={() => onChange(loadCases, [
             ...loadCombinations,
             {
               id: `combination-${crypto.randomUUID()}`,
@@ -837,7 +845,7 @@ function SupportEditorList({ study, retargetFace, onUpdateSupport, onRemoveSuppo
           <div className="editable-item" key={support.id}>
             <div className="editable-summary">
               <span className="item-icon warning"><SupportIcon /></span>
-              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)} °C)` : `Prescribed displacement (${Number(support.parameters.value ?? 0)} mm ${String(support.parameters.component ?? "z")})`}</strong>
+              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)}\u00a0°C)` : `Prescribed displacement (${Number(support.parameters.value ?? 0)}\u00a0mm ${String(support.parameters.component ?? "z")})`}</strong>
               <small>{label}</small>
               <button className="remove-glyph" type="button" aria-label="Remove support" onClick={() => onRemoveSupport(support.id)}><X size={16} /></button>
             </div>

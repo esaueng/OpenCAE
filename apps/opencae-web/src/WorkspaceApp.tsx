@@ -1,7 +1,7 @@
 import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, isThermalResultSummary, ModalSolverSettingsSchema } from "@opencae/schema";
 import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@opencae/schema";
-import { Activity, CloudUpload, HardDrive, RotateCcw, X } from "lucide-react";
+import { CloudUpload, FlaskConical, HardDrive, Keyboard, RotateCcw, X } from "lucide-react";
 import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, loadSampleProject, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
 import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
 import { buildOpenCaeCoreModelForStudy, resolveSolverBackend } from "./workers/opencaeCoreSolve";
@@ -531,7 +531,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackCacheLabel = useMemo(() => {
     if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
     if (resultPlaybackCacheState.status === "ready") {
-      if (resultPlaybackCacheState.cache.mode === "full") return `Smooth playback ready · ${resultPlaybackCacheState.cache.frameCount} frames`;
+      if (resultPlaybackCacheState.cache.mode === "full") return `Smooth playback ready · ${resultPlaybackCacheState.cache.frameCount} interpolated frames`;
       if (resultPlaybackCacheState.cache.mode === "reducedFps") return `Smooth playback ready · ${resultPlaybackCacheState.cache.presentationFps} fps cache`;
       return "Playback cached at solver frames";
     }
@@ -2561,7 +2561,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             aria-expanded={validationGalleryOpen}
             onClick={() => setValidationGalleryOpen(true)}
           >
-            <Activity size={17} aria-hidden="true" />
+            <FlaskConical size={17} aria-hidden="true" />
           </button>
           <button
             className="icon-button"
@@ -2572,7 +2572,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
             aria-label="Show keyboard shortcuts"
             onClick={() => { setStorageRecoveryNoticeOpen(false); setShortcutGuideOpen((open) => !open); }}
           >
-            Keys
+            <Keyboard size={17} aria-hidden="true" />
           </button>
           {shortcutGuideOpen ? (
             <>
