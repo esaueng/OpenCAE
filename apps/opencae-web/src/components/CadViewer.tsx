@@ -167,6 +167,16 @@ export const VIEWER_VIEW_CUBE_BODY_OPACITY = 1;
 export const VIEWER_VIEW_CUBE_FACE_OPACITY = 0.62;
 export const VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY = 0.78;
 export const VIEWER_VIEW_CUBE_EDGE_COLOR = "#8fb4d8";
+
+/**
+ * The view cube was the one viewer element that ignored the theme: a dark navy block
+ * on the light viewport. Dark values are the ones it always rendered.
+ */
+export function viewCubePalette(themeMode: ThemeMode = "dark") {
+  return themeMode === "light"
+    ? { body: "#dfe8f2", face: "#c5d5e6", faceHover: "#8fb4d6", label: "#1f3347", labelHover: "#0b1a2a", edge: "#6f8dab", edgeActive: "#0b63b6" }
+    : { body: "#1d2b3d", face: "#31516b", faceHover: "#6da4c9", label: "#e4eef8", labelHover: "#ffffff", edge: VIEWER_VIEW_CUBE_EDGE_COLOR, edgeActive: "#d9ecff" };
+}
 export const VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE = 0.32;
 export const VIEWER_VIEW_CUBE_CORNER_RADIUS = 0.082;
 export const VIEWER_VIEW_CUBE_CORNER_HIT_RADIUS = 0.19;
@@ -1384,12 +1394,13 @@ function PositiveOctantViewCube({ onSelectView }: { onSelectView: (view: GizmoVi
   const half = VIEWER_VIEW_CUBE_SIZE / 2;
   const faces = useMemo(() => getViewCubeFaceDescriptors(), []);
   const corners = useMemo(() => getViewCubeCornerDescriptors(), []);
+  const palette = viewCubePalette(useContext(SceneThemeContext));
 
   return (
     <group name="Positive-octant triad view cube">
       <mesh position={[half, half, half]} renderOrder={1}>
         <boxGeometry args={[cubeSize, cubeSize, cubeSize]} />
-        <meshBasicMaterial color="#1d2b3d" depthTest={true} transparent={false} opacity={VIEWER_VIEW_CUBE_BODY_OPACITY} depthWrite toneMapped={false} />
+        <meshBasicMaterial color={palette.body} depthTest={true} transparent={false} opacity={VIEWER_VIEW_CUBE_BODY_OPACITY} depthWrite toneMapped={false} />
       </mesh>
       <ViewCubeEdges />
       {faces.map((face) => (
@@ -1445,6 +1456,7 @@ export function getViewCubeCornerDescriptors(): ViewCubeCornerDescriptor[] {
 }
 
 function ViewCubeEdges({ active = false }: { active?: boolean }) {
+  const palette = viewCubePalette(useContext(SceneThemeContext));
   const cubeSize = VIEWER_VIEW_CUBE_SIZE;
   const edgeInset = 0.004;
   const min = -edgeInset;
@@ -1470,7 +1482,7 @@ function ViewCubeEdges({ active = false }: { active?: boolean }) {
         <Line
           key={index}
           points={segment}
-          color={active ? "#d9ecff" : VIEWER_VIEW_CUBE_EDGE_COLOR}
+          color={active ? palette.edgeActive : palette.edge}
           lineWidth={active ? 2 : 1}
           transparent
           opacity={active ? 0.82 : 0.56}
@@ -1495,6 +1507,7 @@ function ViewCubeFace({
   onSelectView: (view: GizmoViewRequest) => void;
 }) {
   const [hovered, setHovered] = useState(false);
+  const palette = viewCubePalette(useContext(SceneThemeContext));
   const { camera } = useThree();
   const faceRef = useRef<THREE.Group | null>(null);
   const labelRef = useRef<THREE.Group | null>(null);
@@ -1537,11 +1550,11 @@ function ViewCubeFace({
     >
       <mesh renderOrder={3}>
         <planeGeometry args={[VIEWER_VIEW_CUBE_SIZE * 0.82, VIEWER_VIEW_CUBE_SIZE * 0.82]} />
-        <meshBasicMaterial color={hovered ? "#6da4c9" : "#31516b"} depthTest transparent opacity={hovered ? VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY : VIEWER_VIEW_CUBE_FACE_OPACITY} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial color={hovered ? palette.faceHover : palette.face} depthTest transparent opacity={hovered ? VIEWER_VIEW_CUBE_FACE_HOVER_OPACITY : VIEWER_VIEW_CUBE_FACE_OPACITY} depthWrite={false} toneMapped={false} />
       </mesh>
       <group ref={labelRef} position={[0, 0, 0.075]} renderOrder={4}>
         <GizmoTextLabel
-          color={hovered ? "#ffffff" : "#e4eef8"}
+          color={hovered ? palette.labelHover : palette.label}
           fontSize={VIEWER_VIEW_CUBE_FACE_LABEL_FONT_SIZE}
           opacity={hovered ? 1 : 0.95}
           depthTest
@@ -6501,14 +6514,22 @@ function UserResultProbeMarker({ reading, point, index }: { reading: ResolvedRes
   const markerColor = resultColorScale ? colorForScaleValue(reading.value, resultColorScale) : "#4da3ff";
   const label = `P${index + 1}: ${formatResultValue(reading.value)}${reading.units ? ` ${reading.units}` : ""}`;
   const labelPosition = [point[0] + 0.18, point[1] + 0.18, point[2] + 0.22] as [number, number, number];
+  const ring = useContext(SceneThemeContext) === "light" ? "#0b1a2a" : "#f8fbff";
+  // The marker, leader and label were all drawn in the contour colour under them, so a
+  // probe on a yellow or green region had no visible dot (measured 1.2:1). The core keeps
+  // the value colour; a neutral ring and leader carry the contrast.
   return (
     <group>
-      <Line points={[point, labelPosition]} color={markerColor} transparent opacity={0.82} lineWidth={1} />
-      <mesh position={point} onClick={(event) => event.stopPropagation()}>
-        <sphereGeometry args={[0.045, 18, 18]} />
+      <Line points={[point, labelPosition]} color={ring} transparent opacity={0.85} lineWidth={1.25} depthTest={false} />
+      <mesh position={point} renderOrder={51} onClick={(event) => event.stopPropagation()}>
+        <sphereGeometry args={[0.058, 18, 18]} />
+        <meshBasicMaterial color={ring} depthTest={false} toneMapped={false} />
+      </mesh>
+      <mesh position={point} renderOrder={52} onClick={(event) => event.stopPropagation()}>
+        <sphereGeometry args={[0.04, 18, 18]} />
         <meshBasicMaterial color={markerColor} depthTest={false} toneMapped={false} />
       </mesh>
-      <SceneLabel label={label} position={labelPosition} tone="active-load" />
+      <SceneLabel label={label} position={labelPosition} tone="probe" />
     </group>
   );
 }
@@ -6530,7 +6551,7 @@ function ModelHitLabel({ hit, active }: { hit: ModelSelectionHit; active: boolea
   );
 }
 
-type SceneLabelTone = "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print" | "support";
+type SceneLabelTone = "max" | "mid" | "min" | "load" | "active-load" | "payload-mass" | "dimension" | "print" | "support" | "probe";
 
 function SceneLabel({
   label,
@@ -6558,8 +6579,8 @@ function SceneLabel({
         letterSpacing={0.01}
         maxWidth={(labelWidth - 0.16) * scale}
         outlineColor={colors.outline}
-        outlineOpacity={0.7}
-        outlineWidth={0.011 * scale}
+        outlineOpacity={tone === "probe" ? 1 : 0.7}
+        outlineWidth={(tone === "probe" ? 0.02 : 0.011) * scale}
       >
         {label}
       </Text>
@@ -6579,6 +6600,8 @@ const SCENE_LABEL_PALETTE: Record<SceneLabelTone | "default", { dark: { outline:
   "active-load": { dark: { outline: "#03101d", text: "#8cc8ff" }, light: { outline: "#f0f9ff", text: "#0b4a7a" } },
   "payload-mass": { dark: { outline: "#032018", text: "#6ee7c8" }, light: { outline: "#ecfdf5", text: "#065f46" } },
   support: { dark: { outline: "#042f2a", text: "#99f6e4" }, light: { outline: "#f0fdfa", text: "#134e4a" } },
+  // Probes sit on arbitrary contour colours, so they take the widest contrast pair.
+  probe: { dark: { outline: "#05080c", text: "#ffffff" }, light: { outline: "#ffffff", text: "#0b1a2a" } },
   load: { dark: { outline: "#1f1300", text: "#ffe6a3" }, light: { outline: "#fffbeb", text: "#78350f" } },
   default: { dark: { outline: "#1f1300", text: "#ffe6a3" }, light: { outline: "#fffbeb", text: "#78350f" } }
 };
@@ -6898,23 +6921,22 @@ function ResultLegend({ resultMode, resultFields, unitSystem, meshSummary, surfa
         onLostPointerCapture={handleResizePointerEnd}
       />
       {stale && <span className="legend-stale">Outdated: the study changed since this run. Re-run to update.</span>}
-      <strong>Nodes: {meshStats.nodes}</strong>
-      <strong>Elements: {meshStats.elements}</strong>
-      <span>Type: {title}</span>
-      <span>Unit: {unit || "ratio"}</span>
+      {/* The field leads. Mesh counts used to be the bold first two lines, above a plain
+          "Type:" that named what the colours meant. */}
+      <div className="legend-heading">
+        <strong className="legend-title">{title}</strong>
+        <span className="legend-unit">{unit || "ratio"}</span>
+      </div>
       {deformationLabel && <span className="legend-deformation-note">{deformationLabel}</span>}
       <div className="legend-scale" style={{ background: resultScaleCssGradient(colorScale) }} />
-      <div className="legend-values">
+      <div className="legend-values" aria-label="Scale minimum, midpoint and maximum">
         <span>{ticks[0]}</span>
         <span>{ticks[1]}</span>
         <span>{ticks[2]}</span>
       </div>
-      <div className="legend-extrema">
-        <span>Min</span>
-        <span>Max</span>
-      </div>
       {/* The bar shows the averaged surface field; the summary peak is the unaveraged element value (2026-09 review F8). */}
       {peakLabel && <span className="legend-peak">{peakLabel} (element, unaveraged)</span>}
+      <span className="legend-meta">{meshStats.nodes} nodes · {meshStats.elements} elements</span>
     </div>
   );
 }

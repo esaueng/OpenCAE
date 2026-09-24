@@ -113,7 +113,9 @@ describe("app CSS", () => {
     expect(resizeHandle).toMatch(/cursor:\s*nwse-resize/);
     expect(resizeHandleAfter).toMatch(/border-bottom:\s*2px\s+solid/);
     expect(resizeHandleAfter).toMatch(/border-right:\s*2px\s+solid/);
-    expect(cssRule(".legend-extrema")).toMatch(/padding-right:\s*20px/);
+    // The Min/Max caption row is gone; the mesh-count line is last and clears the grip.
+    expect(css).not.toContain(".legend-extrema");
+    expect(cssRule(".analysis-legend .legend-meta")).toMatch(/padding-right:\s*calc\(var\(--sp-5\)/);
   });
 
   test("scales result legend visual elements with resized content", () => {
@@ -122,7 +124,8 @@ describe("app CSS", () => {
     expect(legendScale).not.toMatch(/background:/);
     expect(css).not.toContain(".analysis-legend.safety-scale");
     expect(cadViewer).toContain('style={{ background: resultScaleCssGradient(colorScale) }}');
-    expect(cssRule(".legend-values")).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*0\.9\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
+    // Tick values sit at the legend's base size: at 0.9x they rendered below 10px.
+    expect(cssRule(".legend-values")).toMatch(/font-size:\s*calc\(var\(--fs-mini\)\s*\*\s*var\(--analysis-legend-scale,\s*1\)\)/);
   });
 
   test("styles workspace keyboard shortcut hints", () => {

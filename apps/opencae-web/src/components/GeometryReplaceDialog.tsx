@@ -37,7 +37,7 @@ export function GeometryReplaceDialog({ open, actionLabel, losses, onConfirm, on
         </div>
         <footer className="workflow-modal-footer">
           <button className="secondary" type="button" onClick={onCancel}>Keep current model</button>
-          <button className="primary" type="button" onClick={onConfirm}>Replace and clear setup</button>
+          <button className="primary danger" type="button" onClick={onConfirm}>Replace and clear setup</button>
         </footer>
       </section>
     </div>

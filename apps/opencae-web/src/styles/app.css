@@ -168,7 +168,6 @@ img {
 .panel-eyebrow,
 .editable-list h3,
 .section-title,
-.collapsible-subtitle,
 .app-crash-eyebrow,
 .app-crash-detail span {
   font-family: var(--font-mono);
@@ -233,8 +232,10 @@ img {
   gap: var(--sp-25);
 }
 
+/* Same column as the actions above it; at 430px (capped to the brand's 340) it
+   overhung the 320px buttons by 10px a side. */
 .recent-projects {
-  width: min(430px, 100%);
+  width: min(320px, 100%);
   margin-top: var(--sp-4);
   padding: var(--sp-25);
   color: var(--color-text-muted);
@@ -766,7 +767,7 @@ img {
   color: var(--color-text);
   background: var(--color-surface);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-panel);
 }
 
@@ -786,6 +787,11 @@ img {
 .material-preview-pane h3 {
   margin: 0;
   color: var(--color-text);
+}
+
+/* A dialog title set at body size read as one more line of copy. */
+.workflow-modal-header h2 {
+  font-size: var(--fs-lg);
 }
 
 .workflow-modal-footer {
@@ -1381,7 +1387,7 @@ img {
 }
 
 .storage-status-button {
-  min-height: 28px;
+  min-height: var(--control-h-lg);
   display: inline-flex;
   align-items: center;
   gap: var(--sp-15);
@@ -1417,7 +1423,7 @@ img {
   color: var(--color-text);
   background: color-mix(in srgb, var(--color-surface) 96%, transparent);
   border: 1px solid var(--color-accent-border);
-  border-radius: 8px;
+  border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-panel);
   backdrop-filter: blur(12px);
 }
@@ -1455,7 +1461,9 @@ img {
   border-radius: var(--radius-md);
 }
 
-.storage-recovery-header > span:last-child {
+/* Was `> span:last-child`, which never matched: the close button is the last child,
+   so the eyebrow and title ran together on one line. */
+.storage-recovery-heading {
   display: grid;
   gap: 1px;
 }
@@ -1599,7 +1607,7 @@ img {
   color: var(--color-text-muted);
   background: var(--color-surface);
   border: var(--border-thin);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-overlay);
   box-shadow: var(--shadow-panel);
 }
 
@@ -1705,7 +1713,7 @@ img {
   --run-progress: 0%;
   position: relative;
   isolation: isolate;
-  min-height: 32px;
+  min-height: var(--control-h-lg);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -2490,7 +2498,7 @@ img {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   column-gap: 2px;
   color: var(--color-text-muted);
-  font-size: calc(var(--fs-mini) * 0.9 * var(--analysis-legend-scale, 1));
+  font-size: calc(var(--fs-mini) * var(--analysis-legend-scale, 1));
   line-height: 1.15;
 }
 
@@ -2510,13 +2518,35 @@ img {
   text-align: right;
 }
 
-.legend-extrema {
+.legend-heading {
   grid-column: 1 / -1;
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  padding-right: 20px;
+  gap: calc(var(--sp-2) * var(--analysis-legend-scale, 1));
+  min-width: 0;
+}
+
+.analysis-legend .legend-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: calc(var(--fs-sm) * var(--analysis-legend-scale, 1));
+  font-weight: var(--fw-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-legend .legend-unit {
+  flex: none;
   color: var(--color-text-muted);
-  line-height: 1.15;
+}
+
+/* Mesh counts are provenance, not the reading: last, muted, clear of the resize grip. */
+.analysis-legend .legend-meta {
+  padding-right: calc(var(--sp-5) * var(--analysis-legend-scale, 1));
+  color: var(--color-text-subtle);
 }
 
 .side-panel {
@@ -3629,6 +3659,19 @@ input {
   border-color: var(--color-accent);
 }
 
+/* Destructive confirm. The replace dialog's "Replace and clear setup" wore the
+   accent, so the irreversible choice looked like the recommended one. */
+.primary.danger {
+  color: #fff;
+  background: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.primary.danger:hover,
+.theme-light .primary.danger:hover {
+  background: color-mix(in srgb, var(--color-error) 86%, #000);
+}
+
 .secondary {
   color: var(--color-text);
   background: var(--color-surface-2);
@@ -3999,11 +4042,15 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* A quiet sentence-case note, not an eyebrow: tracked uppercase mono truncated
+   "Sample and analysis type" to "SAMPLE AND ANALYS…" beside the title. */
 .collapsible-subtitle {
   min-width: 0;
   margin-left: auto;
   overflow: hidden;
   color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5192,6 +5239,11 @@ input[aria-invalid="true"] {
   margin-bottom: var(--sp-2);
 }
 
+/* Clear the popover's absolutely placed close button, which the label ran under. */
+.shortcut-popover .shortcut-guide-header {
+  padding-right: var(--sp-6);
+}
+
 .shortcut-guide-header strong {
   color: var(--color-text);
   font-size: var(--fs-sm);
@@ -5815,7 +5867,7 @@ input[aria-invalid="true"] {
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border: var(--border-strong);
-  border-radius: 18px;
+  border-radius: var(--radius-overlay);
   background: var(--color-surface);
   box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
 }
@@ -5847,7 +5899,7 @@ input[aria-invalid="true"] {
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   color: var(--color-accent);
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
@@ -5873,7 +5925,7 @@ input[aria-invalid="true"] {
   gap: var(--sp-25);
   padding: var(--sp-3);
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   color: var(--color-text);
   text-align: left;
   background: transparent;
@@ -5963,7 +6015,7 @@ input[aria-invalid="true"] {
   gap: 5px;
   padding: 14px;
   border: var(--border-thin);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   background: var(--color-surface-2);
 }
 
@@ -5981,11 +6033,21 @@ input[aria-invalid="true"] {
 
 .validation-run-meta span { display: grid; gap: 2px; }
 
+/* A flex row put each marker in the gap, where it attached to the previous item
+   ("solver•"). Inline items with a leading separator instead. */
 .validation-detail-list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2) 18px;
-  padding-left: 18px;
+  gap: var(--sp-1) 0;
+  margin: 0;
+  padding: 0;
+  color: var(--color-text-subtle);
+  list-style: none;
+}
+
+.validation-detail-list li + li::before {
+  content: "·";
+  margin: 0 var(--sp-2);
   color: var(--color-text-subtle);
 }
 

@@ -113,7 +113,8 @@ export function StepBar({ activeStep, project, study, hasResults, readiness = []
             disabled={!canSelect}
             onClick={() => onSelect(step.id)}
             aria-current={isActive ? "step" : undefined}
-            title={stepBlockers?.length ? stepBlockers.join(" ") : undefined}
+            // The collapsed rail is icons only; without a title the step had no visible name on hover.
+            title={stepBlockers?.length ? stepBlockers.join(" ") : collapsed ? step.label : undefined}
             aria-label={stepBlockers?.length ? `${step.label}: ${stepBlockers.join(" ")}` : notice ? `${step.label}: needs attention` : undefined}
           >
             <span className={`step-icon ${isComplete ? "done" : stepBlockers?.length ? "blocked" : ""}`} aria-hidden="true">
@@ -126,7 +127,7 @@ export function StepBar({ activeStep, project, study, hasResults, readiness = []
       })}
       </div>
       <div className="stepbar-footer">
-        <div className="stepbar-actions" aria-label="Project links">
+        <div className="stepbar-actions" aria-label="Appearance">
           <button
             className="stepbar-link"
             type="button"

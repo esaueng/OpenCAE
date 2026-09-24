@@ -102,6 +102,9 @@
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-pill: 10px;
+  /* Floating surfaces (dialogs, popovers, the gallery). Controls and cards stay at
+     --radius-md; overlays ranged 4-18px with no rule between them. */
+  --radius-overlay: 8px;
 
   /* ── Shadows ──────────────────────────────────────────── */
   --shadow-panel: 0 14px 38px rgba(0, 0, 0, 0.32);
