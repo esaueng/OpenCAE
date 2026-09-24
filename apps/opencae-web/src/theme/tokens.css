@@ -81,10 +81,18 @@
      value but not rank. These are the shared shapes; every value here is one the app
      already rendered, so introducing them moved nothing. */
 
-  /* Interactive heights. Six distinct values existed; these are the three that matter. */
+  /* Interactive heights. Every control takes one of these; a new literal height on a
+     control is a tier miss, not a new size. sm is also the WCAG 2.5.8 target floor.
+       sm    compact chrome: tabs, links, chips, close/remove glyphs
+       md    fields, selects, segmented controls, rail links
+       lg    action and icon buttons
+       xl    start-screen calls to action
+       touch the floor for primary controls at phone width */
   --control-h-sm: 24px;
   --control-h-md: 30px;
   --control-h-lg: 34px;
+  --control-h-xl: 44px;
+  --control-h-touch: 40px;
 
   /* Card interiors. */
   --card-pad: 10px;
@@ -267,7 +275,7 @@ input, select, textarea {
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   padding: 6px 8px;
-  height: 30px;
+  height: var(--control-h-md);
 }
 
 input:focus, select:focus, textarea:focus {
