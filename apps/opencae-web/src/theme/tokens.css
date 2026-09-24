@@ -110,7 +110,9 @@
   --topbar-h: 44px;
   --statusbar-h: 30px;
   --stepbar-w: 124px;
-  --context-w: 344px;
+  /* Grows past 1560px wide so the panel keeps pace with a large viewer; at
+     1920 the fixed 344px left it 18% of the screen and wrapped its headline. */
+  --context-w: clamp(344px, 22vw, 420px);
 
   /* ── Motion ───────────────────────────────────────────── */
   --dur-fast: 100ms;

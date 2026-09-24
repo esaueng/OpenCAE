@@ -42,7 +42,7 @@ img {
   overflow: auto;
   background:
     radial-gradient(ellipse 80% 50% at 50% 0%, rgba(77, 163, 255, 0.06), transparent 70%),
-    linear-gradient(var(--color-bg), color-mix(in srgb, var(--color-bg) 92%, #000));
+    linear-gradient(#0b0f14, #080c10);
   padding: var(--sp-5);
 }
 
@@ -55,7 +55,7 @@ img {
   overflow: hidden;
   background:
     radial-gradient(ellipse 80% 50% at 50% 0%, rgba(77, 163, 255, 0.06), transparent 70%),
-    linear-gradient(#0b0f14, #080c10);
+    linear-gradient(var(--color-bg), color-mix(in srgb, var(--color-bg) 92%, #000));
   padding: var(--sp-5);
 }
 
@@ -347,7 +347,8 @@ img {
   transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
 
-.start-actions .start-action {
+.start-actions .start-action,
+.start-menu-load {
   justify-content: space-between;
 }
 
@@ -5365,6 +5366,40 @@ input[aria-invalid="true"] {
   outline-offset: 1px;
 }
 
+/* Short screens: with the sample menu open the masthead took ~170px above Back and
+   pushed "Load sample project" below the fold at 600-700px tall. */
+@media (max-height: 760px) {
+  .start-brand.sample-menu-open .start-mark {
+    width: 36px;
+    height: 36px;
+    margin-bottom: var(--sp-2);
+  }
+
+  .start-brand.sample-menu-open h1 {
+    font-size: var(--fs-xl);
+  }
+
+  .start-brand.sample-menu-open .start-tagline {
+    display: none;
+  }
+
+  .start-brand.sample-menu-open .start-sample-grid .sample-option-card {
+    min-height: 0;
+  }
+
+  .start-brand.sample-menu-open .start-sample-grid .sample-thumbnail {
+    height: 64px;
+  }
+
+  /* The primary action stays on screen while the cards scroll under it. */
+  .start-menu-load {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    box-shadow: 0 -12px 24px 4px #0b0f14;
+  }
+}
+
 @media (max-width: 980px) {
   .storage-recovery-card {
     right: var(--sp-3);
@@ -5385,8 +5420,11 @@ input[aria-invalid="true"] {
     overflow: auto;
   }
 
+  /* Sticky belongs on the grid items. .status-strip used to carry it, but its
+     parent .bottom-panel is exactly 30px tall, so it had nowhere to stick and
+     Tips/Logs scrolled off with the page. */
   .topbar,
-  .status-strip {
+  .bottom-panel {
     position: sticky;
     z-index: 1;
     background: var(--color-surface);
@@ -5396,7 +5434,7 @@ input[aria-invalid="true"] {
     top: 0;
   }
 
-  .status-strip {
+  .bottom-panel {
     bottom: 0;
   }
 
@@ -5409,15 +5447,60 @@ input[aria-invalid="true"] {
     grid-template-rows: minmax(440px, 58vh) auto;
   }
 
+  /* The rail spans the viewer and the panel rows; unstuck, the steps scrolled
+     away as soon as the reader reached the form, leaving an empty column. */
   .stepbar {
     grid-row: 1 / span 2;
+    position: sticky;
+    top: var(--topbar-h);
+    align-self: start;
+    max-height: calc(100dvh - var(--topbar-h) - var(--statusbar-h));
     padding: var(--sp-3) var(--sp-2);
     overflow-y: auto;
   }
 
-  .stepbar-eyebrow,
-  .stepbar-footer {
+  .stepbar-eyebrow {
     display: none;
+  }
+
+  /* The footer holds the only theme and unit controls. It used to be hidden here
+     unless the rail was collapsed; show it in the collapsed rail's icon form. */
+  .stepbar .stepbar-footer {
+    justify-items: center;
+    gap: var(--sp-15);
+    width: 100%;
+    margin-top: var(--sp-3);
+  }
+
+  .stepbar .stepbar-footer > div:not(.stepbar-actions):not(.unit-switch),
+  .stepbar .unit-switch > span,
+  .stepbar .unit-switch > strong,
+  .stepbar .unit-toggle-label {
+    display: none;
+  }
+
+  .stepbar .stepbar-link {
+    width: 34px;
+    min-height: 30px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+  }
+
+  .stepbar .unit-switch {
+    display: grid;
+    padding: 0;
+  }
+
+  .stepbar .unit-switch .unit-toggle {
+    width: 34px;
+    min-height: 24px;
+    border: var(--border-thin);
+    border-radius: var(--radius-md);
+  }
+
+  .stepbar .unit-toggle-short {
+    display: inline;
   }
 
   .stepbar.collapsed .stepbar-footer {
@@ -5453,7 +5536,8 @@ input[aria-invalid="true"] {
     gap: var(--sp-2);
   }
 
-  .topbar-tools,
+  /* .topbar-tools (undo, redo, Keys) stays until 640px: hiding it here left undo
+     with no pointer path at all while the bar had ~400px spare. */
   .breadcrumb-sep,
   .breadcrumb > span:last-child {
     display: none;
@@ -5470,8 +5554,6 @@ input[aria-invalid="true"] {
 
   .start-sample-grid {
     grid-template-columns: minmax(0, 1fr);
-    width: min(360px, 100%);
-    margin: 0 auto;
   }
 
   .sample-option-card:not(.compact) {
@@ -5546,12 +5628,23 @@ input[aria-invalid="true"] {
     display: none;
   }
 
-  .app-shell {
-    --stepbar-w: 78px;
-  }
-
+  /* Step labels are hidden at this width, so "expanded" was icon-only too and just
+     22px wider than collapsed. One width, and no toggle that does nothing. */
+  .app-shell,
   .app-shell.stepbar-collapsed {
     --stepbar-w: 56px;
+  }
+
+  .stepbar-collapse {
+    display: none;
+  }
+
+  .topbar-tools {
+    display: none;
+  }
+
+  .start-action kbd {
+    display: none;
   }
 
   .start-screen {
@@ -5625,6 +5718,15 @@ input[aria-invalid="true"] {
 
   .status-strip {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* "Orthographic" dropped to its own row and the strip covered 54px of a 490px viewer. */
+  .viewer-view-presets {
+    flex-wrap: nowrap;
+  }
+
+  .viewer-view-presets button {
+    padding-inline: var(--sp-15);
   }
 }
 .validation-gallery-backdrop {
