@@ -384,7 +384,7 @@ img {
 
 .start-action small {
   margin-top: 1px;
-  color: rgba(6, 17, 30, 0.72);
+  color: rgba(6, 17, 30, 0.85);
   font-size: var(--fs-xs);
 }
 
@@ -2574,6 +2574,13 @@ img {
   line-height: 1.55;
 }
 
+/* Prose, callouts and warnings sat flush on the control below them (measured 0px in
+   Dynamic Run, Results and Beam Model). In the panel's block flow this margin
+   collapses into a following section title's larger one, so only the flush cases move. */
+.panel-body > :is(.panel-copy, .muted, .callout, .panel-warning) {
+  margin-bottom: var(--gap-block);
+}
+
 .panel-warning {
   margin: 0;
   padding: var(--sp-2) var(--sp-25);
@@ -3235,6 +3242,29 @@ img {
   border-bottom: var(--border-thin);
 }
 
+/* Count-aware layouts. The base grid is three columns, so a two-option control
+   (thermal Temperature / Heat flux) left a dead third of its width, and the five
+   dynamic result modes laid out 3+2 with an empty cell. */
+.segmented:has(> button:nth-child(2):last-child) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) > button {
+  grid-column: span 2;
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) > button:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
+.segmented.result-mode:has(> button:nth-child(5):last-child) > button:nth-child(-n + 3) {
+  border-bottom: var(--border-thin);
+}
+
 .modal-mode-table {
   display: grid;
   gap: var(--sp-2);
@@ -3249,9 +3279,23 @@ img {
   text-align: left;
 }
 
+/* The selected mode used the primary fill, so the list read as six buttons with one
+   call to action. Selection matches every other picker: accent tint and inset rule. */
+.modal-mode-table button[aria-pressed="true"] {
+  color: var(--color-text);
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.modal-mode-table button[aria-pressed="true"] > strong {
+  color: var(--color-accent);
+}
+
 .modal-mode-table button > span {
   justify-self: end;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .modal-mode-table button > small {
@@ -3626,6 +3670,14 @@ input {
   background: var(--color-accent-dim);
 }
 
+.text-button.danger-text {
+  color: var(--color-error);
+}
+
+.text-button.danger-text:hover {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -3940,9 +3992,20 @@ button:disabled {
   display: none;
 }
 
+/* The title wrapped to two lines ("Load / cases") because the mono subtitle took
+   the row; the title keeps its line and the subtitle truncates instead. */
+.collapsible-title {
+  flex: none;
+  white-space: nowrap;
+}
+
 .collapsible-subtitle {
+  min-width: 0;
   margin-left: auto;
+  overflow: hidden;
   color: var(--color-text-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .collapsible-chevron {
@@ -4102,7 +4165,7 @@ button:disabled {
 .load-case-row,
 .load-combination-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 28px;
+  grid-template-columns: minmax(0, 1fr) auto auto 28px;
   align-items: center;
   gap: 7px;
   padding: var(--card-pad);
@@ -4111,24 +4174,29 @@ button:disabled {
   border-radius: var(--card-radius);
 }
 
+/* One row per case: name, load count, Enabled, delete. The count used to sit alone
+   on a second row with the delete glyph centred across both. */
 .load-case-row > small {
-  grid-column: 1 / span 2;
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
+  white-space: nowrap;
 }
 
-.load-case-row > .remove-glyph {
-  grid-column: 3;
-  grid-row: 1 / span 2;
+.load-case-row > small.load-case-empty {
+  color: var(--color-warning);
 }
 
 .load-combination-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.load-combination-row > .secondary,
+.load-combination-row > .load-combination-delete,
 .combination-factor {
   grid-column: 1 / -1;
+}
+
+.load-combination-delete {
+  justify-self: end;
 }
 
 .combination-factor {
@@ -4356,8 +4424,11 @@ button:disabled {
   cursor: pointer;
 }
 
+/* Disabled only while its own edit form is open. The global disabled fade made the
+   item being edited look like the one thing on the panel that was unavailable. */
 .editable-summary-trigger:disabled {
   cursor: default;
+  opacity: 1;
 }
 
 .editable-item:has(.editable-summary-trigger:hover:not(:disabled)),
@@ -4462,6 +4533,10 @@ button:disabled {
 .edit-form {
   display: grid;
   gap: var(--sp-2);
+}
+
+.edit-form .placement-chip {
+  margin: 0;
 }
 
 .edit-form .field {

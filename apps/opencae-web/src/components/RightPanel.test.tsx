@@ -6,6 +6,7 @@ import { bracketDisplayModel } from "@opencae/samples";
 import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@opencae/schema";
 import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
 import type { StepId } from "./StepBar";
+import { resultExportMenuItems } from "./panels/ResultsPanels";
 import { readinessForStudy } from "../runReadiness";
 import { StudySchema } from "@opencae/schema";
 import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
@@ -639,8 +640,10 @@ describe("RightPanel payload mass controls", () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).not.toContain('role="listitem"');
     expect(markup).toContain("Block shift-invert");
-    expect(markup).toContain("Export selected-mode CSV");
-    expect(markup).toContain("Export selected-mode VTU");
+    // Modal exports share the Results panel's Export menu; its items render only
+    // while open, so the labels are checked on the builder that feeds it.
+    expect(markup).toContain("export-menu-trigger");
+    expect(resultExportMenuItems({ onExportResultData: vi.fn() }, "mode").map((item) => item.label)).toEqual(["Selected-mode CSV", "Selected-mode VTU"]);
   });
 
   test("renders thermal results as the final workflow step with readable metrics", () => {

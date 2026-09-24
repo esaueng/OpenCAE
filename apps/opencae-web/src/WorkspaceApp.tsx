@@ -531,7 +531,7 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   const resultPlaybackCacheLabel = useMemo(() => {
     if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
     if (resultPlaybackCacheState.status === "ready") {
-      if (resultPlaybackCacheState.cache.mode === "full") return `Smooth playback ready · ${resultPlaybackCacheState.cache.frameCount} frames`;
+      if (resultPlaybackCacheState.cache.mode === "full") return `Smooth playback ready · ${resultPlaybackCacheState.cache.frameCount} interpolated frames`;
       if (resultPlaybackCacheState.cache.mode === "reducedFps") return `Smooth playback ready · ${resultPlaybackCacheState.cache.presentationFps} fps cache`;
       return "Playback cached at solver frames";
     }

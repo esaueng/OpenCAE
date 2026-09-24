@@ -392,3 +392,11 @@ function roundBoundingDimension(value: number): number {
   if (magnitude >= 10) return Math.round(value * 100) / 100;
   return Math.round(value * 1000) / 1000;
 }
+
+/**
+ * Screen form of an ASCII unit: "kg/m^3" -> "kg/m³". Units are stored and exported with
+ * carets; the panels showed them raw beside places that already used superscripts.
+ */
+export function displayUnitText(text: string): string {
+  return text.replace(/\^(-?)([0-9])/g, (_, sign: string, digit: string) => `${sign ? "⁻" : ""}${"⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(digit)]}`);
+}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { KG_PER_M3_PER_LB_PER_IN3, defaultSolverMethodForStudy, densityForUnits, displayModelForUnits, formatDensity, formatDisplayNumber, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, massForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, volumeForUnits } from "./unitDisplay";
+import { KG_PER_M3_PER_LB_PER_IN3, defaultSolverMethodForStudy, displayUnitText, densityForUnits, displayModelForUnits, formatDensity, formatDisplayNumber, formatForce, formatLength, formatMass, formatMaterialStress, formatResultMetric, formatResultNumber, formatResultProvenanceLabel, formatStress, formatUnitSystemLabel, formatVolume, loadValueForUnits, massForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, volumeForUnits } from "./unitDisplay";
 
 describe("unit display formatting", () => {
   test("uses one canonical solver method for each study type", () => {
@@ -265,5 +265,19 @@ describe("unit display formatting", () => {
     }, "US");
 
     expect(displayModel.dimensions).toEqual({ x: 1, y: 2, z: 3, units: "in" });
+  });
+});
+
+describe("displayUnitText", () => {
+  test("turns ASCII caret exponents into superscripts for the screen", () => {
+    expect(displayUnitText("41,280 mm^3")).toBe("41,280 mm³");
+    expect(displayUnitText("2,700 kg/m^3")).toBe("2,700 kg/m³");
+    expect(displayUnitText("1.2 W/m^2")).toBe("1.2 W/m²");
+    expect(displayUnitText("9.81 m s^-2")).toBe("9.81 m s⁻²");
+  });
+
+  test("leaves text without carets, including exponent notation, untouched", () => {
+    expect(displayUnitText("6.585e+8")).toBe("6.585e+8");
+    expect(displayUnitText("Static Stress")).toBe("Static Stress");
   });
 });

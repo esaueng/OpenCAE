@@ -158,7 +158,7 @@
   --color-accent: #0b63b6;
   --color-accent-dim: rgba(22, 119, 210, 0.12);
   --color-accent-border: rgba(22, 119, 210, 0.42);
-  --color-warning: #a16207;
+  --color-warning: #854d0e; /* #a16207 fell to 3.7-4.0:1 on its own 12% warning tint */
   --color-error: #b91c1c;
   --color-success: #15803d;
   --color-viewport-bg: #f7f9fc;

@@ -19,7 +19,7 @@ import { dimensionValuesForDisplayModel } from "../../modelDimensions";
 import { SETTING_HELP, type SettingHelpId, type SettingHelpVisual } from "../../settingHelp";
 
 import { getViewportTooltipPosition } from "../../tooltipPosition";
-import { forceForUnits, formatDisplayNumber, type UnitSystem } from "../../unitDisplay";
+import { displayUnitText, forceForUnits, formatDisplayNumber, type UnitSystem } from "../../unitDisplay";
 import { canNavigateToStep } from "../../appShellState";
 
 export const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
@@ -285,29 +285,29 @@ export function HelpVisual({ kind }: { kind: SettingHelpVisual }) {
 }
 
 export function Info({ label, value }: { label: string; value: string }) {
-  return <div className="info-row"><span>{label}</span><strong>{value}</strong></div>;
+  return <div className="info-row"><span>{label}</span><strong>{displayUnitText(value)}</strong></div>;
 }
 
-/* The one display level in the app. --fs-xl was defined in tokens.css and used nowhere,
-   so the largest type in the workspace was 16px and the number a user ran the solve for
-   rendered at the same size and weight as the solver-runner string. Every result panel
-   states its headline figures through this, so the answer reads as the answer. */
 /** Splits "0.001433 mm" into its number and a trailing unit, so the unit can be set smaller. */
 export function splitHeadlineValue(value: string): { number: string; unit: string | null } {
   const match = /^(.*\d\S*)\s+([^\d\s]\S*)$/.exec(value);
   return match ? { number: match[1]!, unit: match[2]! } : { number: value, unit: null };
 }
 
+/* The one display level in the app. --fs-xl was defined in tokens.css and used nowhere,
+   so the largest type in the workspace was 16px and the number a user ran the solve for
+   rendered at the same size and weight as the solver-runner string. Every result panel
+   states its headline figures through this, so the answer reads as the answer. */
 export function Headline({ items }: { items: Array<{ label: string; value: string }> }) {
   return (
     <div className="result-headline">
       {items.map((item) => {
         // At 22px mono the unit made "0.001433 mm" wrap in a half-width column.
-        const { number, unit } = splitHeadlineValue(item.value);
+        const { number, unit } = splitHeadlineValue(displayUnitText(item.value));
         return (
           <div className="result-headline-item" key={item.label}>
             <span>{item.label}</span>
-            <strong aria-label={item.value}>{number}{unit && <small className="result-headline-unit">{unit}</small>}</strong>
+            <strong aria-label={displayUnitText(item.value)}>{number}{unit && <small className="result-headline-unit">{unit}</small>}</strong>
           </div>
         );
       })}

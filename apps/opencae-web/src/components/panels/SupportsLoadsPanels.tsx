@@ -474,16 +474,17 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
         return (
           <div className="load-case-row" key={loadCase.id}>
             <input aria-label={`Load case name ${loadCase.name}`} value={loadCase.name} onChange={(event) => updateCase(loadCase.id, { name: event.currentTarget.value || "Untitled case" })} />
+            {/* An enabled empty case blocks the run; say so where it was made, not only on Run. */}
+            <small className={loadCase.enabled && loadCase.loadIds.length === 0 ? "load-case-empty" : undefined} title={loadCase.enabled && loadCase.loadIds.length === 0 ? "Enabled cases need at least one load. Assign a load or turn the case off." : undefined}>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
             <label className="toggle compact-toggle">
               <input type="checkbox" aria-label={`Enable load case ${loadCase.name}`} checked={loadCase.enabled} onChange={(event) => updateCase(loadCase.id, { enabled: event.currentTarget.checked })} />
               <span>Enabled</span>
             </label>
-            <small>{loadCase.loadIds.length} load{loadCase.loadIds.length === 1 ? "" : "s"}</small>
             <button type="button" className="remove-glyph" aria-label={`Delete load case ${loadCase.name}`} disabled={!canDelete} onClick={() => onChange(loadCases.filter((candidate) => candidate.id !== loadCase.id), loadCombinations)}><X size={15} /></button>
           </div>
         );
       })}
-      <button className="secondary wide" type="button" onClick={() => onChange([
+      <button className="outline-action wide" type="button" onClick={() => onChange([
         ...loadCases,
         { id: `case-${crypto.randomUUID()}`, name: `Case ${loadCases.length + 1}`, enabled: true, loadIds: [] }
       ], loadCombinations)}><Plus size={16} />Add load case</button>
@@ -512,10 +513,10 @@ function LoadCasesEditor({ studyType, loadCases, loadCombinations, onChange }: {
                   />
                 </label>
               ))}
-              <button type="button" className="secondary" onClick={() => onChange(loadCases, loadCombinations.filter((candidate) => candidate.id !== combination.id))}>Delete combination</button>
+              <button type="button" className="text-button danger-text load-combination-delete" onClick={() => onChange(loadCases, loadCombinations.filter((candidate) => candidate.id !== combination.id))}>Delete combination</button>
             </div>
           ))}
-          <button className="secondary wide" type="button" disabled={!loadCases.length} onClick={() => onChange(loadCases, [
+          <button className="outline-action wide" type="button" disabled={!loadCases.length} onClick={() => onChange(loadCases, [
             ...loadCombinations,
             {
               id: `combination-${crypto.randomUUID()}`,
@@ -844,7 +845,7 @@ function SupportEditorList({ study, retargetFace, onUpdateSupport, onRemoveSuppo
           <div className="editable-item" key={support.id}>
             <div className="editable-summary">
               <span className="item-icon warning"><SupportIcon /></span>
-              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)} °C)` : `Prescribed displacement (${Number(support.parameters.value ?? 0)} mm ${String(support.parameters.component ?? "z")})`}</strong>
+              <strong>{displayLabel} · {support.type === "fixed" ? "Fixed support" : support.type === "prescribed_temperature" ? `Prescribed temperature (${Number(support.parameters.value ?? 0)}\u00a0°C)` : `Prescribed displacement (${Number(support.parameters.value ?? 0)}\u00a0mm ${String(support.parameters.component ?? "z")})`}</strong>
               <small>{label}</small>
               <button className="remove-glyph" type="button" aria-label="Remove support" onClick={() => onRemoveSupport(support.id)}><X size={16} /></button>
             </div>

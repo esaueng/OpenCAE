@@ -55,6 +55,7 @@ export function ThermalResultsPanelContent({
   onExportResultPng,
   onExportResultHtml,
   onExportResultData,
+  onSaveProject,
   reportBusy = false,
   pngExportBusy = false,
   htmlExportBusy = false,
@@ -72,9 +73,9 @@ export function ThermalResultsPanelContent({
         <button type="button" className={resultMode === "heat_flux" ? "active" : ""} aria-pressed={resultMode === "heat_flux"} onClick={() => onResultModeChange("heat_flux")}>Heat flux</button>
       </div>
       <Headline items={[
-        { label: "Minimum temperature", value: formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits) },
-        { label: "Maximum temperature", value: formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits) },
-        { label: "Maximum heat flux", value: formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits) }
+        { label: "Min temperature", value: formatResultMetric(resultSummary.minTemperature, resultSummary.temperatureUnits) },
+        { label: "Max temperature", value: formatResultMetric(resultSummary.maxTemperature, resultSummary.temperatureUnits) },
+        { label: "Peak heat flux", value: formatResultMetric(resultSummary.maxHeatFlux, resultSummary.heatFluxUnits) }
       ]} />
       {project.unitSystem === "US" && (
         <p className="muted">Imperial display converts temperatures only. Heat flux and heat rates stay in {resultSummary.heatFluxUnits} and W.</p>
@@ -89,11 +90,10 @@ export function ThermalResultsPanelContent({
         <Info label="Result source" value={resultSourceLabelForPanel(resultSummary)} />
       </div>
       <div className="result-actions">
-        <button className="secondary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport?.()}><FileDown size={16} />{reportBusy ? "Generating…" : "Generate report"}</button>
-        <button className="secondary wide" type="button" disabled={pngExportBusy || reportDisabled} onClick={() => void onExportResultPng?.()}><FileDown size={16} />{pngExportBusy ? "Exporting…" : "Export PNG"}</button>
-        <button className="secondary wide" type="button" disabled={htmlExportBusy || reportDisabled} onClick={() => void onExportResultHtml?.()}><FileDown size={16} />{htmlExportBusy ? "Exporting…" : "Export standalone HTML"}</button>
-        {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-state CSV"}</button>}
-        {onExportResultData && <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-state VTU"}</button>}
+        {onGenerateReport && (
+          <button className="primary wide" type="button" disabled={reportBusy || reportDisabled} onClick={() => void onGenerateReport()}><FileDown size={18} />{reportBusy ? "Generating…" : "Generate report"}</button>
+        )}
+        <ResultExportMenu items={resultExportMenuItems({ onExportResultPng, onExportResultHtml, onExportResultData, onSaveProject, pngExportBusy, htmlExportBusy, dataExportBusy, reportDisabled }, "state")} />
       </div>
       {reportError && <p className="panel-warning">{reportError}</p>}
       {pngExportError && <p className="panel-warning">{pngExportError}</p>}
@@ -102,6 +102,9 @@ export function ThermalResultsPanelContent({
     </Panel>
   );
 }
+
+/** Mode shapes colour by normalized displacement, so the legend uses the motion ramp. */
+const MODE_SHAPE_LEGEND_GRADIENT = resultScaleCssGradient({ type: "displacement", min: 0, max: 1, bands: "continuous" });
 
 export function ModalResultsPanelContent({
   study,
@@ -125,6 +128,7 @@ export function ModalResultsPanelContent({
   onToggleDeformed,
   onStressExaggerationChange,
   onExportResultData,
+  onSaveProject,
   dataExportBusy = null,
   dataExportError,
   reportDisabled = false
@@ -156,21 +160,21 @@ export function ModalResultsPanelContent({
             key={mode.modeIndex}
             type="button"
             aria-pressed={mode.modeIndex === selectedModeIndex}
-            aria-label={`Mode ${mode.modeIndex}, ${Number(mode.frequencyHz.toPrecision(6))} Hz`}
-            className={mode.modeIndex === selectedModeIndex ? "primary" : "secondary"}
+            aria-label={`Mode ${mode.modeIndex}, ${formatDisplayNumber(mode.frequencyHz)} Hz`}
+            className="secondary mode-option"
             onClick={() => onSelectedModeIndexChange?.(mode.modeIndex)}
           >
             <strong>{`Mode ${mode.modeIndex}`}</strong>
-            <span>{`${Number(mode.frequencyHz.toPrecision(6))} Hz`}</span>
+            <span>{`${formatDisplayNumber(mode.frequencyHz)} Hz`}</span>
             <small>{`Residual ${mode.scaledResidual.toExponential(2)}`}</small>
           </button>
         ))}
       </div>
       {activeMode && (
         <div className="summary-box">
-          <Info label="Frequency" value={`${Number(activeMode.frequencyHz.toPrecision(6))} Hz`} />
-          <Info label="Eigenvalue" value={Number(activeMode.eigenvalue.toPrecision(6)).toString()} />
-          <Info label="Scaled residual" value={activeMode.scaledResidual.toExponential(3)} />
+          <Info label="Frequency" value={`${formatDisplayNumber(activeMode.frequencyHz)} Hz`} />
+          <Info label="Eigenvalue" value={activeMode.eigenvalue.toExponential(3)} />
+          <Info label="Scaled residual" value={activeMode.scaledResidual.toExponential(2)} />
           <Info label="Shape units" value="normalized" />
         </div>
       )}
@@ -192,7 +196,7 @@ export function ModalResultsPanelContent({
           </label>
           <label className="field range-field">
             <span className="range-label"><span>Animation speed</span><strong>{Math.round(resultPlaybackFps)} fps</strong></span>
-            <input type="range" min="1" max="30" step="1" value={resultPlaybackFps} onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))} />
+            <input type="range" min="1" max="30" step="1" value={resultPlaybackFps} style={{ "--range-progress": `${rangeProgressPercent(resultPlaybackFps, 1, 30)}%` } as CSSProperties} onChange={(event) => onResultPlaybackFpsChange?.(Number(event.currentTarget.value))} />
           </label>
           <label className="toggle playback-loop-toggle">
             <input type="checkbox" checked={resultPlaybackReverseLoop} onChange={(event) => onResultPlaybackReverseLoopChange?.(event.currentTarget.checked)} />
@@ -205,17 +209,15 @@ export function ModalResultsPanelContent({
       <label className="toggle"><input type="checkbox" checked={showDeformed} onChange={onToggleDeformed} /> Animate mode shape</label>
       <label className="field range-field">
         <span className="range-label"><span>Visualization amplitude</span><strong>{stressExaggeration.toFixed(1)}x</strong></span>
-        <input type="range" min="0.5" max="4" step="0.1" value={stressExaggeration} onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))} />
+        <input type="range" min="0.5" max="4" step="0.1" value={stressExaggeration} style={{ "--range-progress": `${rangeProgressPercent(stressExaggeration, 0.5, 4)}%` } as CSSProperties} onChange={(event) => onStressExaggerationChange(Number(event.currentTarget.value))} />
       </label>
       <p className="panel-copy">Amplitude and phase are visualization-only. Normalized mode shapes are not physical displacements.</p>
-      {onExportResultData && (
-        <div className="result-actions">
-          <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("csv")}><FileDown size={16} />{dataExportBusy === "csv" ? "Exporting…" : "Export selected-mode CSV"}</button>
-          <button className="secondary wide" type="button" disabled={dataExportBusy !== null || reportDisabled} onClick={() => void onExportResultData("vtu")}><FileDown size={16} />{dataExportBusy === "vtu" ? "Exporting…" : "Export selected-mode VTU"}</button>
-        </div>
-      )}
+      <div className="result-actions">
+        <ResultExportMenu items={resultExportMenuItems({ onExportResultData, onSaveProject, dataExportBusy, reportDisabled }, "mode")} />
+      </div>
       {dataExportError && <p className="panel-warning" role="alert"><AlertTriangle size={16} />{dataExportError}</p>}
-      <div className="legend"><small>Node</small><span /><small>Antinode</small></div>
+      {/* The bar was an empty span: the row read "Node … Antinode" with nothing between. */}
+      <div className="legend"><small>Node</small><span style={{ background: MODE_SHAPE_LEGEND_GRADIENT }} /><small>Antinode</small></div>
     </Panel>
   );
 }
@@ -237,6 +239,66 @@ type ResultExportItem = {
  * export is running the trigger itself carries that item's busy label, so the
  * state stays visible without reopening the menu.
  */
+export type ResultExportMenuSource = Pick<RightPanelProps, "onExportResultPng" | "onExportResultHtml" | "onExportResultData" | "onSaveProject" | "pngExportBusy" | "htmlExportBusy" | "dataExportBusy" | "reportDisabled">;
+
+/**
+ * The secondary result downloads, shared by every analysis type. Thermal used to
+ * stack five identical buttons and modal two, beside static's single primary
+ * action plus menu. `scope` names what the data exports contain.
+ */
+export function resultExportMenuItems(source: ResultExportMenuSource, scope: "state" | "mode"): ResultExportItem[] {
+  const { onExportResultPng, onExportResultHtml, onExportResultData, onSaveProject, pngExportBusy = false, htmlExportBusy = false, dataExportBusy = null, reportDisabled = false } = source;
+  const scopeLabel = scope === "mode" ? "Selected-mode" : "Selected-state";
+  return [
+    ...(onExportResultPng && scope === "state" ? [{
+      id: "png",
+      label: "PNG image",
+      busyLabel: "Exporting PNG…",
+      busy: pngExportBusy,
+      disabled: reportDisabled,
+      icon: <FileImage size={16} />,
+      run: () => void onExportResultPng()
+    }] : []),
+    ...(onExportResultHtml && scope === "state" ? [{
+      id: "html",
+      label: "Offline HTML",
+      busyLabel: "Packaging HTML…",
+      busy: htmlExportBusy,
+      disabled: reportDisabled,
+      icon: <FileCode2 size={16} />,
+      run: () => void onExportResultHtml()
+    }] : []),
+    ...(onExportResultData ? [{
+      id: "csv",
+      label: `${scopeLabel} CSV`,
+      busyLabel: "Exporting CSV…",
+      busy: dataExportBusy === "csv",
+      disabled: reportDisabled,
+      icon: <Table2 size={16} />,
+      run: () => void onExportResultData("csv")
+    }, {
+      id: "vtu",
+      label: `${scopeLabel} VTU`,
+      busyLabel: "Exporting VTU…",
+      busy: dataExportBusy === "vtu",
+      disabled: reportDisabled,
+      icon: <Boxes size={16} />,
+      run: () => void onExportResultData("vtu")
+    }] : []),
+    // The project file bundles geometry, study setup and the stored results, so
+    // it stays available while a run is in flight (unlike the result exports,
+    // which need a settled result state).
+    ...(onSaveProject ? [{
+      id: "project",
+      label: "Full project file",
+      busyLabel: "Saving project…",
+      busy: false,
+      icon: <FolderDown size={16} />,
+      run: () => void onSaveProject()
+    }] : [])
+  ];
+}
+
 function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>();
@@ -476,54 +538,7 @@ export function ResultsPanelContent({
     updateColorScaleSetting({ rangeMode: "manual", manualMin: parsedScaleMin, manualMax: parsedScaleMax });
   }
 
-  const exportMenuItems: ResultExportItem[] = [
-    ...(onExportResultPng ? [{
-      id: "png",
-      label: "PNG image",
-      busyLabel: "Exporting PNG…",
-      busy: pngExportBusy,
-      disabled: reportDisabled,
-      icon: <FileImage size={16} />,
-      run: () => void onExportResultPng()
-    }] : []),
-    ...(onExportResultHtml ? [{
-      id: "html",
-      label: "Offline HTML",
-      busyLabel: "Packaging HTML…",
-      busy: htmlExportBusy,
-      disabled: reportDisabled,
-      icon: <FileCode2 size={16} />,
-      run: () => void onExportResultHtml()
-    }] : []),
-    ...(onExportResultData ? [{
-      id: "csv",
-      label: "Selected-state CSV",
-      busyLabel: "Exporting CSV…",
-      busy: dataExportBusy === "csv",
-      disabled: reportDisabled,
-      icon: <Table2 size={16} />,
-      run: () => void onExportResultData("csv")
-    }, {
-      id: "vtu",
-      label: "Selected-state VTU",
-      busyLabel: "Exporting VTU…",
-      busy: dataExportBusy === "vtu",
-      disabled: reportDisabled,
-      icon: <Boxes size={16} />,
-      run: () => void onExportResultData("vtu")
-    }] : []),
-    // The project file bundles geometry, study setup and the stored results, so
-    // it stays available while a run is in flight (unlike the result exports,
-    // which need a settled result state).
-    ...(onSaveProject ? [{
-      id: "project",
-      label: "Full project file",
-      busyLabel: "Saving project…",
-      busy: false,
-      icon: <FolderDown size={16} />,
-      run: () => void onSaveProject()
-    }] : [])
-  ];
+  const exportMenuItems = resultExportMenuItems({ onExportResultPng, onExportResultHtml, onExportResultData, onSaveProject, pngExportBusy, htmlExportBusy, dataExportBusy, reportDisabled }, "state");
 
   return (
     <Panel title="Results" step="results" helper="View stress and displacement directly on the 3D model." study={study}>
@@ -613,7 +628,7 @@ export function ResultsPanelContent({
             </button>
           </div>
           {resultPlaybackCacheLabel && <small className="playback-cache-status">{resultPlaybackCacheLabel}</small>}
-          <Info label="Peak displacement" value={peakDisplacement ? `${Number(peakDisplacement.value.toPrecision(3))} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
+          <Info label="Peak displacement" value={peakDisplacement ? `${formatDisplayNumber(peakDisplacement.value)} ${peakDisplacement.units} at ${peakDisplacement.timeSeconds.toFixed(4)} s` : "Unavailable"} />
         </div>
       )}
       <SectionTitle helpId="resultMode">Result mode</SectionTitle>
@@ -782,7 +797,9 @@ export function ResultsPanelContent({
 
 function resultSourceLabelForPanel(resultSummary: ResultSummary): string {
   const label = formatResultProvenanceLabel(resultSummary.provenance);
-  return label === "OpenCAE Core Local (in-browser)" ? "Local (in-browser)" : label;
+  // Thermal provenance reads "OpenCAE Core Local" without the suffix; both are the
+  // in-browser solver and read the same way the Run panel names it.
+  return label === "OpenCAE Core Local (in-browser)" || label === "OpenCAE Core Local" ? "Local (in-browser)" : label;
 }
 
 function resultContractHasMissingUnits(summary: StructuralResultSummary, fields: ResultField[]): boolean {
