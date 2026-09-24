@@ -3406,6 +3406,17 @@ input {
   font-family: var(--font-mono);
 }
 
+/* Section boundaries measure --gap-section (28px) everywhere else. These two titles sit
+   inside grid containers, where the block above's margin cannot collapse into theirs,
+   so they read 42px and 36px. */
+.segmented.result-mode + .field > .section-title:first-child {
+  margin-top: calc(var(--gap-section) - 14px);
+}
+
+.load-case-editor > .section-title {
+  margin-top: calc(var(--gap-section) - var(--sp-2));
+}
+
 .panel-body > .section-title:first-child {
   margin-top: 0;
 }
@@ -5845,6 +5856,27 @@ input[aria-invalid="true"] {
 
   .status-strip {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  /* Touch targets: the top bar, start screen and sample menu controls ran 24-34px tall
+     on a phone. 40px is the floor here; desktop keeps its compact sizes. */
+  .topbar-action,
+  .storage-status-button,
+  .start-action,
+  .start-menu-back,
+  .start-analysis-type button,
+  .workflow-nav button {
+    min-height: 40px;
+  }
+
+  /* The legend covered ~35% of a 312x490 viewer. The reading (field, bar, ticks, peak)
+     stays; the mesh-count line goes. */
+  .analysis-legend .legend-meta {
+    display: none;
+  }
+
+  .analysis-legend {
+    min-height: 0;
   }
 
   /* "Orthographic" dropped to its own row and the strip covered 54px of a 490px viewer. */
