@@ -769,7 +769,9 @@ describe("RightPanel payload mass controls", () => {
     expect(supportsHtml).not.toContain("Select the actual model face");
     expect(loadsHtml).not.toContain("<strong>Load placement</strong>");
     expect(loadsHtml).not.toContain("Click the exact point for force");
-    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Overall dimensions help"');
+    // Dimensions, section, fit and mesh share one View section whose help covers all four;
+    // the dimensions-specific help sits on the panel the Show dimensions button opens.
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="View tools help"');
     expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Support placement help"');
     expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Load placement help"');
   });

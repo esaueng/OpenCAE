@@ -2,7 +2,7 @@
    Shared contracts live in ./RightPanelProps; panels never import each other. */
 import { useEffect, useRef, useState } from "react";
 
-import { AlertTriangle, ArrowDown, Atom, Eye, Factory, Maximize2, RotateCcw, Ruler, ScanLine, Upload, Wrench } from "lucide-react";
+import { AlertTriangle, ArrowDown, Atom, Eye, Factory, Grid3x3, Maximize2, RotateCcw, Ruler, ScanLine, Upload, Wrench } from "lucide-react";
 
 import { GEOMETRY_FILE_ACCEPT, PREVIEW_ONLY_GEOMETRY_NOTICE, STL_PREVIEW_SCOPE_NOTE, SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../../geometryFormats";
 
@@ -24,7 +24,7 @@ import { SAMPLE_OPTIONS, sampleOptionFor } from "../sampleOptions";
 
 import type { RightPanelProps } from "./RightPanelProps";
 import { Panel } from "./PanelChrome";
-import { Callout, Collapsible, ConceptCard, HelpLabel, HelpNote, Info, ModelDimensions, SectionTitle, SupportIcon, formatEquivalentForce } from "./PanelChrome";
+import { Callout, Collapsible, ConceptCard, HelpLabel, Info, ModelDimensions, SectionTitle, SupportIcon, formatEquivalentForce } from "./PanelChrome";
 export function ModelPanel({ project, displayModel, study, viewMode, showDimensions, sectionPlane = DEFAULT_SECTION_PLANE, sampleModel, sampleAnalysisType = "static_stress", onFitView, onRotateModel, onResetModelOrientation, onViewModeChange, onToggleDimensions, onSectionPlaneChange, onLoadSample, onUploadModel, onRepairModel, isRepairingModel = false }: RightPanelProps) {
   const [confirmSampleLoad, setConfirmSampleLoad] = useState(false);
   const [pendingSampleModel, setPendingSampleModel] = useState<SampleModelId>(sampleModel);
@@ -191,24 +191,39 @@ export function ModelPanel({ project, displayModel, study, viewMode, showDimensi
         )}
         <Info label="Units" value={project.unitSystem === "US" ? "in" : "mm"} />
       </div>
-      <button className={showDimensions ? "primary wide" : "secondary wide"} type="button" onClick={onToggleDimensions}>
-        <Ruler size={16} />
-        {showDimensions ? "Hide dimensions" : "Show dimensions"}
-      </button>
-      <HelpNote helpId="dimensions" />
-      {showDimensions && <ModelDimensions displayModel={displayModel} />}
-      <SectionTitle helpId="sectionPlane">Open section</SectionTitle>
-      <button
-        className={sectionPlane.enabled ? "primary wide" : "secondary wide"}
-        type="button"
-        aria-pressed={sectionPlane.enabled}
-        onClick={() => onSectionPlaneChange?.({ ...sectionPlane, enabled: !sectionPlane.enabled })}
-      >
-        <ScanLine size={16} />
-        {sectionPlane.enabled ? "Close section" : "Open section"}
-      </button>
+      {/* View tools share one section: each used to be a lone full-width button,
+          one under an eyebrow that only repeated its label and one trailed by an
+          orphaned help icon. Help now sits on the group each button opens. */}
+      <SectionTitle helpId="viewTools">View</SectionTitle>
+      <div className="view-tool-grid">
+        <button className={showDimensions ? "primary" : "secondary"} type="button" aria-pressed={showDimensions} onClick={onToggleDimensions}>
+          <Ruler size={15} />
+          {showDimensions ? "Hide dimensions" : "Show dimensions"}
+        </button>
+        <button
+          className={sectionPlane.enabled ? "primary" : "secondary"}
+          type="button"
+          aria-pressed={sectionPlane.enabled}
+          onClick={() => onSectionPlaneChange?.({ ...sectionPlane, enabled: !sectionPlane.enabled })}
+        >
+          <ScanLine size={15} />
+          {sectionPlane.enabled ? "Close section" : "Open section"}
+        </button>
+        <button className="secondary" type="button" onClick={onFitView}><Maximize2 size={15} />Fit view</button>
+        <button type="button" className={viewMode === "mesh" ? "primary" : "secondary"} aria-pressed={viewMode === "mesh"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}>
+          <Grid3x3 size={15} />
+          {viewMode === "mesh" ? "Hide mesh" : "Show mesh"}
+        </button>
+      </div>
+      {showDimensions && (
+        <div className="view-tool-detail">
+          <HelpLabel helpId="dimensions">Overall dimensions</HelpLabel>
+          <ModelDimensions displayModel={displayModel} />
+        </div>
+      )}
       {sectionPlane.enabled ? (
-        <div className="section-plane-controls">
+        <div className="section-plane-controls view-tool-detail">
+          <HelpLabel helpId="sectionPlane">Open section</HelpLabel>
           <div className="segmented" role="group" aria-label="Section plane axis">
             {(["x", "y", "z"] as const).map((axis) => (
               <button
@@ -244,10 +259,6 @@ export function ModelPanel({ project, displayModel, study, viewMode, showDimensi
         </button>
       </div>
       <p className="orientation-readout">{formatModelOrientation(displayModel)}</p>
-      <div className="button-grid">
-        <button className="secondary" onClick={onFitView}><Maximize2 size={16} />Fit view</button>
-        <button type="button" className={viewMode === "mesh" ? "primary" : "secondary"} aria-pressed={viewMode === "mesh"} onClick={() => onViewModeChange(viewMode === "mesh" ? "model" : "mesh")}><Eye size={16} />Toggle mesh</button>
-      </div>
       {!isBlankProject && !isUploadedProject && (
         <>
           <SectionTitle helpId="preconfigured">Preconfigured</SectionTitle>

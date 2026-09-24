@@ -42,7 +42,7 @@ img {
   overflow: auto;
   background:
     radial-gradient(ellipse 80% 50% at 50% 0%, rgba(77, 163, 255, 0.06), transparent 70%),
-    linear-gradient(#0b0f14, #080c10);
+    linear-gradient(var(--color-bg), color-mix(in srgb, var(--color-bg) 92%, #000));
   padding: var(--sp-5);
 }
 
@@ -195,8 +195,7 @@ img {
   background: rgba(17, 24, 33, 0.72);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
 }
 
 .start-menu-back:hover,
@@ -353,7 +352,7 @@ img {
 }
 
 .start-action.primary {
-  color: #06111e;
+  color: var(--color-on-accent);
   background: var(--color-accent);
   border-color: var(--color-accent);
 }
@@ -680,8 +679,7 @@ img {
   grid-template-columns: 1fr;
   gap: 3px;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
   line-height: 1.25;
 }
 
@@ -1115,8 +1113,7 @@ img {
 .material-list button small {
   margin-top: 3px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
 }
 
 .material-list-empty {
@@ -1344,7 +1341,6 @@ img {
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   text-overflow: ellipsis;
 }
@@ -1393,8 +1389,7 @@ img {
   background: var(--color-surface-2);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 
@@ -1935,7 +1930,7 @@ img {
 }
 
 .theme-light .topbar-action.running {
-  color: #06111e;
+  color: var(--color-text);
 }
 
 .workspace {
@@ -1960,6 +1955,9 @@ img {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
+  /* Text in the rail starts on the step icons' left edge (step padding + its
+     2px active border), not 8px outside it. */
+  padding-left: calc(var(--sp-15) + 2px);
 }
 
 .stepbar-eyebrow,
@@ -2056,10 +2054,10 @@ img {
   height: 18px;
 }
 
+/* Done reads from the glyph alone. Seven green-filled tiles made a finished
+   setup the loudest thing on screen and drowned the accent of the active step. */
 .step-icon.done {
   color: var(--color-success);
-  border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.08);
 }
 
 .step.active .step-icon {
@@ -2086,6 +2084,7 @@ img {
   justify-content: space-between;
   gap: var(--sp-15);
   min-width: 0;
+  padding-inline: calc(var(--sp-15) + 2px) var(--sp-15);
 }
 
 .stepbar-footer > .unit-switch {
@@ -2176,6 +2175,7 @@ img {
 
 .stepbar.collapsed .stepbar-header {
   justify-content: center;
+  padding-left: 0;
 }
 
 .stepbar.collapsed .stepbar-eyebrow,
@@ -2673,12 +2673,12 @@ img {
   min-width: 18px;
   padding: 1px 5px;
   color: var(--color-text-muted);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
   border: var(--border-thin);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: var(--fs-mini);
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
   line-height: var(--lh-tight);
   text-align: center;
 }
@@ -2731,8 +2731,8 @@ img {
   width: min(440px, calc(100vw - 24px));
   padding: 11px;
   color: var(--color-text);
-  background: rgba(11, 17, 24, 0.94);
-  border: var(--border-thin);
+  background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  border: var(--border-strong);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-panel);
   font-size: var(--fs-xs);
@@ -2775,44 +2775,6 @@ img {
 .field-tooltip > span:last-child {
   grid-column: 2;
   color: var(--color-text-muted);
-}
-
-.help-note {
-  display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) 22px;
-  align-items: center;
-  gap: var(--sp-25);
-  margin: 0 0 14px;
-  padding: var(--card-pad);
-  color: var(--color-text-muted);
-  background: var(--color-surface-2);
-  border: var(--border-thin);
-  border-radius: var(--card-radius);
-}
-
-.help-note--collapsed {
-  display: flex;
-  justify-content: flex-end;
-  margin: -4px 0 var(--sp-25);
-  padding: 0;
-  background: transparent;
-  border: 0;
-}
-
-.help-note strong,
-.help-note small {
-  display: block;
-}
-
-.help-note strong {
-  color: var(--color-text);
-  font-size: var(--fs-sm);
-}
-
-.help-note small {
-  margin-top: 2px;
-  font-size: var(--fs-xs);
-  line-height: 1.4;
 }
 
 .help-visual {
@@ -3512,7 +3474,7 @@ input {
   height: 20px;
   display: grid;
   place-items: center;
-  color: #06111e;
+  color: var(--color-on-accent);
   border: 1px solid var(--color-text-subtle);
   border-radius: 50%;
 }
@@ -3639,10 +3601,6 @@ input {
 
 /* Light-theme accent is dark (#0b63b6), so primary buttons need light text
    and a darkened (not lightened) hover to hold WCAG AA contrast. */
-.theme-light .primary {
-  color: #f8fbff;
-}
-
 .theme-light .primary:hover {
   background: color-mix(in srgb, var(--color-accent) 85%, #06111e);
 }
@@ -3874,6 +3832,10 @@ button:disabled {
 }
 
 .result-headline-item strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--sp-1);
   overflow-wrap: anywhere;
   min-width: 0;
   color: var(--color-text);
@@ -3885,6 +3847,14 @@ button:disabled {
 }
 
 /* A single headline figure gets the full width rather than a stranded half. */
+.result-headline-unit {
+  color: var(--color-text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0;
+}
+
 .result-headline:has(> .result-headline-item:only-child) {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -4037,6 +4007,7 @@ button:disabled {
 
 .failure-assessment {
   margin-top: 0;
+  margin-bottom: var(--sp-2);
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: var(--sp-25);
@@ -4277,17 +4248,17 @@ button:disabled {
 }
 
 .convergence-chart .chart-displacement {
-  stroke: #38bdf8;
+  stroke: var(--color-series-1);
   fill: var(--color-surface-2);
 }
 
 .convergence-chart .chart-stress {
-  stroke: #fb923c;
+  stroke: var(--color-series-2);
   fill: var(--color-surface-2);
 }
 
 .convergence-chart .chart-skipped {
-  stroke: #f87171;
+  stroke: var(--color-error);
   stroke-width: 2;
 }
 
@@ -4297,11 +4268,11 @@ button:disabled {
 }
 
 .convergence-chart .chart-displacement-label {
-  fill: #38bdf8;
+  fill: var(--color-series-1);
 }
 
 .convergence-chart .chart-stress-label {
-  fill: #fb923c;
+  fill: var(--color-series-2);
 }
 
 .convergence-rungs {
@@ -4423,6 +4394,10 @@ button:disabled {
   color: #39c8c8;
 }
 
+.theme-light .editable-summary .load-type-icon.pressure {
+  color: #0f766e;
+}
+
 .editable-summary .load-type-icon.gravity {
   color: var(--color-success);
 }
@@ -4443,7 +4418,6 @@ button:disabled {
   min-width: 0;
   color: var(--color-text-muted);
   font-size: var(--fs-xs);
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -4520,18 +4494,22 @@ input[aria-invalid="true"] {
 
 .check {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--sp-25);
   color: var(--color-text-muted);
   font-size: var(--fs-md);
+  line-height: var(--lh-tight);
 }
 
-.check > span {
+/* The tick box only. `.check > span` used to style every child span, so the
+   done state painted the label itself green-on-green (2026-09 refinement). */
+.check-mark {
+  flex: none;
   width: 18px;
   height: 18px;
   display: grid;
   place-items: center;
-  border: var(--border-thin);
+  border: var(--border-strong);
   border-radius: var(--radius-md);
 }
 
@@ -4539,17 +4517,49 @@ input[aria-invalid="true"] {
   color: var(--color-text);
 }
 
-.check.done > span {
+.check.done > .check-mark {
   color: var(--color-success);
-  background: rgba(34, 197, 94, 0.14);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
   border-color: var(--color-success);
 }
 
 .placement-chip {
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   margin-bottom: 14px;
+}
+
+.placement-field .placement-chip {
+  margin: 0;
+}
+
+/* Model step view tools: four peers in one grid instead of four lone rows. */
+.view-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.view-tool-grid button {
+  min-width: 0;
+  justify-content: flex-start;
+  padding-inline: var(--sp-25);
+}
+
+.view-tool-detail {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--gap-block);
+}
+
+.view-tool-detail > .field-label-with-help {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.view-tool-detail .dimension-box {
+  margin: 0;
 }
 
 .placement-chip.ready {
@@ -4597,6 +4607,56 @@ input[aria-invalid="true"] {
   line-height: 16px;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+/* Additional faces for multi-face supports and loads. */
+.face-picker {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.face-picker > legend {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  margin-bottom: var(--sp-15);
+}
+
+.face-picker-meta {
+  color: var(--color-text-subtle);
+  font-weight: var(--fw-regular);
+}
+
+.face-picker-list {
+  display: grid;
+  max-height: 176px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--color-surface-2);
+  border: var(--border-thin);
+  border-radius: var(--card-radius);
+}
+
+.face-picker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-25);
+  min-height: 32px;
+  padding: 0 var(--card-pad);
+  color: var(--color-text);
+  font-weight: var(--fw-regular);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.face-picker-row + .face-picker-row {
+  border-top: var(--border-thin);
+}
+
+.face-picker-row:hover {
+  background: var(--color-surface-hover);
 }
 
 .toggle {
@@ -4670,7 +4730,6 @@ input[aria-invalid="true"] {
 .concept-card small {
   margin-top: 2px;
   color: var(--color-text-muted);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -4766,7 +4825,6 @@ input[aria-invalid="true"] {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-15);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -4800,8 +4858,7 @@ input[aria-invalid="true"] {
   align-items: center;
   gap: 5px;
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--fs-mini);
+  font-size: var(--fs-xs);
   text-transform: lowercase;
   text-decoration: none;
 }
@@ -4974,7 +5031,6 @@ input[aria-invalid="true"] {
   background: rgba(11, 15, 20, 0.32);
   border: var(--border-thin);
   border-radius: var(--radius-md);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -5030,7 +5086,6 @@ input[aria-invalid="true"] {
 
 .tips-drawer-header strong {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
 }
@@ -5068,7 +5123,6 @@ input[aria-invalid="true"] {
 
 .shortcut-guide-header span {
   color: var(--color-text-subtle);
-  font-family: var(--font-mono);
   font-size: var(--fs-xs);
 }
 
@@ -5926,20 +5980,11 @@ input[aria-invalid="true"] {
   background: var(--color-error);
 }
 
-.check {
-  align-items: flex-start;
-}
-
-/* Override the 18px tick box that `.check > span` gives every child. */
-.check > .check-copy {
-  width: auto;
-  height: auto;
-  border: 0;
-  border-radius: 0;
+.check-copy {
   display: grid;
-  place-items: start;
   gap: 2px;
   min-width: 0;
+  padding-top: 1px;
 }
 
 .check-blockers {

@@ -25,7 +25,7 @@ import {
 
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 import type { RightPanelProps } from "./RightPanelProps";
-import { Panel, formatProbeReading } from "./PanelChrome";
+import { Panel, formatProbeReading, themedPortalRoot } from "./PanelChrome";
 import { STRESS_EXAGGERATION_COMMIT_DELAY_MS, stressComponentLabel } from "./RightPanelProps";
 import { Callout, Headline, HelpLabel, Info, SectionTitle, formatLoadCapacity, interpolatedFrameTimeSeconds, peakDisplacementFrame } from "./PanelChrome";
 export function ResultsPanel(props: RightPanelProps) {
@@ -327,7 +327,7 @@ function ResultExportMenu({ items }: { items: ResultExportItem[] }) {
             </button>
           ))}
         </div>,
-        document.body
+        themedPortalRoot(containerRef.current)
       )}
     </div>
   );

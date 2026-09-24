@@ -15,6 +15,14 @@ describe("app typeface", () => {
     }
   });
 
+  test("loads the family --font-mono declares, so values render alike on every platform", () => {
+    expect(tokens).toMatch(/--font-mono: 'IBM Plex Mono'/);
+    for (const weight of ["400", "500"]) {
+      const face = faces.find((block) => block.includes("'IBM Plex Mono'") && block.includes(`font-weight: ${weight};`) && block.includes(`ibm-plex-mono-latin-${weight}-normal.woff2`));
+      expect(face, `mono face for weight ${weight}`).toBeDefined();
+    }
+  });
+
   test("Greek faces are range-gated so they only download when a Greek glyph renders", () => {
     const greek = faces.filter((block) => block.includes("-greek-"));
     expect(greek).toHaveLength(3);

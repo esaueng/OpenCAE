@@ -517,7 +517,7 @@ describe("app CSS", () => {
     expect(css).not.toMatch(/\.panel-eyebrow,\n\.section-title \{/);
 
     // Card interiors resolve through the shared tokens.
-    for (const selector of [".help-note", ".result-probe-list", ".result-scale-controls",
+    for (const selector of [".result-probe-list", ".result-scale-controls",
       ".placement-chip", ".load-combination-row", ".shortcut-toggle"]) {
       expect(cssRule(selector), selector).toMatch(/padding:\s*var\(--card-pad\)/);
     }

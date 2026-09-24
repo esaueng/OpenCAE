@@ -43,6 +43,7 @@ export type SettingHelpId =
   | "modePhase"
   | "pinnedProbes"
   | "sectionPlane"
+  | "viewTools"
   | "resultFrame"
   | "loadCombinations"
   | "simulationProperties"
@@ -83,6 +84,11 @@ export const SETTING_HELP: Record<SettingHelpId, SettingHelp> = {
     title: "Pinned probes",
     body: "Click the result surface to pin a reading at that spot; up to 20 pins. Each pin re-reads whatever the panel is currently showing, so switching result mode, stress component, or frame updates every pinned number. Readings are interpolated between the nearest solved values rather than copied from a single node. You cannot place a pin while playback is running, and pins are cleared when the run, model, mesh, or variant changes.",
     visual: "results"
+  },
+  viewTools: {
+    title: "View tools",
+    body: "Display aids for inspecting the part. Show dimensions draws the overall bounding size in the viewer and lists it here, Open section clips the view with a movable plane, Fit view frames the whole model (shortcut H), and Show mesh draws the generated mesh once one exists. None of them change the model, the mesh, or any result.",
+    visual: "dimensions"
   },
   sectionPlane: {
     title: "Open section",
