@@ -654,15 +654,15 @@ export function WorkspaceApp({ initialAction = null, restoredWorkspace: provided
   useEffect(() => {
     if (!initialAction || initialActionConsumedRef.current) return;
     initialActionConsumedRef.current = true;
-    if (initialAction.type === "loadSample") {
-      void handleLoadSample(initialAction.sample, initialAction.analysisType);
-      return;
-    }
-    if (initialAction.type === "createProject") {
-      handleCreateProject();
-      return;
-    }
-    handleOpenProject(initialAction.file);
+    if (initialAction.type === "loadSample") void handleLoadSample(initialAction.sample, initialAction.analysisType);
+    else if (initialAction.type === "createProject") handleCreateProject();
+    else handleOpenProject(initialAction.file);
+    // The unmount cleanup above aborts the action this just started. Under
+    // StrictMode's simulated unmount that left the start screen dead, so let
+    // the remount start it again; a real unmount never remounts.
+    return () => {
+      initialActionConsumedRef.current = false;
+    };
   }, [initialAction]);
 
   useEffect(() => {
