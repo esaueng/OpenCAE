@@ -223,7 +223,7 @@ export function StartScreen({ onLoadSample, onCreateProject, onOpenProject, busy
         <a className="start-credit" href="https://esauengineering.com/" target="_blank" rel="noreferrer">
           Built by Esau Engineering
         </a>
-        <a className="start-github" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">github</a>
+        <a className="start-github" href="https://github.com/esaueng/OpenCAE" target="_blank" rel="noreferrer">GitHub</a>
       </footer>
     </main>
   );

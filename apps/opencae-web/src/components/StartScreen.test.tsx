@@ -18,6 +18,8 @@ describe("StartScreen", () => {
     expect(html).toContain('href="https://esauengineering.com/"');
     expect(html).toContain("Built by Esau Engineering");
     expect(html).toContain('href="https://github.com/esaueng/OpenCAE"');
+    // Same casing as the workspace status bar's GitHub link.
+    expect(html).toContain(">GitHub</a>");
     expect(html).toContain("Runs locally");
     expect(html).not.toContain("v0.1.0-mvp");
     expect(html).not.toContain("local mode");
