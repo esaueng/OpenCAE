@@ -164,6 +164,7 @@ describe("cloud retirement guard", () => {
 
   test("the retired infrastructure files stay deleted", () => {
     for (const retiredPath of [
+      "services/opencae-core-cloud",
       "services/openfea-core-cloud",
       "wrangler.containers.jsonc",
       "wrangler.local-first.jsonc",

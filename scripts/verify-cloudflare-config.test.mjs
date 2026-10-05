@@ -36,6 +36,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
   test("retired container and local-first wrangler variants stay deleted", () => {
     expect(existsSync(resolve(rootDir, "wrangler.containers.jsonc"))).toBe(false);
     expect(existsSync(resolve(rootDir, "wrangler.local-first.jsonc"))).toBe(false);
+    expect(existsSync(resolve(rootDir, "services/opencae-core-cloud"))).toBe(false);
     expect(existsSync(resolve(rootDir, "services/openfea-core-cloud"))).toBe(false);
     expect(existsSync(resolve(rootDir, "scripts/verify-runner-version.mjs"))).toBe(false);
   });
