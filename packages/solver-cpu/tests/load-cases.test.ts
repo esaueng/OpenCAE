@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { singleTetStaticFixture } from "@opencae/examples";
-import type { OpenCAEModelJson } from "@opencae/core";
+import { singleTetStaticFixture } from "@openfea/examples";
+import type { OpenFEAModelJson } from "@openfea/core";
 import {
   combineStaticLinearTetResults,
   computePrincipalStressMeasures,
@@ -9,7 +9,7 @@ import {
   type SolveProgressEvent
 } from "../src";
 
-function caseModel(): OpenCAEModelJson {
+function caseModel(): OpenFEAModelJson {
   return {
     ...singleTetStaticFixture,
     loads: [

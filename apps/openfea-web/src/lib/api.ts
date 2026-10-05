@@ -1,0 +1,1204 @@
+import { finiteExtrema } from "@openfea/core";
+import { MAX_EMBEDDED_MODEL_BYTES, MAX_VISUAL_MESH_BYTES, isStructuralResultSummary } from "@openfea/schema";
+import type { AnalysisMesh, CustomMaterial, DisplayModel, DynamicSolverSettings, MeshConvergenceRecord, MeshQuality, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunVariantRef, RunVariantResult, Study, StudyRun } from "@openfea/schema";
+import type { StepGeometryInspection, StepGeometryRepairReport } from "@openfea/mesh-intake";
+import { assertCompatibleManufacturingProcess, resolveMaterial } from "@openfea/materials";
+import { unitsForLoadType, type LoadApplicationPoint, type LoadDirection, type LoadDirectionLabel, type LoadType, type PayloadLoadMetadata } from "../loadPreview";
+import { nextLoadLabel, nextSupportLabel } from "../supportLabels";
+import type { PayloadObjectSelection } from "../workspaceViewTypes";
+import { embedUploadedModelFile, type EmbeddedModelFile, type LocalResultBundle, type SolverSurfaceMesh } from "../projectFile";
+import { createLocalBlankProject, createLocalSampleProject, createLocalUploadResponse, openLocalProjectPayload } from "../localProjectFactory";
+import { peekStepSurfacePreview } from "../stepSurfacePreviewFallback";
+import type { SolveProgressEvent } from "@openfea/solve-pipeline";
+import type { ResultViewCaptures } from "../report/captureResultViews";
+import { isCancelledSolveError, startLocalSolve } from "../workers/solveWorkerClient";
+import { deleteLocalRunVariantResults, loadLocalRunResults, loadLocalRunVariantResult, saveLocalRunResults, saveLocalRunVariantResult } from "./localResultsStore";
+import { cancelWasmMeshing, canMeshStudyOnDemand, generateWasmMeshForStudy, type WasmMeshPhaseProgress } from "./wasmMeshing";
+import { coreMeshStatisticsForStudy, geometrySourceForStudy, hasActualCoreVolumeMesh, isComplexGeometry, normalizeSolverBackend, openFeaCoreEligibility, OPENFEA_CORE_MESH_REQUIRED_REASON, type NormalizedBrowserSolverBackend } from "../workers/openfeaCoreSolve";
+import { runStaticMeshConvergence, type ConvergenceProbe } from "../meshConvergence";
+import { SUPPORTED_GEOMETRY_FORMAT_LABEL, isSupportedGeometryExtension } from "../geometryFormats";
+import {
+  meshSummaryForPreset,
+  meshTargetSizeMmForPreset,
+  PROCEDURAL_MESH_SIZE_MM
+} from "./meshEstimates";
+import {
+  createLocalRunStore,
+  emitLocalRunEvent,
+  finishLocalRun,
+  subscribeToLocalRunRecord,
+  syntheticRunErrorEvent,
+  type LocalRunRecord
+} from "./localRunStore";
+
+export interface SampleProjectResponse {
+  message?: string;
+  /** A consequence the user must act on (e.g. a saved mesh that was not restored); shown as a workspace notice, not only logged. */
+  notice?: string;
+  project: Project;
+  displayModel: DisplayModel;
+  results?: LocalResultBundle;
+}
+
+export type StepGeometryMetadata = {
+  status: "solid" | "repairable" | "unrepairable" | "invalid" | "unchecked" | "repaired";
+  inspection?: StepGeometryInspection;
+  repair?: StepGeometryRepairReport;
+  message?: string;
+};
+
+export const MAX_LOCAL_PROJECT_FILE_BYTES = 96 * 1024 * 1024;
+
+export type ModelMutationOptions = {
+  signal?: AbortSignal;
+  /** Rechecked after expensive CAD work and immediately before persistence. */
+  isCurrent?: () => boolean;
+  /** Retained project-file mutation identity; local writes are guarded by isCurrent. */
+  clientId?: string;
+  generation?: number;
+};
+
+export type SampleModelId = "bracket" | "plate" | "cantilever";
+export type SampleAnalysisType = "static_stress" | "dynamic_structural" | "modal_analysis" | "steady_state_thermal";
+
+export interface ResultsResponse {
+  owner?: { projectId: string; studyId: string };
+  summary: ResultSummary;
+  fields: ResultField[];
+  variants?: RunVariantResult[];
+  variantRefs?: RunVariantRef[];
+  activeVariantId?: string;
+  surfaceMesh?: SolverSurfaceMesh;
+  /** Solver diagnostics entries (e.g. core-solve-diagnostics with real mesh counts). */
+  diagnostics?: unknown[];
+  artifacts?: {
+    meshConnectivity?: { connectedComponents: number };
+    meshStatistics?: { nodes: number; elements: number; totalDofs?: number; constrainedDofs?: number; freeDofs?: number; representativeElementSizeMm?: number };
+  };
+  reportCaptures?: ResultViewCaptures;
+}
+
+export interface RunSimulationOptions {
+  onRunStatus?: (message: string) => void;
+  resultRenderBounds?: ResultRenderBounds | null;
+  customMaterials?: CustomMaterial[];
+  /**
+   * Called when a run had to mesh its geometry first (A-M4 local-first
+   * meshing): receives the study with the freshly stored mesh artifact so the
+   * caller can persist it (same shape generateMesh returns).
+   */
+  onStudyMeshed?: (study: Study) => void;
+}
+
+export interface RunMeshConvergenceOptions {
+  customMaterials?: CustomMaterial[];
+  onProgress?: (message: string) => void;
+}
+
+export interface GenerateMeshOptions {
+  /** Keep isolated workflows, such as convergence ladders, from mutating the API-owned study. */
+  localOnly?: boolean;
+  /**
+   * Allow the quarantined preset-estimate fallback for preview/sample
+   * geometry when wasm meshing is unavailable. Default off: production STEP
+   * meshing throws instead of marking a fake estimate complete.
+   */
+  allowEstimateFallback?: boolean;
+}
+
+const localResultsByRunId = new Map<string, ResultsResponse>();
+const RUN_BOOKKEEPING_LIMIT = 4;
+const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+/** Prefix of retired client-dispatched cloud runs; kept only to recognize historical run ids from old autosaves. */
+const HISTORICAL_CLOUD_RUN_ID_PREFIX = "run-cloud-core-";
+const HISTORICAL_CLOUD_RUN_MESSAGE =
+  "This run was solved on the retired OpenCAE Core Cloud. Its results are only available if they were saved with the project; re-run the simulation to solve locally in your browser.";
+const localRunStore = createLocalRunStore(RUN_BOOKKEEPING_LIMIT);
+const localRunsByRunId = localRunStore.records;
+const createLocalRunRecord = localRunStore.createRecord;
+const activeLocalRun = localRunStore.activeRun;
+
+function setCappedRunEntry<T>(cache: Map<string, T>, runId: string, value: T, limit = RUN_BOOKKEEPING_LIMIT): void {
+  cache.delete(runId);
+  cache.set(runId, value);
+  while (cache.size > limit) {
+    const oldestRunId = cache.keys().next().value as string | undefined;
+    if (oldestRunId === undefined) return;
+    cache.delete(oldestRunId);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Local run controller: real, solver-driven run events for in-browser solves.
+// Replaces the former pre-timed synthetic event scripts (honest results: every
+// progress event now reflects actual solver phase reports, elapsed time is
+// wall-clock, and estimatedRemainingMs is only present where it is derivable).
+// Run-record storage, event emission, terminal transitions, and the replay
+// adapter live in ./localRunStore; this module keeps progress mapping.
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps real solver progress hooks onto the run progress contract:
+ * assemble 0-30%, solve/frames 30-90% (stress recovery 85-90%), postprocess
+ * 90-100%. estimatedRemainingMs is only emitted for dynamic frame integration,
+ * where a per-frame pace is measurable; CG iteration counts admit no honest ETA.
+ *
+ * Runs that meshed first (A-M4) reserve 0-20% for real meshing phases, so
+ * their solve progress is compressed into offset..100 (progressOffset = 20).
+ */
+function handleLocalSolveProgress(record: LocalRunRecord, progress: SolveProgressEvent, progressOffset = 0): void {
+  if (record.status !== "running") return;
+  const fraction = progress.total > 0 ? Math.min(progress.completed / progress.total, 1) : 0;
+  let percent: number;
+  let message: string;
+  let estimatedRemainingMs: number | undefined;
+  if (progress.phase === "assemble") {
+    percent = 30 * fraction;
+    message = `Assembling OpenFEA Core stiffness matrix (${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()} elements).`;
+  } else if (progress.phase === "frames") {
+    percent = 30 + 60 * fraction;
+    message = `Writing dynamic result frames ${progress.completed.toLocaleString()} / ${progress.total.toLocaleString()}.`;
+    const elapsedMs = Date.now() - record.startedAtMs;
+    if (progress.completed > 0 && progress.total > progress.completed) {
+      estimatedRemainingMs = (elapsedMs / progress.completed) * (progress.total - progress.completed);
+    } else if (progress.total <= progress.completed) {
+      estimatedRemainingMs = 0;
+    }
+  } else if (progress.phase === "recover") {
+    percent = 85 + 5 * fraction;
+    message = "Recovering OpenFEA Core element stresses.";
+  } else {
+    percent = 30 + 55 * fraction;
+    message = progress.iteration !== undefined
+      ? `Solving OpenFEA Core sparse system (CG iteration ${progress.iteration.toLocaleString()}${
+          progress.relativeResidual !== undefined && Number.isFinite(progress.relativeResidual)
+            ? `, residual ${progress.relativeResidual.toExponential(1)}`
+            : ""
+        }).`
+      : "Solving OpenFEA Core sparse system.";
+  }
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: progressOffset + percent * (100 - progressOffset) / 100,
+    message,
+    ...(estimatedRemainingMs !== undefined ? { estimatedRemainingMs } : {})
+  });
+}
+
+/**
+ * Persist a completed local result bundle for reload restore. Failures are
+ * never silent: they surface as a visible warning diagnostic on the result
+ * summary (and a console warning).
+ */
+async function persistLocalRunResults(runId: string, results: ResultsResponse): Promise<ResultsResponse> {
+  try {
+    await saveLocalRunResults(runId, results);
+    return results;
+  } catch (error) {
+    const message = messageFromUnknownError(error) || "Browser storage is unavailable; these results will not survive a reload.";
+    console.warn(`[OpenFEA] ${message}`);
+    return {
+      ...results,
+      summary: {
+        ...results.summary,
+        diagnostics: [
+          ...(results.summary.diagnostics ?? []),
+          {
+            id: "local-results-persistence",
+            severity: "warning" as const,
+            source: "local_job" as const,
+            message: `Results computed successfully but could not be saved for reload: ${message}`,
+            suggestedActions: []
+          }
+        ]
+      }
+    };
+  }
+}
+
+export async function loadSampleProject(sample: SampleModelId = "bracket", analysisType: SampleAnalysisType = "static_stress"): Promise<SampleProjectResponse> {
+  return createLocalSampleProject(sample, analysisType);
+}
+
+export async function createProject(): Promise<SampleProjectResponse> {
+  return createLocalBlankProject();
+}
+
+export async function importLocalProject(file: File): Promise<SampleProjectResponse> {
+  if (file.size > MAX_LOCAL_PROJECT_FILE_BYTES) {
+    throw new Error("The selected OpenFEA project exceeds the 96 MiB local import limit.");
+  }
+  const text = await file.text();
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error("The selected file is not a valid OpenFEA project file.");
+  }
+  return openLocalProjectPayload(payload);
+}
+
+export async function uploadModel(
+  projectId: string,
+  file: File,
+  currentProject?: Project,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<SampleProjectResponse> {
+  return uploadModelWithGeometry(projectId, file, currentProject, undefined, mutationOptions);
+}
+
+async function uploadModelWithGeometry(
+  projectId: string,
+  file: File,
+  currentProject?: Project,
+  knownStepGeometry?: StepGeometryMetadata,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<SampleProjectResponse> {
+  assertCurrentModelMutation(mutationOptions);
+  const extension = file.name.trim().split(".").pop()?.toLowerCase() ?? "";
+  if (!isSupportedGeometryExtension(extension)) {
+    throw new Error(`Unsupported geometry format. Supported uploads: ${SUPPORTED_GEOMETRY_FORMAT_LABEL}.`);
+  }
+  const uploadLimit = extension === "stl" || extension === "obj" ? MAX_VISUAL_MESH_BYTES : MAX_EMBEDDED_MODEL_BYTES;
+  if (file.size <= 0 || file.size > uploadLimit) {
+    throw new Error(`CAD and mesh uploads must be between 1 byte and ${uploadLimit / (1024 * 1024)} MiB for this format.`);
+  }
+  const contentBase64 = await fileToBase64(file);
+  assertCurrentModelMutation(mutationOptions);
+  const embeddedModel: EmbeddedModelFile = {
+    filename: file.name,
+    contentType: file.type || "application/octet-stream",
+    size: file.size,
+    contentBase64
+  };
+  const { faces: stepDisplayFaces, dimensions: stepDimensions } = await stepDisplayFacesForUpload(file.name, contentBase64);
+  assertCurrentModelMutation(mutationOptions);
+  const stepGeometry = knownStepGeometry ?? await inspectStepGeometryForUpload(file.name, contentBase64);
+  assertCurrentModelMutation(mutationOptions);
+  void projectId;
+  if (!currentProject) throw new Error("Could not upload model without an open project.");
+  const data = createLocalUploadResponse(currentProject, embeddedModel, undefined, { stepDisplayFaces, stepDimensions });
+  let nextProject = embedUploadedModelFile(data.project, embeddedModel);
+  if (stepGeometry) nextProject = attachStepGeometryMetadata(nextProject, embeddedModel.filename, stepGeometry);
+  const notice = stepGeometryUploadNotice(stepGeometry);
+  return {
+    ...data,
+    project: nextProject,
+    message: [data.message, notice].filter(Boolean).join(" ")
+  };
+}
+
+/**
+ * Export a healed STEP through Gmsh, then feed those bytes back through the
+ * normal replacement path. Re-importing intentionally resets face-bound
+ * setup because healing/capping can renumber B-rep faces.
+ */
+export async function repairUploadedStepModel(
+  projectId: string,
+  currentProject: Project,
+  mutationOptions: ModelMutationOptions = {}
+): Promise<SampleProjectResponse> {
+  assertCurrentModelMutation(mutationOptions);
+  const embeddedModel = embeddedStepModel(currentProject);
+  if (!embeddedModel) throw new Error("The uploaded STEP bytes are unavailable. Re-upload the model before repairing it.");
+  if (import.meta.env.VITE_WASM_MESHING === "0" || typeof Worker === "undefined") {
+    throw new Error("STEP repair is unavailable in this browser build.");
+  }
+  const client = await import("../workers/meshWorkerClient");
+  const repaired = await client.repairStepFileInWorker({
+    stepContent: base64ToArrayBuffer(embeddedModel.contentBase64)
+  });
+  // Do not let an old repair persist over a model/project selected while the
+  // worker was healing the B-rep. The caller's generation guard changes at
+  // action initiation, before the newer upload has to finish.
+  assertCurrentModelMutation(mutationOptions);
+  const repairedBuffer = repaired.stepContent.slice().buffer as ArrayBuffer;
+  const repairedFile = new File([repairedBuffer], embeddedModel.filename, { type: embeddedModel.contentType || "model/step" });
+  const response = await uploadModelWithGeometry(projectId, repairedFile, currentProject, {
+    status: "repaired",
+    inspection: repaired.inspection,
+    repair: repaired.repair,
+    message: "Open surfaces were healed into a closed solid. Review the repaired shape before simulation."
+  }, mutationOptions);
+  return {
+    ...response,
+    message: `Open surfaces fixed (${repaired.repair.method === "heal_and_cap" ? `${repaired.repair.cappedSurfaceCount} boundary patch${repaired.repair.cappedSurfaceCount === 1 ? "" : "es"} added` : "faces sewn"}). Material, supports, loads, mesh, and prior runs were reset because repaired face IDs can change.`
+  };
+}
+
+async function inspectStepGeometryForUpload(filename: string, contentBase64: string): Promise<StepGeometryMetadata | undefined> {
+  const extension = filename.trim().split(".").pop()?.toLowerCase();
+  if (extension !== "step" && extension !== "stp") return undefined;
+  if (import.meta.env.VITE_WASM_MESHING === "0" || typeof Worker === "undefined") {
+    return { status: "unchecked", message: "STEP topology could not be checked in this browser build." };
+  }
+  try {
+    const cached = peekStepSurfacePreview(contentBase64);
+    if (cached) return stepGeometryMetadataFromInspection(cached.inspection);
+    const client = await import("../workers/meshWorkerClient");
+    const { inspection } = await client.inspectStepFileInWorker({ stepContent: base64ToArrayBuffer(contentBase64) });
+    return stepGeometryMetadataFromInspection(inspection);
+  } catch (error) {
+    return {
+      status: "unchecked",
+      message: `STEP topology check was unavailable: ${messageFromUnknownError(error) || "unknown error"}`
+    };
+  }
+}
+
+export function stepGeometryMetadataFromInspection(
+  inspection: StepGeometryInspection
+): StepGeometryMetadata {
+  const status: StepGeometryMetadata["status"] = inspection.repairable || inspection.status === "open_shell"
+    ? "repairable"
+    : inspection.status === "solid"
+      ? "solid"
+      : inspection.status === "invalid"
+        ? "invalid"
+        : "unrepairable";
+  return { status, inspection, ...(inspection.message ? { message: inspection.message } : {}) };
+}
+
+function attachStepGeometryMetadata(project: Project, filename: string, stepGeometry: StepGeometryMetadata): Project {
+  const exactIndex = project.geometryFiles.findIndex((geometry) => geometry.filename === filename && geometry.metadata.source === "local-upload");
+  const fallbackIndex = project.geometryFiles.findIndex((geometry) => geometry.metadata.source === "local-upload");
+  const targetIndex = exactIndex >= 0 ? exactIndex : fallbackIndex;
+  if (targetIndex < 0) return project;
+  return {
+    ...project,
+    geometryFiles: project.geometryFiles.map((geometry, index) =>
+      index === targetIndex
+        ? { ...geometry, metadata: { ...geometry.metadata, stepGeometry } }
+        : geometry
+    )
+  };
+}
+
+function stepGeometryUploadNotice(stepGeometry: StepGeometryMetadata | undefined): string {
+  if (stepGeometry?.status === "repairable") return "Open STEP surfaces were detected. Use Fix model before simulation.";
+  if (stepGeometry?.status === "unrepairable") return "Open STEP surfaces were detected, but automatic repair could not create a safe solid.";
+  if (stepGeometry?.status === "invalid") return stepGeometry.message ?? "The STEP topology is invalid.";
+  return "";
+}
+
+function embeddedStepModel(project: Pick<Project, "geometryFiles">): EmbeddedModelFile | null {
+  const geometry = project.geometryFiles.find((candidate) => candidate.metadata.source === "local-upload");
+  const value = geometry?.metadata.embeddedModel;
+  if (!value || typeof value !== "object") return null;
+  const embedded = value as Partial<EmbeddedModelFile>;
+  const extension = embedded.filename?.trim().split(".").pop()?.toLowerCase();
+  if (
+    (extension !== "step" && extension !== "stp") ||
+    typeof embedded.filename !== "string" ||
+    typeof embedded.contentType !== "string" ||
+    typeof embedded.size !== "number" ||
+    typeof embedded.contentBase64 !== "string" ||
+    !embedded.contentBase64
+  ) return null;
+  return embedded as EmbeddedModelFile;
+}
+
+/**
+ * Real B-rep faces for STEP uploads (plan A-M3), so supports/loads target
+ * actual geometry instead of generic box-face placeholders. On by default
+ * (A-M4) with the flag check outside the dynamic import so VITE_WASM_MESHING=0
+ * opt-out builds tree-shake the whole path; any registry failure falls back
+ * to the legacy generic faces.
+ */
+async function stepDisplayFacesForUpload(filename: string, contentBase64: string): Promise<{ faces?: DisplayModel["faces"]; dimensions?: NonNullable<DisplayModel["dimensions"]> }> {
+  if (import.meta.env.VITE_WASM_MESHING !== "0") {
+    const extension = filename.trim().split(".").pop()?.toLowerCase();
+    if (extension !== "step" && extension !== "stp") return {};
+    try {
+      const stepFaces = await import("../stepFaces");
+      const registry = await stepFaces.stepFaceRegistryFromBase64(contentBase64);
+      return {
+        faces: registry.displayFaces.length ? registry.displayFaces : undefined,
+        // Measured here, not by the viewer, so a run can start before the
+        // 3D view has painted (2026-09 review D27).
+        dimensions: stepFaces.stepRegistryDimensions(registry)
+      };
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+export async function renameProject(projectId: string, name: string, currentProject?: Project): Promise<{ project: Project; message: string }> {
+  void projectId;
+  if (!currentProject) throw new Error("Could not rename project without an open project.");
+  return {
+    project: {
+      ...currentProject,
+      name,
+      updatedAt: new Date().toISOString()
+    },
+    message: "Project renamed locally."
+  };
+}
+
+export async function generateMesh(studyId: string, preset: MeshQuality, currentStudy: Study, displayModel?: DisplayModel, onProgress?: (message: string) => void, onPhaseProgress?: (progress: WasmMeshPhaseProgress) => void, options: GenerateMeshOptions = {}): Promise<{ study: Study; message: string }> {
+  // In-browser gmsh-wasm meshing (production default since A-M4). Returns
+  // null in opt-out builds or when the geometry has no wasm-meshable source.
+  // Estimate fallback is quarantined behind options.allowEstimateFallback and
+  // only for preview/sample geometry: uploaded STEP failures and typed
+  // quality/topology rejections are permanent and always surface instead of
+  // marking a fake estimate complete and failing again at Run.
+  if (currentStudy) {
+    try {
+      const presetStudy: Study = { ...currentStudy, meshSettings: { ...currentStudy.meshSettings, preset } };
+      const geometry = geometrySourceForStudy(presetStudy, displayModel);
+      const wasmMeshed = await generateWasmMeshForStudy({
+        preset,
+        study: presetStudy,
+        displayModel,
+        geometry: geometry ? geometryWithMeshPreset(geometry, presetStudy) : null,
+        meshSizeMm: meshTargetSizeMmForPreset(preset),
+        onProgress,
+        onPhaseProgress
+      });
+      if (wasmMeshed) return wasmMeshed;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      if (
+        displayModel?.nativeCad?.format === "step" ||
+        (error instanceof Error && (error.name === "MeshQualityError" || error.name === "StepGeometryError"))
+      ) throw error;
+      if (!options.allowEstimateFallback) throw error;
+      onProgress?.(`In-browser meshing failed (${messageFromUnknownError(error) || "unknown error"}). Falling back to preset estimates.`);
+    }
+  }
+  if (!options.allowEstimateFallback && !currentStudy) throw new Error("Could not generate mesh without an open study.");
+  if (!options.allowEstimateFallback) {
+    throw new Error("In-browser meshing is unavailable for this geometry (opt-out build or preview-only format).");
+  }
+  const localFallback = () => {
+    if (!currentStudy) throw new Error("Could not generate mesh without an open study.");
+    const analysisMesh = displayModel ? analysisMeshForDisplayModel(displayModel, preset) : undefined;
+    const summary = meshSummaryForPreset(preset, analysisMesh);
+    return {
+      study: {
+        ...currentStudy,
+        meshSettings: {
+          preset,
+          status: "complete" as const,
+          meshRef: `${currentStudy.projectId}/mesh/mesh-summary.json`,
+          summary
+        }
+      },
+      message: "Mesh generated locally."
+    };
+  };
+  void studyId;
+  void options.localOnly;
+  return localFallback();
+}
+
+export async function runMeshConvergence(
+  currentStudy: Study,
+  caseId: string,
+  probe: ConvergenceProbe,
+  displayModel: DisplayModel,
+  options: RunMeshConvergenceOptions = {}
+): Promise<MeshConvergenceRecord> {
+  if (currentStudy.type !== "static_stress") throw new Error("Mesh convergence is available for static load cases only.");
+  return runStaticMeshConvergence({
+    study: currentStudy,
+    caseId,
+    probe,
+    onProgress: (preset, phase) => options.onProgress?.(`${capitalizeWord(preset)} convergence rung: ${phase}.`),
+    prepareMesh: async (preset, isolatedStudy) => {
+      const generated = await generateMesh(
+        isolatedStudy.id,
+        preset,
+        isolatedStudy,
+        displayModel,
+        options.onProgress,
+        undefined,
+        { localOnly: true, allowEstimateFallback: true }
+      );
+      if (generated.study.type !== "static_stress") throw new Error("Convergence meshing changed the static study type unexpectedly.");
+      const coreStatistics = coreMeshStatisticsForStudy(generated.study, displayModel, options.customMaterials);
+      const density = generated.study.meshSettings.summary?.density;
+      const actualMeshSizeMm = finitePositiveNumber(density?.actualMeshSizeMm) ?? coreStatistics.representativeElementSizeMm;
+      return {
+        study: generated.study,
+        statistics: {
+          nodes: coreStatistics.nodes,
+          elements: coreStatistics.elements,
+          totalDofs: coreStatistics.totalDofs,
+          freeDofs: coreStatistics.freeDofs,
+          actualMeshSizeMm
+        }
+      };
+    },
+    solve: async (isolatedStudy, preset) => {
+      const runId = `run-convergence-${preset}-${randomUuid()}`;
+      const handle = startLocalSolve(
+        { runId, study: studyWithLocalBackend(isolatedStudy), displayModel, customMaterials: options.customMaterials },
+        (event) => options.onProgress?.(`${capitalizeWord(preset)} solve: ${event.phase}.`)
+      );
+      const { result } = await handle.completion;
+      return result;
+    }
+  });
+}
+
+export async function assignMaterial(
+  studyId: string,
+  materialId: string,
+  parameters: Record<string, unknown> = {},
+  currentStudy: Study,
+  customMaterials: readonly CustomMaterial[] = []
+): Promise<{ study: Study; message: string }> {
+  resolveMaterial(materialId, customMaterials);
+  if (parameters.manufacturingProcessId !== undefined) {
+    assertCompatibleManufacturingProcess(materialId, parameters.manufacturingProcessId, customMaterials);
+  }
+  void studyId;
+  if (!currentStudy) throw new Error("Could not assign material without an open study.");
+  const bodySelection = currentStudy.namedSelections.find((selection) => selection.entityType === "body");
+  const selectionRef = bodySelection?.id ?? currentStudy.geometryScope[0]?.entityId ?? "selection-body-local";
+  return {
+    study: {
+      ...currentStudy,
+      materialAssignments: [{
+        id: "assign-material-current",
+        materialId,
+        selectionRef,
+        parameters,
+        status: "complete" as const
+      }]
+    },
+    message: `Material assigned to ${bodySelection?.name ?? "model"}.`
+  };
+}
+
+export async function addSupport(studyId: string, selectionRef: string | undefined, currentStudy: Study): Promise<{ study: Study; message: string }> {
+  void studyId;
+  if (!currentStudy) throw new Error("Could not add support without an open study.");
+  return {
+    study: {
+      ...currentStudy,
+      constraints: [
+        ...currentStudy.constraints,
+        {
+          id: `constraint-${crypto.randomUUID()}`,
+          type: "fixed" as const,
+          selectionRef: selectionRef ?? currentStudy.namedSelections.find((selection) => selection.entityType === "face")?.id ?? "selection-fixed-face",
+          parameters: { label: nextSupportLabel(currentStudy.constraints, "fixed") },
+          status: "complete" as const
+        }
+      ]
+    },
+    message: "Fixed support added."
+  };
+}
+
+export async function updateStudy(studyId: string, patch: Partial<Study>, message = "Study updated.", currentStudy: Study): Promise<{ study: Study; message: string }> {
+  void studyId;
+  if (!currentStudy) throw new Error("Could not update study without an open study.");
+  return { study: { ...currentStudy, ...patch } as Study, message };
+}
+
+export async function addLoad(studyId: string, type: LoadType, value: number, selectionRef: string, direction: LoadDirection, applicationPoint: LoadApplicationPoint | null | undefined, payloadObject: PayloadObjectSelection | null | undefined, currentStudy: Study, payloadMetadata: PayloadLoadMetadata = {}, directionMode?: LoadDirectionLabel, extras?: { selectionRefs?: string[] }): Promise<{ study: Study; message: string }> {
+  void studyId;
+  if (!currentStudy) throw new Error("Could not add load without an open study.");
+  const loadId = `load-${crypto.randomUUID()}`;
+  const structuralStudy = currentStudy.type === "static_stress" || currentStudy.type === "dynamic_structural" ? currentStudy : null;
+  const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, loadId) : undefined;
+  // Multi-face loads (Decision 2): extras land on selectionRefs; the metadata
+  // copy is stripped so parameters stay parseable scalars.
+  const { selectionRefs: metadataRefs, ...cleanMetadata } = payloadMetadata;
+  const extraRefs = [...new Set([...(extras?.selectionRefs ?? []), ...(metadataRefs ?? [])].filter((ref) => ref && ref !== selectionRef))];
+  return {
+    study: {
+      ...currentStudy,
+      loads: [
+        ...currentStudy.loads,
+        {
+          id: loadId,
+          type,
+          selectionRef,
+          ...(extraRefs.length ? { selectionRefs: extraRefs } : {}),
+          parameters: { label: nextLoadLabel(currentStudy.loads), value, units: unitsForLoadType(type), direction, ...(directionMode ? { directionMode } : {}), ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? cleanMetadata : {}) },
+          status: "complete" as const
+        }
+      ],
+      ...(loadCases ? { loadCases } : {})
+    },
+    message: extraRefs.length ? `Load added on ${extraRefs.length + 1} faces.` : "Load added."
+  };
+}
+
+function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>, loadId: string) {
+  const cases = study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+  return cases.map((loadCase, index) => index === 0 ? { ...loadCase, loadIds: [...loadCase.loadIds, loadId] } : loadCase);
+}
+
+export async function runSimulation(studyId: string, currentStudy: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): Promise<{ run: { id: string }; streamUrl: string; message: string }> {
+  // B4a: every run executes locally in the browser (complex geometry without
+  // a stored mesh artifact is wasm-meshed first when this build/browser can).
+  // The legacy server-dispatched run branch is gone: since B3
+  // no reachable caller runs without the open study.
+  void studyId;
+  if (!currentStudy) throw new Error("runSimulation requires the open study; server-dispatched runs were removed.");
+  // Local runs never leave the browser. Stamp the resolved backend onto the
+  // run's study copy so the solve worker's explicit-local guard sees the
+  // routing decision; the persisted study keeps the user's "auto" choice.
+  return runSimulationLocally(studyWithLocalBackend(currentStudy), displayModel, options);
+}
+
+function studyWithLocalBackend(study: Study): Study {
+  if (study.solverSettings.backend === "opencae_core_local") return study;
+  // The identical-looking branches keep the static/dynamic study union narrowed
+  // so each spread pairs solverSettings with its own study variant.
+  if (study.type === "dynamic_structural") return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  if (study.type === "modal_analysis") return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+  return { ...study, solverSettings: { ...study.solverSettings, backend: "opencae_core_local" } };
+}
+
+export async function getResults(runId: string, expectedOwner?: ResultsResponse["owner"]): Promise<ResultsResponse> {
+  const localResults = localResultsByRunId.get(runId);
+  if (localResults) return resultsForOwner(localResults, expectedOwner);
+  // Local run ids never exist server-side; restore from the browser store
+  // (post-reload) or fail with a clear reason instead of a confusing 404.
+  if (runId.startsWith("run-local-")) return restoreLocalRunResults(runId, expectedOwner);
+  // Historical cloud runs (pre-B4a autosaves): the client cloud path is gone,
+  // so never fetch the dead endpoints — fail with an honest explanation.
+  if (runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX)) throw new Error(HISTORICAL_CLOUD_RUN_MESSAGE);
+  throw new Error("Results for this run are not available in browser storage. Re-run the simulation locally.");
+}
+
+async function restoreLocalRunResults(runId: string, expectedOwner?: ResultsResponse["owner"]): Promise<ResultsResponse> {
+  let stored: ResultsResponse | null;
+  try {
+    stored = await loadLocalRunResults<ResultsResponse>(runId);
+  } catch (error) {
+    throw new Error(`Local results for this run could not be restored: ${messageFromUnknownError(error) || "browser storage unavailable."}`);
+  }
+  if (!stored) throw new Error("Results for this local run are no longer available in this browser (storage cleared or run pruned). Re-run the simulation.");
+  const results = resultsForOwner(withFieldRunIds(runId, stored), expectedOwner);
+  setCappedRunEntry(localResultsByRunId, runId, results);
+  return results;
+}
+
+function resultsForOwner(results: ResultsResponse, expectedOwner?: ResultsResponse["owner"]): ResultsResponse {
+  if (!expectedOwner) return results;
+  if (results.owner?.projectId !== expectedOwner.projectId || results.owner.studyId !== expectedOwner.studyId) {
+    throw new Error("Stored results belong to a different project or analysis. Re-run the simulation for the current project.");
+  }
+  return results;
+}
+
+export function withReportCaptures(results: ResultsResponse, reportCaptures: ResultViewCaptures): ResultsResponse {
+  return { ...results, reportCaptures };
+}
+
+export async function saveRunReportCaptures(runId: string, reportCaptures: ResultViewCaptures): Promise<void> {
+  let results = localResultsByRunId.get(runId);
+  if (!results) results = await loadLocalRunResults<ResultsResponse>(runId) ?? undefined;
+  if (!results) throw new Error("Simulation results are no longer available; report images could not be saved.");
+  const next = withReportCaptures(results, reportCaptures);
+  await saveLocalRunResults(runId, next);
+  setCappedRunEntry(localResultsByRunId, runId, next);
+}
+
+// Deployed Core Cloud runners omit runId on result fields; the schema (and
+// autosave restore) requires it, so stamp the owning run before use.
+export function withFieldRunIds(runId: string, results: ResultsResponse): ResultsResponse {
+  const stampFields = (fields: ResultField[], variantId?: string) => fields.map((field) => ({
+    ...field,
+    // A result bundle belongs to this run even if an upstream field carries a
+    // placeholder or stale id. Eligibility filters use exact run ownership,
+    // so preserving a truthy old id makes a completed modal run look empty.
+    runId,
+    ...(variantId ? { variantId } : {})
+  }));
+  const stamped = {
+    ...results,
+    fields: stampFields(results.fields, results.activeVariantId),
+    ...(results.variants ? {
+      variants: results.variants.map((variant) => ({ ...variant, fields: stampFields(variant.fields, variant.id) }))
+    } : {})
+  };
+  return withDerivedSafetyFactorSurfaceField(stamped);
+}
+
+export async function getRunVariant(runId: string, variantId: string): Promise<RunVariantResult> {
+  const inMemory = localResultsByRunId.get(runId)?.variants?.find((variant) => variant.id === variantId);
+  if (inMemory) return inMemory;
+  const stored = await loadLocalRunVariantResult<RunVariantResult>(runId, variantId);
+  if (!stored) throw new Error(`Result variant ${variantId} is no longer available in browser storage. Re-run the simulation.`);
+  return {
+    ...stored,
+    fields: stored.fields.map((field) => ({ ...field, runId: field.runId || runId, variantId: field.variantId || variantId }))
+  };
+}
+
+const DERIVED_SAFETY_FACTOR_CAP = 1000;
+
+// Cloud results carry safety factor only as an element field with no surface
+// alignment, so Safety Factor mode used to fall back to demo geometry. Derive a
+// per-node field from the surface stress field and the summary yield margin.
+export function withDerivedSafetyFactorSurfaceField(results: ResultsResponse): ResultsResponse {
+  if (!isStructuralResultSummary(results.summary)) return results;
+  const surfaceMesh = results.surfaceMesh;
+  if (!surfaceMesh) return results;
+  const aligned = (field: ResultField) => field.location === "node" && field.surfaceMeshRef === surfaceMesh.id && field.values.length === surfaceMesh.nodes.length;
+  if (results.fields.some((field) => field.type === "safety_factor" && aligned(field))) return results;
+  const stressField = results.fields.find((field) => field.type === "stress" && aligned(field));
+  const safetyFactor = Number(results.summary?.safetyFactor);
+  const maxStress = Number(results.summary?.maxStress);
+  if (!stressField || !Number.isFinite(safetyFactor) || !Number.isFinite(maxStress) || safetyFactor <= 0 || maxStress <= 0) return results;
+  const yieldStrength = safetyFactor * maxStress;
+  const values = stressField.values.map((stress) =>
+    Math.min(DERIVED_SAFETY_FACTOR_CAP, yieldStrength / Math.max(Math.abs(stress), yieldStrength / DERIVED_SAFETY_FACTOR_CAP))
+  );
+  const extent = finiteExtrema(values);
+  if (!extent) return results;
+  return {
+    ...results,
+    fields: [
+      ...results.fields,
+      {
+        ...stressField,
+        id: `${stressField.id}-derived-safety-factor`,
+        type: "safety_factor",
+        values,
+        min: extent.min,
+        max: extent.max,
+        units: "ratio",
+        vectors: undefined,
+        samples: undefined
+      }
+    ]
+  };
+}
+
+export async function cancelRun(runId: string): Promise<{ run: StudyRun; message: string }> {
+  const localRecord = localRunsByRunId.get(runId);
+  if (localRecord) {
+    if (localRecord.status === "running") {
+      const cancelSolve = localRecord.cancelSolve;
+      // Terminal transition first so the solve completion/rejection handlers
+      // become no-ops: exactly one terminal event per run.
+      finishLocalRun(localRecord, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
+      cancelSolve?.();
+      void deleteLocalRunVariantResults(runId).catch(() => undefined);
+    }
+    localResultsByRunId.delete(runId);
+    return {
+      run: cancelledStudyRun(runId, "local"),
+      message: "Simulation cancelled."
+    };
+  }
+  throw new Error("This run is not active in the current browser session and cannot be cancelled.");
+}
+
+function cancelledStudyRun(runId: string, solverBackend: string): StudyRun {
+  return {
+    id: runId,
+    studyId: "local",
+    status: "cancelled",
+    jobId: `job-${runId}`,
+    solverBackend,
+    solverVersion: "0.1.0",
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+    diagnostics: []
+  };
+}
+
+export function subscribeToRun(runId: string, onEvent: (event: RunEvent) => void): EventSource {
+  const localRecord = localRunsByRunId.get(runId);
+  if (localRecord) return subscribeToLocalRunRecord(localRecord, onEvent);
+  const deliverFailure = (message: string) => onEvent(syntheticRunErrorEvent(runId, message));
+  // Browser-run ids with no live record are terminal history — never open an
+  // event stream to endpoints that cannot know them (historical cloud runs'
+  // client endpoints are gone; local runs live only in this session).
+  if (runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX) || runId.startsWith("run-local-")) {
+    const timer = globalThis.setTimeout(() => deliverFailure(
+      runId.startsWith(HISTORICAL_CLOUD_RUN_ID_PREFIX)
+        ? HISTORICAL_CLOUD_RUN_MESSAGE
+        : "This local run is no longer active in this browser session. Re-run the simulation."
+    ), 0);
+    return { close: () => globalThis.clearTimeout(timer) } as EventSource;
+  }
+  const timer = globalThis.setTimeout(() => deliverFailure(
+    "This run is not active in the current browser session. Re-run the simulation locally."
+  ), 0);
+  return { close: () => globalThis.clearTimeout(timer) } as EventSource;
+}
+
+function messageFromUnknownError(error: unknown): string {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : "";
+}
+
+// Gmsh characteristic length (mm) per mesh preset for procedural sample
+// geometry (bracket). Shared by the mesh step and the run flow's mesh-first
+// path; STEP uploads use the same map as a characteristic-length hint.
+export { meshTargetSizeMmForPreset, PROCEDURAL_MESH_SIZE_MM } from "./meshEstimates";
+
+export function geometryWithMeshPreset(geometry: NonNullable<ReturnType<typeof geometrySourceForStudy>>, study: Study) {
+  if (geometry.kind !== "sample_procedural" || !geometry.descriptor) return geometry;
+  const meshSize = PROCEDURAL_MESH_SIZE_MM[study.meshSettings.preset] ?? PROCEDURAL_MESH_SIZE_MM.medium;
+  return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
+}
+
+/** First 20% of a mesh-first run's progress belongs to real meshing phases. */
+const MESH_FIRST_SOLVE_PROGRESS_OFFSET = 20;
+
+function runSimulationLocally(study: Study, displayModel?: DisplayModel, options: RunSimulationOptions = {}): { run: StudyRun; streamUrl: string; message: string } {
+  const runId = `run-local-${crypto.randomUUID()}`;
+  const backend = simulationBackend(study);
+  // A-M4 local-first meshing: complex geometry without a stored Core volume
+  // mesh is meshed in-browser (real gmsh-wasm) before the solve; mesh and
+  // solve are strictly sequential — both are memory-heavy.
+  const needsMesh = isComplexGeometry(displayModel, study) && !hasActualCoreVolumeMesh(study, displayModel);
+  const capabilities = { canMeshOnDemand: needsMesh && canMeshStudyOnDemand(study, displayModel) };
+  const meshFirst = needsMesh && capabilities.canMeshOnDemand;
+  const coreEligibility = openFeaCoreEligibility(study, displayModel, capabilities, options.customMaterials);
+  const now = new Date().toISOString();
+  if (!coreEligibility.ok) {
+    const record = createLocalRunRecord(runId, "failed");
+    record.events.push(
+      { runId, type: "state", progress: 0, message: "OpenFEA Core Local solve blocked.", elapsedMs: 0, timestamp: now },
+      { runId, type: "error", progress: 100, message: coreEligibility.reason, elapsedMs: 0, timestamp: now }
+    );
+    return {
+      run: {
+        id: runId,
+        studyId: study.id,
+        status: "failed",
+        jobId: `job-${runId}`,
+        meshRef: study.meshSettings.meshRef,
+        solverBackend: "opencae_core_local",
+        solverVersion: "0.1.0",
+        startedAt: now,
+        finishedAt: now,
+        diagnostics: [{
+          id: "opencae-core-ineligible",
+          severity: "error",
+          source: "solver",
+          message: coreEligibility.reason,
+          suggestedActions: []
+        }]
+      },
+      streamUrl: `local:${runId}`,
+      message: coreEligibility.reason
+    };
+  }
+
+  // Single-flight: one in-browser solve at a time (same UX as the run button).
+  if (activeLocalRun()) throw new Error("Simulation is already running.");
+
+  const dynamic = study.type === "dynamic_structural";
+  const record = createLocalRunRecord(runId);
+  emitLocalRunEvent(record, {
+    type: "state",
+    progress: 0,
+    message: meshFirst
+      ? "OpenFEA Core run queued in browser: meshing geometry, then solving."
+      : dynamic ? "OpenFEA Core dynamic solve queued in browser." : "OpenFEA Core solve queued in browser."
+  });
+
+  const solveProgressOffset = meshFirst ? MESH_FIRST_SOLVE_PROGRESS_OFFSET : 0;
+  const variantWrites: Promise<void>[] = [];
+  void (async () => {
+    let solveStudy = study;
+    if (meshFirst) {
+      // Hard-cancel path during meshing: terminate the mesh worker.
+      record.cancelSolve = () => cancelWasmMeshing("Simulation cancelled.");
+      solveStudy = await meshStudyForLocalRun(record, study, displayModel);
+      if (record.status !== "running") return; // Cancelled while meshing.
+      // Hand the freshly meshed study (with its stored artifact) back to the
+      // caller so the workspace persists it like a mesh-step result.
+      options.onStudyMeshed?.(solveStudy);
+    }
+    let variantPersistenceWarning: string | undefined;
+    const handle = startLocalSolve(
+      { runId, study: solveStudy, displayModel, customMaterials: options.customMaterials, debugResults: debugResultsEnabled() },
+      (progress) => handleLocalSolveProgress(record, progress, solveProgressOffset),
+      (variant) => {
+        emitLocalRunEvent(record, {
+          type: "message",
+          message: `Completed ${variant.name}; saving it separately.`
+        });
+        variantWrites.push(saveLocalRunVariantResult(runId, variant.id, variant)
+          .then(() => {
+            if (record.status === "running") emitLocalRunEvent(record, { type: "message", message: `Stored ${variant.name}.` });
+          })
+          .catch((error) => {
+            variantPersistenceWarning = messageFromUnknownError(error) || "A completed dynamic case could not be persisted.";
+          }));
+      }
+    );
+    record.cancelSolve = handle.cancel;
+    const { result } = await handle.completion;
+    await Promise.all(variantWrites);
+    if (record.status !== "running") return;
+    emitLocalRunEvent(record, { type: "progress", progress: 92, message: "Writing OpenFEA Core result fields." });
+    let stampedResults: ResultsResponse = {
+      ...withFieldRunIds(runId, result as ResultsResponse),
+      owner: { projectId: solveStudy.projectId, studyId: solveStudy.id }
+    };
+    if (variantPersistenceWarning) {
+      stampedResults = {
+        ...stampedResults,
+        summary: {
+          ...stampedResults.summary,
+          diagnostics: [
+            ...(stampedResults.summary.diagnostics ?? []),
+            {
+              id: "dynamic-case-persistence",
+              severity: "warning",
+              source: "local_job",
+              message: `Dynamic cases completed, but not every case could be saved separately: ${variantPersistenceWarning}`,
+              suggestedActions: []
+            }
+          ]
+        }
+      };
+    }
+    const results = await persistLocalRunResults(runId, stampedResults);
+    if (record.status !== "running") return;
+    setCappedRunEntry(localResultsByRunId, runId, results);
+    finishLocalRun(record, "complete", {
+      type: "complete",
+      progress: 100,
+      estimatedRemainingMs: 0,
+      message: dynamic ? "OpenFEA Core dynamic simulation complete." : "OpenFEA Core simulation complete."
+    });
+  })().catch(async (error) => {
+    await Promise.allSettled(variantWrites);
+    await deleteLocalRunVariantResults(runId).catch(() => undefined);
+    if (record.status !== "running") return;
+    if (isCancelledSolveError(error)) {
+      finishLocalRun(record, "cancelled", { type: "cancelled", message: "Simulation cancelled." });
+      return;
+    }
+    finishLocalRun(record, "failed", {
+      type: "error",
+      progress: 100,
+      message: messageFromUnknownError(error) || "Local solve failed."
+    });
+  });
+
+  return {
+    run: {
+      id: runId,
+      studyId: study.id,
+      status: "queued",
+      jobId: `job-${runId}`,
+      meshRef: study.meshSettings.meshRef,
+      solverBackend: localSolverBackendForRun(study, backend, coreEligibility),
+      solverVersion: "0.1.0",
+      startedAt: now,
+      diagnostics: []
+    },
+    streamUrl: `local:${runId}`,
+    message: "OpenFEA Core Local simulation running."
+  };
+}
+
+/**
+ * Mesh-first leg of a local run (A-M4): reuses the mesh step's
+ * generateWasmMeshForStudy (single meshing code path), streaming its real
+ * phase reports ("Meshing volume...", ...) into the run event stream within
+ * the 0-20% progress window, and returns the study carrying the stored
+ * artifact. Throws (failing the run honestly) when meshing cannot produce a
+ * volume mesh — a run never falls back to estimates.
+ */
+async function meshStudyForLocalRun(record: LocalRunRecord, study: Study, displayModel?: DisplayModel): Promise<Study> {
+  const preset = study.meshSettings.preset;
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: 2,
+    message: "No stored volume mesh for this geometry — meshing in browser before solving."
+  });
+  let meshPhaseCount = 0;
+  const geometry = geometrySourceForStudy(study, displayModel);
+  const meshed = await generateWasmMeshForStudy({
+    preset,
+    study,
+    displayModel,
+    geometry: geometry ? geometryWithMeshPreset(geometry, study) : null,
+    meshSizeMm: PROCEDURAL_MESH_SIZE_MM[preset] ?? PROCEDURAL_MESH_SIZE_MM.medium,
+    onProgress: (message) => {
+      if (record.status !== "running") return;
+      meshPhaseCount += 1;
+      emitLocalRunEvent(record, {
+        type: "progress",
+        progress: Math.min(2 + meshPhaseCount * 2, MESH_FIRST_SOLVE_PROGRESS_OFFSET - 2),
+        message
+      });
+    }
+  });
+  if (!meshed) {
+    throw new Error(`In-browser meshing could not run for this geometry, so the simulation was stopped. ${OPENFEA_CORE_MESH_REQUIRED_REASON}`);
+  }
+  emitLocalRunEvent(record, {
+    type: "progress",
+    progress: MESH_FIRST_SOLVE_PROGRESS_OFFSET,
+    message: meshed.message
+  });
+  return meshed.study;
+}
+
+export function dynamicOutputFrameEstimate(study: Study, options: { backend?: string } = {}): number {
+  const raw = study.solverSettings as Partial<DynamicSolverSettings>;
+  const startTime = finiteOr(raw.startTime, 0);
+  const endTime = finiteOr(raw.endTime, 0.1);
+  const timeStep = finiteOr(raw.timeStep, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const requestedOutputInterval = finiteOr(raw.outputInterval, DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  void options;
+  const backendMinimum = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+  const outputInterval = Math.max(requestedOutputInterval, timeStep, backendMinimum);
+  const duration = Math.max(0, endTime - startTime);
+  const wholeSteps = Math.floor(duration / outputInterval);
+  const remainder = duration - wholeSteps * outputInterval;
+  return Math.max(1, wholeSteps + 1 + (remainder > outputInterval * 1e-9 ? 1 : 0));
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function finitePositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function capitalizeWord(value: string): string {
+  return value.length ? `${value[0]!.toUpperCase()}${value.slice(1)}` : value;
+}
+
+function randomUuid(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+type Vec3 = [number, number, number];
+
+function analysisMeshForDisplayModel(displayModel: DisplayModel, quality: AnalysisMesh["quality"]): AnalysisMesh {
+  const bounds = boundsForDisplayModel(displayModel);
+  const divisions = quality === "ultra" ? 64 : quality === "fine" ? 42 : quality === "medium" ? 24 : 12;
+  const samples: AnalysisMesh["samples"] = [];
+  const faces: Array<{ axis: 0 | 1 | 2; value: number; normal: Vec3; sourceId: string }> = [
+    { axis: 0, value: bounds.min[0], normal: [-1, 0, 0], sourceId: "x-min" },
+    { axis: 0, value: bounds.max[0], normal: [1, 0, 0], sourceId: "x-max" },
+    { axis: 1, value: bounds.min[1], normal: [0, -1, 0], sourceId: "y-min" },
+    { axis: 1, value: bounds.max[1], normal: [0, 1, 0], sourceId: "y-max" },
+    { axis: 2, value: bounds.min[2], normal: [0, 0, -1], sourceId: "z-min" },
+    { axis: 2, value: bounds.max[2], normal: [0, 0, 1], sourceId: "z-max" }
+  ];
+  for (const face of displayModel.faces) {
+    samples.push({ point: face.center, normal: normalized(face.normal), weight: 1, sourceId: face.id });
+  }
+  for (const face of faces) {
+    const otherAxes = ([0, 1, 2] as const).filter((axis) => axis !== face.axis);
+    for (let a = 0; a <= divisions; a += 1) {
+      for (let b = 0; b <= divisions; b += 1) {
+        const point: Vec3 = [0, 0, 0];
+        point[face.axis] = face.value;
+        point[otherAxes[0]!] = lerp(bounds.min[otherAxes[0]!], bounds.max[otherAxes[0]!], a / divisions);
+        point[otherAxes[1]!] = lerp(bounds.min[otherAxes[1]!], bounds.max[otherAxes[1]!], b / divisions);
+        samples.push({ point, normal: face.normal, weight: 1, sourceId: face.sourceId });
+      }
+    }
+  }
+  return { quality, bounds, samples };
+}
+
+function boundsForDisplayModel(displayModel: DisplayModel): AnalysisMesh["bounds"] {
+  const min: Vec3 = [Infinity, Infinity, Infinity];
+  const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const face of displayModel.faces) {
+    for (let axis = 0; axis < 3; axis += 1) {
+      min[axis] = Math.min(min[axis]!, face.center[axis]!);
+      max[axis] = Math.max(max[axis]!, face.center[axis]!);
+    }
+  }
+  if (!displayModel.faces.length) {
+    min[0] = -1.2; min[1] = -0.5; min[2] = -0.5;
+    max[0] = 1.2; max[1] = 0.5; max[2] = 0.5;
+  }
+  for (let axis = 0; axis < 3; axis += 1) {
+    const span = Math.max(max[axis]! - min[axis]!, 0.4);
+    const pad = Math.max(span * 0.08, 0.12);
+    min[axis] = min[axis]! - pad;
+    max[axis] = max[axis]! + pad;
+  }
+  return { min, max };
+}
+
+function normalized(vector: Vec3): Vec3 {
+  const length = Math.hypot(vector[0], vector[1], vector[2]) || 1;
+  return [vector[0] / length, vector[1] / length, vector[2] / length];
+}
+
+function lerp(min: number, max: number, t: number): number {
+  return min + (max - min) * t;
+}
+
+export { MESH_PRESET_ESTIMATE_WARNING } from "./meshEstimates";
+
+function simulationBackend(study: Study): NormalizedBrowserSolverBackend {
+  return normalizeSolverBackend(study);
+}
+
+function localSolverBackendForRun(study: Study, backend: NormalizedBrowserSolverBackend, coreEligibility?: ReturnType<typeof openFeaCoreEligibility>): string {
+  if (backend === "opencae_core_local" && coreEligibility?.ok) {
+    // Structured-block and actual-mesh studies both run the full production
+    // Core pipeline in the browser now; the preview solver tier is retired.
+    return study.type === "dynamic_structural" ? "opencae-core-mdof-tet" : "opencae-core-sparse-tet";
+  }
+  if (study.type === "dynamic_structural") return "local-dynamic-newmark";
+  if (isBeamDemoStudyForLocalRun(study)) return "local-beam-demo-euler-bernoulli";
+  return "local-heuristic-surface";
+}
+
+function debugResultsEnabled(): boolean {
+  return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("debugResults") === "1";
+}
+
+function isBeamDemoStudyForLocalRun(study: Study): boolean {
+  const entityIds = new Set(study.namedSelections.flatMap((selection) => selection.geometryRefs.map((ref) => ref.entityId)));
+  const hasBeamFaces = ["face-base-left", "face-load-top", "face-web-front", "face-base-bottom"].every((id) => entityIds.has(id));
+  if (!hasBeamFaces) return false;
+  const selectionText = study.namedSelections
+    .flatMap((selection) => [selection.name, ...selection.geometryRefs.map((ref) => ref.label)])
+    .join(" ")
+    .toLowerCase();
+  const projectText = `${study.projectId} ${study.name}`.toLowerCase();
+  return selectionText.includes("payload") || selectionText.includes("beam body") || projectText.includes("beam");
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(contentBase64: string): ArrayBuffer {
+  const binary = atob(contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
+}
+
+function assertCurrentModelMutation(options: ModelMutationOptions): void {
+  if (!options.signal?.aborted && options.isCurrent?.() !== false) return;
+  const error = new Error("This model action was superseded by a newer workspace change.");
+  error.name = "AbortError";
+  throw error;
+}

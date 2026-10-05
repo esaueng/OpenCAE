@@ -1,0 +1,463 @@
+import { describe, expect, test } from "vitest";
+import type { DisplayFace, DisplayModel, Load, NamedSelection, Study } from "@openfea/schema";
+import { createViewerLoadMarkers, directionLabelForLoad, directionVectorForLabel, directionLabelForVector, loadMagnitudeError, loadMarkerDisplayLabel, loadMarkerFromLoad, loadMarkerViewportPresentation, payloadObjectForLoad, unitsForLoadType } from "./loadPreview";
+
+const face: DisplayFace = {
+  id: "face-side",
+  label: "Side face",
+  color: "#fff",
+  center: [1, 2, 3],
+  normal: [0, 0, 1],
+  stressValue: 0
+};
+
+const selection: NamedSelection = {
+  id: "selection-side",
+  name: "Side face",
+  entityType: "face",
+  geometryRefs: [{ bodyId: "body-1", entityType: "face", entityId: "face-side", label: "Side face" }],
+  fingerprint: "side"
+};
+
+const secondSelection: NamedSelection = {
+  id: "selection-back",
+  name: "Back face",
+  entityType: "face",
+  geometryRefs: [{ bodyId: "body-1", entityType: "face", entityId: "face-back", label: "Back face" }],
+  fingerprint: "back"
+};
+
+const study = {
+  loads: [],
+  namedSelections: [selection, secondSelection]
+} as unknown as Study;
+
+const legacySampleDisplayModel: DisplayModel = {
+  id: "display-sample",
+  name: "Legacy sample",
+  bodyCount: 1,
+  faces: [face]
+};
+
+describe("load preview helpers", () => {
+  test("maps direction labels to saved vectors", () => {
+    expect(directionVectorForLabel("-Y", face)).toEqual([0, -1, 0]);
+    expect(directionVectorForLabel("+X", face)).toEqual([1, 0, 0]);
+    expect(directionVectorForLabel("+Z", face)).toEqual([0, 0, 1]);
+    expect(directionVectorForLabel("-Z", face)).toEqual([0, 0, -1]);
+    expect(directionVectorForLabel("Normal", face)).toEqual([0, 0, 1]);
+    expect(directionVectorForLabel("Opposite normal", face)).toEqual([0, 0, -1]);
+  });
+
+  test("recognizes face-normal and opposite-face-normal vectors", () => {
+    expect(directionLabelForVector([0, 0, 1], undefined, face)).toBe("Normal");
+    expect(directionLabelForVector([0, 0, -1], undefined, face)).toBe("Opposite normal");
+  });
+
+  test("derives the displayed direction from the solved vector instead of untrusted directionMode", () => {
+    const load = {
+      id: "load-global-z",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 100, direction: [0, 0, -1], directionMode: "-Z" },
+      status: "complete"
+    } as Load;
+
+    expect(directionLabelForLoad(load, undefined, face)).toBe("Opposite normal");
+  });
+
+  test("maps viewer global directions through legacy sample orientation when saving", () => {
+    expect(directionVectorForLabel("-Z", face, legacySampleDisplayModel)).toEqual([0, -1, 0]);
+    expect(directionLabelForVector([0, -1, 0], legacySampleDisplayModel)).toBe("-Z");
+  });
+
+  test("uses a picked face point for saved load markers", () => {
+    const point: [number, number, number] = [1.2, 2.1, 3.05];
+    const load: Load = {
+      id: "load-point",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: point },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual(point);
+  });
+
+  test("reads payload object metadata for mass loads", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "part-1", label: "Payload part", center: [1, 2, 3] }
+      },
+      status: "complete"
+    };
+
+    expect(payloadObjectForLoad(load)).toEqual({ id: "part-1", label: "Payload part", center: [1, 2, 3] });
+  });
+
+  test("rejects payload labels that exceed the viewport text budget", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "part-1", label: "x".repeat(129), center: [1, 2, 3] }
+      },
+      status: "complete"
+    };
+
+    expect(payloadObjectForLoad(load)).toBeUndefined();
+  });
+
+  test("uses payload object center for gravity load markers when no point is saved", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "rod-1", label: "Rod 1", center: [1.25, 2.5, 3.75] }
+      },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual([1.25, 2.5, 3.75]);
+  });
+
+  test("presents applied payload mass markers as load labels without arrows", () => {
+    const load: Load = {
+      id: "load-payload",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: {
+        value: 5,
+        units: "kg",
+        direction: [0, 0, -1],
+        payloadObject: { id: "rod-1", label: "Part 2", center: [1.25, 2.5, 3.75] }
+      },
+      status: "complete"
+    };
+    const marker = loadMarkerFromLoad(load, study, 0);
+
+    expect(marker?.payloadObject?.label).toBe("Part 2");
+    expect(marker && loadMarkerViewportPresentation(marker)).toEqual({
+      label: "L1 Part 2",
+      showArrow: false,
+      showLeader: true,
+      tone: "payload-mass",
+      color: "#34d399"
+    });
+  });
+
+  test("treats gravity loads as payload mass inputs", () => {
+    expect(unitsForLoadType("gravity")).toBe("kg");
+    const load: Load = {
+      id: "load-gravity",
+      type: "gravity",
+      selectionRef: "selection-side",
+      parameters: { value: 10, units: "kg", direction: [0, 0, -1] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)).toMatchObject({
+      type: "gravity",
+      value: 10,
+      units: "kg",
+      direction: [0, 0, -1]
+    });
+  });
+
+  test("uses canonical UI units for advanced distributed loads", () => {
+    expect(unitsForLoadType("surface_traction")).toBe("kPa");
+    expect(unitsForLoadType("volume_force")).toBe("N/m^3");
+    expect(unitsForLoadType("remote_force")).toBe("N");
+    expect(unitsForLoadType("bolt_preload")).toBe("N");
+  });
+
+  test("places a remote-force marker at its explicit remote point", () => {
+    const load: Load = {
+      id: "remote",
+      type: "remote_force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3], remotePoint: [4, 5, 6] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.point).toEqual([4, 5, 6]);
+  });
+
+  test("does not create an unsaved marker for the selected load face", () => {
+    const markers = createViewerLoadMarkers({
+      study
+    });
+
+    expect(markers).toEqual([]);
+  });
+
+  test("creates a lightweight preview marker for a selected load point", () => {
+    const point: [number, number, number] = [1.2, 2.1, 3.05];
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: point },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study,
+      draftLoadPreview: { load: draftLoad, selection }
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      id: "draft-load",
+      faceId: "face-side",
+      point,
+      preview: true,
+      labelIndex: 0,
+      stackIndex: 0
+    });
+  });
+
+  test("numbers unsaved draft markers after saved loads without changing saved marker labels", () => {
+    const savedLoad: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "pressure",
+      selectionRef: "selection-back",
+      parameters: { value: 100, units: "kPa", direction: [1, 0, 0], applicationPoint: [2, 3, 4] },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      draftLoadPreview: { load: draftLoad, selection: secondSelection }
+    });
+
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 P 100 kPa +X"]);
+    expect(markers[1]).toMatchObject({
+      id: "draft-load",
+      faceId: "face-back",
+      preview: true,
+      labelIndex: 1,
+      stackIndex: 0
+    });
+  });
+
+  test("creates preview marker display from draft load inputs", () => {
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "pressure",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "kPa", direction: [0, 1, 0], applicationPoint: [1, 2, 3] },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study,
+      draftLoadPreview: { load: draftLoad, selection }
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.preview).toBe(true);
+    expect(markers[0]?.point).toEqual([1, 2, 3]);
+  });
+
+  test("does not create an unsaved draft marker without a valid draft selection", () => {
+    const draftLoad: Load = {
+      id: "draft-load",
+      type: "force",
+      selectionRef: "missing-selection",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1], applicationPoint: [1, 2, 3] },
+      status: "complete"
+    };
+
+    const markers = createViewerLoadMarkers({
+      study,
+      draftLoadPreview: { load: draftLoad, selection: undefined }
+    });
+
+    expect(markers).toEqual([]);
+  });
+
+  test("reads saved load direction and label for existing markers", () => {
+    const load: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [1, 0, 0] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)).toEqual({
+      id: "load-1",
+      faceId: "face-side",
+      point: undefined,
+      type: "force",
+      value: 500,
+      units: "N",
+      direction: [1, 0, 0],
+      directionLabel: "+X",
+      labelIndex: 0,
+      stackIndex: 0
+    });
+    expect(directionLabelForLoad(load)).toBe("+X");
+  });
+
+  test("reads saved Z load directions", () => {
+    const load: Load = {
+      id: "load-z",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0)?.directionLabel).toBe("-Z");
+    expect(directionLabelForLoad(load)).toBe("-Z");
+  });
+
+  test("keeps an opposite-normal load labeled against its selected face", () => {
+    const load: Load = {
+      id: "load-opposite-normal",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+
+    expect(loadMarkerFromLoad(load, study, 0, false, legacySampleDisplayModel)?.directionLabel).toBe("Opposite normal");
+    expect(directionLabelForLoad(load, legacySampleDisplayModel, face)).toBe("Opposite normal");
+  });
+
+  test("labels legacy sample model-space directions by viewer global axes", () => {
+    const load: Load = {
+      id: "load-legacy-z",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 250, units: "N", direction: [0, -1, 0] },
+      status: "complete"
+    };
+
+    const marker = loadMarkerFromLoad(load, study, 0, false, legacySampleDisplayModel);
+
+    expect(marker?.direction).toEqual([0, -1, 0]);
+    expect(marker?.directionLabel).toBe("-Z");
+    expect(directionLabelForLoad(load, legacySampleDisplayModel)).toBe("-Z");
+  });
+
+  test("returns saved load markers without adding draft markers", () => {
+    const savedLoad: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+    const markers = createViewerLoadMarkers({
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      displayModel: legacySampleDisplayModel
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.id).toBe("load-1");
+  });
+
+  test("uses edited load previews for viewer markers before the edit is saved", () => {
+    const savedLoad: Load = {
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    };
+    const previewLoad: Load = {
+      ...savedLoad,
+      parameters: { ...savedLoad.parameters, direction: [0, 1, 0] }
+    };
+
+    const markers = createViewerLoadMarkers({
+      study: { ...study, loads: [savedLoad] } as unknown as Study,
+      loadPreviews: [previewLoad]
+    });
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      id: "load-1",
+      direction: [0, 1, 0],
+      directionLabel: "+Y",
+      labelIndex: 0,
+      stackIndex: 0
+    });
+  });
+
+  test("formats the viewport load label for reuse in the sidebar", () => {
+    const marker = loadMarkerFromLoad({
+      id: "load-1",
+      type: "force",
+      selectionRef: "selection-side",
+      parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+      status: "complete"
+    }, study, 0);
+
+    expect(marker && loadMarkerDisplayLabel(marker)).toBe("L1 F 500 N -Z");
+  });
+
+  test("numbers load labels globally across different faces", () => {
+    const markers = createViewerLoadMarkers({
+      study: {
+        ...study,
+        loads: [
+          {
+            id: "load-1",
+            type: "force",
+            selectionRef: "selection-side",
+            parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+            status: "complete"
+          },
+          {
+            id: "load-2",
+            type: "force",
+            selectionRef: "selection-back",
+            parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+            status: "complete"
+          }
+        ]
+      } as unknown as Study
+    });
+
+    expect(markers.map(loadMarkerDisplayLabel)).toEqual(["L1 F 500 N -Z", "L2 F 500 N -Z"]);
+    expect(markers.map((marker) => marker.stackIndex)).toEqual([0, 0]);
+  });
+  test("mirrors the domain validator's load-magnitude rule at the point of entry", () => {
+    // Structural magnitudes are positive; direction is chosen separately, so a
+    // negative number is a mistake rather than a reversed load.
+    expect(loadMagnitudeError(500, "static_stress")).toBeNull();
+    expect(loadMagnitudeError(-1, "static_stress")).toContain("greater than zero");
+    expect(loadMagnitudeError(0, "static_stress")).toContain("cannot be zero");
+    expect(loadMagnitudeError(Number.NaN, "static_stress")).toBe("Enter a number.");
+    expect(loadMagnitudeError(-1, "dynamic_structural")).toContain("greater than zero");
+
+    // Inward surface heat flux is signed: negative is cooling.
+    expect(loadMagnitudeError(-500, "steady_state_thermal")).toBeNull();
+    expect(loadMagnitudeError(0, "steady_state_thermal")).toContain("cannot be zero");
+  });
+});

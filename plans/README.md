@@ -1,5 +1,7 @@
 # OpenCAE Advisor Plans
 
+These dated plans retain the OpenCAE names and paths used at their recorded commits. For current implementation, use the OpenFEA workspace paths and `@openfea/*` packages documented in the root README.
+
 Four advisory runs are indexed here:
 
 - **Run 1 — 2026-06-12**, base commit `3a67db9`, standard read-only survey (plans 001–005).

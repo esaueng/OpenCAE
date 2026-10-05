@@ -19,7 +19,7 @@ Advisory boundary (must survive into the docs text): these caveats are engineeri
 Safety factor — `packages/solver-cpu/src/results.ts:337-350`:
 
 ```ts
-export function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Array): Float64Array {
+export function computeSafetyFactor(model: NormalizedOpenFEAModel, vonMises: Float64Array): Float64Array {
   ...
   values[element] = yieldStrength > 0 && vonMises[element] > 0 ? yieldStrength / vonMises[element] : 0;
 ```
@@ -27,7 +27,7 @@ export function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Flo
 Silent omission when yield is missing — `results.ts:352-354`:
 
 ```ts
-function hasYieldStrength(model: NormalizedOpenCAEModel): boolean {
+function hasYieldStrength(model: NormalizedOpenFEAModel): boolean {
   return model.materials.some((material) => (material.yieldStrength ?? 0) > 0);
 }
 ```
@@ -42,7 +42,7 @@ The recovered-nodal von Mises field is already computed for every solve (static:
 
 - `CoreSolveResult` summary/field shapes live in `packages/core/src/results.ts` and `packages/core/src/model-json.ts` types; `validateCoreResult` (`packages/core/src/results.ts`) validates result structure — **additive fields must not fail it** (check whether it rejects unknown keys before adding any; that check is your first task).
 - Existing metadata style: lowercase snake/kebab string literals like `"raw_element_von_mises"`, `"volume_weighted_nodal_recovery"` — follow it.
-- Cloud provenance stamping (`services/opencae-core-cloud/src/server.ts:377-407`) spreads summary/provenance — additive summary fields flow through untouched; verify.
+- Cloud provenance stamping (`services/openfea-core-cloud/src/server.ts:377-407`) spreads summary/provenance — additive summary fields flow through untouched; verify.
 
 ## Steps
 
@@ -68,7 +68,7 @@ In `docs/validation/core.md` (Result Surface Fields / summary section) and `READ
 
 - Run `validateCoreResult` against a result carrying the new fields (unit test) — must pass.
 - Grep consumers for summary destructuring that might break on new keys: `grep -rn "summary\." apps/ packages/viewer/ services/ --include="*.ts" | grep -v test` — visually confirm additive safety.
-- Cloud test: one assertion in `services/opencae-core-cloud/tests/server.test.ts` that a solve response summary carries `stressBasis` and `meshConvergence` (proves pass-through).
+- Cloud test: one assertion in `services/openfea-core-cloud/tests/server.test.ts` that a solve response summary carries `stressBasis` and `meshConvergence` (proves pass-through).
 
 ## Hard boundaries
 

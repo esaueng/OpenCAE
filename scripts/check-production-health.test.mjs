@@ -4,8 +4,8 @@ import { checkProductionHealth, PRODUCTION_HEALTH_URL, validateProductionHealthR
 const healthyResponse = {
   ok: true,
   mode: "cloudflare-worker",
-  service: "opencae-web",
-  solverRuntime: "browser-opencae-core"
+  service: "openfea-web",
+  solverRuntime: "browser-openfea-core"
 };
 
 describe("production health check", () => {
@@ -16,7 +16,7 @@ describe("production health check", () => {
   test.each([
     [503, healthyResponse, "HTTP status must be 200"],
     [200, { ...healthyResponse, ok: false }, "ok must be true"],
-    [200, { ...healthyResponse, solverRuntime: "cloud" }, "solverRuntime must be \"browser-opencae-core\""],
+    [200, { ...healthyResponse, solverRuntime: "cloud" }, "solverRuntime must be \"browser-openfea-core\""],
     [200, null, "response body must be a JSON object"]
   ])("rejects an unhealthy production response", (status, body, message) => {
     expect(() => validateProductionHealthResponse(status, body)).toThrow(message);

@@ -1,4 +1,4 @@
-import { assertProductionSurfaceFieldInvariant, type CoreResultField, type CoreSolveResult } from "@opencae/core";
+import { assertProductionSurfaceFieldInvariant, type CoreResultField, type CoreSolveResult } from "@openfea/core";
 
 export type SolverSurfaceRenderGeometry = {
   source: "solver_surface_mesh";

@@ -1,4 +1,4 @@
-export const OPENCAE_CORE_VERSION = "0.1.5";
+export const OPENFEA_CORE_VERSION = "0.1.5";
 export type {
   BoundaryConditionJson,
   BodyForceDensityLoadJson,
@@ -24,11 +24,11 @@ export type {
   NormalizedElementBlock,
   NormalizedElementSet,
   NormalizedNodeSet,
-  NormalizedOpenCAEModel,
+  NormalizedOpenFEAModel,
   NormalizedSurfaceFacet,
   NormalizedSurfaceSet,
   NormalizedTet4ElementBlock,
-  OpenCAEModelJson,
+  OpenFEAModelJson,
   PhysicalGroupJson,
   PressureLoadJson,
   PrescribedDisplacementBoundaryConditionJson,
@@ -52,11 +52,11 @@ export type {
   ValidationReport
 } from "./model-json";
 export {
-  OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
-  OPENCAE_MODEL_SCHEMA,
-  OPENCAE_MODEL_SCHEMA_VERSION,
-  OPENCAE_OLDEST_MODEL_SCHEMA_VERSION,
-  OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
+  OPENFEA_LEGACY_MODEL_SCHEMA_VERSION,
+  OPENFEA_MODEL_SCHEMA,
+  OPENFEA_MODEL_SCHEMA_VERSION,
+  OPENFEA_OLDEST_MODEL_SCHEMA_VERSION,
+  OPENFEA_PREVIOUS_MODEL_SCHEMA_VERSION
 } from "./model-json";
 export type {
   BuildSurfaceFacetsInput,

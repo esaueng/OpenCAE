@@ -1,13 +1,13 @@
 # Plans
 
-Use OpenCAE Core as the product name and `opencae-core` as the repository/root package name. Do not introduce alternative project names.
+Use OpenFEA Core as the product name and `openfea-core` as the repository/root package name. Do not introduce alternative project names.
 
 ## Future Codex Task Template
 
 ```md
-Implement the next phase for OpenCAE Core.
-Repository/code name: opencae-core.
-Product/docs/UI name: OpenCAE Core.
+Implement the next phase for OpenFEA Core.
+Repository/code name: openfea-core.
+Product/docs/UI name: OpenFEA Core.
 
 Read AGENTS.md, PROJECT_BRIEF.md, ROADMAP.md, ARCHITECTURE.md, BENCHMARKS.md, and PLANS.md first.
 

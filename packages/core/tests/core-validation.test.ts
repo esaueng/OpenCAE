@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { OpenCAEModelJson, SurfaceSetJson } from "../src";
+import type { OpenFEAModelJson, SurfaceSetJson } from "../src";
 import { solverSurfaceMeshFromModel } from "../src";
 import {
   connectedComponents,
@@ -82,7 +82,7 @@ describe("Core validation suite mesh topology", () => {
   });
 });
 
-function modelWith(connectivity: number[], coordinates: number[], type: "Tet4" | "Tet10" = "Tet4"): OpenCAEModelJson {
+function modelWith(connectivity: number[], coordinates: number[], type: "Tet4" | "Tet10" = "Tet4"): OpenFEAModelJson {
   return {
     schema: "opencae.model",
     schemaVersion: "0.2.0",

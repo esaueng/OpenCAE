@@ -1,11 +1,11 @@
-import type { NormalizedOpenCAEModel } from "@opencae/core";
+import type { NormalizedOpenFEAModel } from "@openfea/core";
 import { collectTetCoordinates } from "./element";
 import { computeTet10Volume } from "./element-tet10";
 import { computeTet4Geometry } from "./geometry";
 import { collectElementCoordinates, elementNodeCountForBlock } from "./solver";
 
 export function recoverNodalVonMisesFromElements(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   elementVonMises: ArrayLike<number>
 ): Float64Array {
   const nodalSum = new Float64Array(model.counts.nodes);
@@ -52,7 +52,7 @@ export function recoverNodalVonMisesFromElements(
  * principal-stress measure is evaluated.
  */
 export function recoverNodalStressTensorsFromElements(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   elementStress: ArrayLike<number>
 ): Float64Array {
   const componentCount = 6;

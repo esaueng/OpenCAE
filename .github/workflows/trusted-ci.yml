@@ -28,7 +28,7 @@ jobs:
           import os
           import re
 
-          REPO = "esaueng/OpenCAE"
+          REPO = "esaueng/OpenFEA"
           REPO_ID = 1222078082
           ACTOR = "petergstfsn"
           ACTOR_ID = 171875562
@@ -143,15 +143,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build OpenCAE Core packages
+      - name: Build OpenFEA Core packages
         run: |
-          pnpm --filter @opencae/core build
-          pnpm --filter @opencae/examples build
-          pnpm --filter @opencae/solver-cpu build
-          pnpm --filter @opencae/solver-webgpu build
-          pnpm --filter @opencae/viewer build
+          pnpm --filter @openfea/core build
+          pnpm --filter @openfea/examples build
+          pnpm --filter @openfea/solver-cpu build
+          pnpm --filter @openfea/solver-webgpu build
+          pnpm --filter @openfea/viewer build
 
-      - name: Test OpenCAE Core packages
+      - name: Test OpenFEA Core packages
         run: pnpm --filter "./packages/*" --if-present test
 
       - name: Verify Cloudflare config
@@ -164,7 +164,7 @@ jobs:
         run: pnpm test
 
       - name: Build web app
-        run: pnpm --filter @opencae/web build
+        run: pnpm --filter @openfea/web build
 
       - name: Enforce retired-token bundle proof on the fresh build
         run: pnpm exec vitest run scripts/cloud-retirement-guard.test.mjs
@@ -192,16 +192,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build OpenCAE Core packages
+      - name: Build OpenFEA Core packages
         run: |
-          pnpm --filter @opencae/core build
-          pnpm --filter @opencae/examples build
-          pnpm --filter @opencae/solver-cpu build
-          pnpm --filter @opencae/solver-webgpu build
-          pnpm --filter @opencae/viewer build
+          pnpm --filter @openfea/core build
+          pnpm --filter @openfea/examples build
+          pnpm --filter @openfea/solver-cpu build
+          pnpm --filter @openfea/solver-webgpu build
+          pnpm --filter @openfea/viewer build
 
       - name: Build web app
-        run: pnpm --filter @opencae/web build
+        run: pnpm --filter @openfea/web build
 
       - name: Verify STEP selection across display LODs in Chrome
         run: pnpm verify:step-selection-browser

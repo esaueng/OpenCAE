@@ -6,7 +6,7 @@ packages:
   - "runners/*"
 overrides:
   # jsPDF pulls dompurify in as an optionalDependency for its html() path. That
-  # path is aliased to a throwing stub in apps/opencae-web/vite.config.ts, so no
+  # path is aliased to a throwing stub in apps/openfea-web/vite.config.ts, so no
   # dompurify code ships — but Dependabot reads the lockfile, not the bundle.
   # 3.4.14 clears GHSA-55q2-fjhq-7xh7 (IN_PLACE hook XSS, <=3.4.12) and
   # satisfies jsPDF's ^3.3.1.

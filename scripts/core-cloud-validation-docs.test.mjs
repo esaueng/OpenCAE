@@ -65,7 +65,7 @@ describe("validation and retirement documentation", () => {
 
     expect(readme).toContain("## Production Uptime");
     expect(readme).toContain("https://cae.esau.app/health");
-    expect(readme).toContain("browser-opencae-core");
+    expect(readme).toContain("browser-openfea-core");
     expect(readme).toContain("actions/workflows/production-health.yml/badge.svg?branch=main");
     expect(healthWorkflow).toContain("node scripts/check-production-health.mjs");
     expect(healthWorkflow).toContain('cron: "17,47 * * * *"');

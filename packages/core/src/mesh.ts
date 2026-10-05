@@ -1,6 +1,6 @@
-import type { ElementBlockJson, ElementType, OpenCAEModelJson, SurfaceFacetJson, SurfaceSetJson } from "./model-json";
+import type { ElementBlockJson, ElementType, OpenFEAModelJson, SurfaceFacetJson, SurfaceSetJson } from "./model-json";
 
-export type MeshUtilityModel = Pick<OpenCAEModelJson, "nodes" | "elementBlocks"> & {
+export type MeshUtilityModel = Pick<OpenFEAModelJson, "nodes" | "elementBlocks"> & {
   surfaceFacets?: SurfaceFacetJson[];
 };
 

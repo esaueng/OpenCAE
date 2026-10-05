@@ -3,8 +3,8 @@ import {
   TET10_HRZ_EDGE_MASS_FRACTION,
   TET10_HRZ_VERTEX_MASS_FRACTION,
   type LoadAssemblyDiagnostics,
-  type NormalizedOpenCAEModel
-} from "@opencae/core";
+  type NormalizedOpenFEAModel
+} from "@openfea/core";
 import { computeTet4Geometry } from "./geometry";
 import {
   computeTet10Volume,
@@ -41,7 +41,7 @@ export type PreparedStructuralSystem = {
 };
 
 export function prepareStructuralSystem(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   boundaryConditionNames: string[],
   loadNames: string[] = [],
   hooks?: SolverHooks,
@@ -104,7 +104,7 @@ export function prepareStructuralSystem(
 }
 
 /** Legacy result bundles omit assembly detail; expose it only for the new primitives that require balance diagnostics. */
-export function hasAdvancedLoadPrimitives(model: NormalizedOpenCAEModel, loadNames: string[]): boolean {
+export function hasAdvancedLoadPrimitives(model: NormalizedOpenFEAModel, loadNames: string[]): boolean {
   const selected = new Set(loadNames);
   return model.loads.some((load) => selected.has(load.name) && (
     load.type === "surfaceTraction"
@@ -114,7 +114,7 @@ export function hasAdvancedLoadPrimitives(model: NormalizedOpenCAEModel, loadNam
   ));
 }
 
-export function assembleLumpedMass(model: NormalizedOpenCAEModel, analysisLabel: "Dynamic" | "Modal" = "Dynamic"):
+export function assembleLumpedMass(model: NormalizedOpenFEAModel, analysisLabel: "Dynamic" | "Modal" = "Dynamic"):
   | { ok: true; dofMass: Float64Array; totalMass: number }
   | { ok: false; error: CpuSolverError } {
   const nodalMass = new Float64Array(model.counts.nodes);

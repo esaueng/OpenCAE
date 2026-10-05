@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
-import { OPENCAE_MODEL_SCHEMA_VERSION, type OpenCAEModelJson } from "@opencae/core";
+import { OPENFEA_MODEL_SCHEMA_VERSION, type OpenFEAModelJson } from "@openfea/core";
 import { solveSteadyStateThermal } from "../src";
 
 describe("steady-state thermal", () => {
   test("recovers the exact linear temperature and Fourier heat flux in a Tet4", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       schema: "opencae.model",
-      schemaVersion: OPENCAE_MODEL_SCHEMA_VERSION,
+      schemaVersion: OPENFEA_MODEL_SCHEMA_VERSION,
       nodes: { coordinates: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] },
       materials: [{
         name: "thermal-solid",

@@ -1,21 +1,21 @@
-# OpenCAE Core Validation Suite
+# OpenFEA Core Validation Suite
 
-This document defines the Core validation suite for mesh-native OpenCAE models. The suite is intended to run without UI, Cloud FEA, React, or browser services.
+This document defines the Core validation suite for mesh-native OpenFEA models. The suite is intended to run without UI, Cloud FEA, React, or browser services.
 
 ## How To Run
 
 ```sh
-pnpm --filter @opencae/core test
-pnpm --filter @opencae/solver-cpu test
+pnpm --filter @openfea/core test
+pnpm --filter @openfea/solver-cpu test
 ```
 
 For compiler coverage:
 
 ```sh
-pnpm --filter @opencae/core typecheck
-pnpm --filter @opencae/solver-cpu typecheck
-pnpm --filter @opencae/core build
-pnpm --filter @opencae/solver-cpu build
+pnpm --filter @openfea/core typecheck
+pnpm --filter @openfea/solver-cpu typecheck
+pnpm --filter @openfea/core build
+pnpm --filter @openfea/solver-cpu build
 ```
 
 ## Supported Model Schema
@@ -41,7 +41,7 @@ Constraints must remove rigid-body modes. Missing or insufficient constraints ar
 Production APIs do not fall back to local estimates, display-bounds proxy solves, or preview dynamic scaling. A model that identifies its mesh source as a display-bounds proxy is rejected with:
 
 ```text
-OpenCAE Core requires an actual volume mesh for this solve. No estimate fallback was used.
+OpenFEA Core requires an actual volume mesh for this solve. No estimate fallback was used.
 ```
 
 Dynamic solves require density on every solved material. Missing density fails with:

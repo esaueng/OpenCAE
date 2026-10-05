@@ -1,0 +1,346 @@
+/* ─────────────────────────────────────────────────────────────
+   OpenFEA Design Tokens
+   Drop in at: apps/openfea-web/src/theme/tokens.css
+   Import once in main.tsx BEFORE any component imports.
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surfaces & text ──────────────────────────────────── */
+  --color-bg: #0b0f14;
+  --color-surface: #111821;
+  --color-surface-2: #17202b;
+  --color-surface-hover: #1b2430;
+  --color-border: #2a3441;
+  --color-border-strong: #3a4554;
+  --color-text: #e6edf3;
+  --color-text-muted: #8b949e;
+  --color-text-subtle: #828d99; /* 4.87:1 vs --color-surface-2 #17202b (WCAG 1.4.3/1.4.11 AA) */
+
+  /* ── Semantic ─────────────────────────────────────────── */
+  --color-accent: #4da3ff;
+  --color-accent-dim: rgba(77, 163, 255, 0.12);
+  --color-accent-border: rgba(77, 163, 255, 0.45);
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-success: #22c55e;
+  --color-viewport-bg: #070b10;
+  /* Ink on an accent fill (primary buttons, selected radios). */
+  --color-on-accent: #06111e;
+  /* Chart series that must read on both surfaces; ramp colours are tuned for the
+     dark viewport and fall to ~2:1 on the light panel. */
+  --color-series-1: #38bdf8;
+  --color-series-2: #fb923c;
+
+  /* ── General-purpose result accents. The actual WebGL and HTML contour
+     ramps are generated together by resultColorScale.ts. ── */
+  --color-ramp-0: #0759d6;
+  --color-ramp-1: #0ea5e9;
+  --color-ramp-2: #22c55e;
+  --color-ramp-3: #facc15;
+  --color-ramp-4: #f97316;
+  --color-ramp-5: #ef4444;
+
+  /* ── Typography ───────────────────────────────────────── */
+  --font-ui: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --fs-mini: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 22px;
+  --fs-display: 38px;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+
+  --lh-tight: 1.35;
+  --lh-normal: 1.5;
+  --lh-loose: 1.7;
+
+  --ls-eyebrow: 0.14em;
+  --ls-tagline: 0.2em;
+
+  /* ── Spacing scale (4-based) ──────────────────────────────
+     --sp-15 and --sp-25 are the half-steps the stylesheet had already been writing
+     by hand ~115 times; naming them is what lets the component tier below exist. */
+  --sp-1: 4px;
+  --sp-15: 6px;
+  --sp-2: 8px;
+  --sp-25: 10px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* ── Component tier ───────────────────────────────────────
+     tokens.css had primitives and app.css had components, with nothing in between —
+     so 800-odd rules each re-derived their own box and the interface could express
+     value but not rank. These are the shared shapes; every value here is one the app
+     already rendered, so introducing them moved nothing. */
+
+  /* Interactive heights. Every control takes one of these; a new literal height on a
+     control is a tier miss, not a new size. sm is also the WCAG 2.5.8 target floor.
+       sm    compact chrome: tabs, links, chips, close/remove glyphs
+       md    fields, selects, segmented controls, rail links
+       lg    action and icon buttons
+       xl    start-screen calls to action
+       touch the floor for primary controls at phone width */
+  --control-h-sm: 24px;
+  --control-h-md: 30px;
+  --control-h-lg: 34px;
+  --control-h-xl: 44px;
+  --control-h-touch: 40px;
+
+  /* Card interiors. */
+  --card-pad: 10px;
+  --card-pad-tight: 8px;
+  --card-radius: var(--radius-md);
+
+  /* Grouping. One value was doing both jobs, which is why nothing grouped. */
+  --gap-block: 12px;
+  --gap-section: 28px;
+
+  --fw-semibold: 600;
+  --lh-snug: 1.45;
+
+  /* ── Radii ────────────────────────────────────────────── */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-pill: 10px;
+  /* Floating surfaces (dialogs, popovers, the gallery). Controls and cards stay at
+     --radius-md; overlays ranged 4-18px with no rule between them. */
+  --radius-overlay: 8px;
+
+  /* ── Shadows ──────────────────────────────────────────── */
+  --shadow-panel: 0 14px 38px rgba(0, 0, 0, 0.32);
+
+  /* ── Layout dimensions ────────────────────────────────── */
+  --topbar-h: 44px;
+  --statusbar-h: 30px;
+  --stepbar-w: 124px;
+  /* Grows past 1560px wide so the panel keeps pace with a large viewer; at
+     1920 the fixed 344px left it 18% of the screen and wrapped its headline. */
+  --context-w: clamp(344px, 22vw, 420px);
+
+  /* ── Motion ───────────────────────────────────────────── */
+  --dur-fast: 100ms;
+  --dur-base: 200ms;
+  --dur-slow: 500ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Z-index scale ──────────────────────────────────────
+     One source of truth for the app's stacking order, lowest first. Values are
+     the ones the app already rendered before they were named; --z-modal (50)
+     and --z-start-screen (100) were dropped because no layer sits at those
+     depths. Bare `z-index: 1` inside a component stays bare: it orders siblings
+     within one stacking context and is not an app layer.
+
+     Known inconsistency, left alone deliberately: the two modal backdrops sit
+     at different depths (--z-modal-backdrop 30 vs --z-gallery-backdrop 120)
+     with the condition menu and popover between them, so a popover floats over
+     the workflow modal's backdrop but under the gallery's. Aligning them is a
+     visible stacking change and needs its own review. */
+  --z-base: 0;
+  --z-viewer-overlay: 2;
+  --z-log-drawer: 5;
+  --z-viewer-import-overlay: 20;
+  --z-modal-backdrop: 30;
+  --z-condition-menu: 35;
+  --z-popover: 40;
+  --z-gallery-backdrop: 120;
+  --z-tooltip: 1000;
+  --z-skip-link: 9999;
+}
+
+.theme-light {
+  --color-bg: #edf2f7;
+  --color-surface: #f8fafc;
+  --color-surface-2: #e9eff6;
+  --color-surface-hover: #dfe8f2;
+  --color-border: #c8d2df;
+  --color-border-strong: #aebbc9;
+  --color-text: #17202b;
+  --color-text-muted: #536170;
+  --color-text-subtle: #5f6b7a;
+  --color-accent: #0b63b6;
+  --color-accent-dim: rgba(22, 119, 210, 0.12);
+  --color-accent-border: rgba(22, 119, 210, 0.42);
+  --color-warning: #854d0e; /* #a16207 fell to 3.7-4.0:1 on its own 12% warning tint */
+  --color-error: #b91c1c;
+  --color-success: #15803d;
+  --color-viewport-bg: #f7f9fc;
+  --color-on-accent: #f8fbff;
+  --color-series-1: #0369a1;
+  --color-series-2: #c2410c;
+  --shadow-panel: 0 12px 30px rgba(37, 54, 73, 0.14);
+  color-scheme: light;
+}
+
+/* ── Borders (composed) ─────────────────────────────────────
+   A custom property that references another resolves where it is declared,
+   so these must be declared again in every scope that re-themes the colours.
+   Declared only in :root, light mode inherited the dark #2a3441 into all 94
+   borders drawn with them. */
+:root,
+.theme-light {
+  --border-thin: 1px solid var(--color-border);
+  --border-strong: 1px solid var(--color-border-strong);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Base reset (minimal — expand in a separate reset if needed)
+   ───────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  line-height: var(--lh-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Hover and press states snapped: 10 transitions in the whole stylesheet, none on
+   the shared buttons. Components that animate something else still override this. */
+button,
+a,
+summary {
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+/* There is zero relative font sizing anywhere in this app's CSS, which makes the browser
+   default `small { font-size: smaller }` (0.8333em) provably the only source of the
+   sub-11px text the interface was rendering — the legend's Low/High at 9.58px and the
+   colour-scale range line at 10.83px, a measured value rendering smaller than its own
+   caption. Anchor it to the scale instead.
+
+   `strong` is deliberately NOT reset here: 17 rules already set --fw-medium on it
+   explicitly, which is evidence the codebase treats bold-vs-medium as a per-component
+   choice rather than a global one. */
+small {
+  font-size: var(--fs-xs);
+}
+
+/* Unstyled headings otherwise render at the UA's bold 700 and em-based sizes, which is
+   where the off-token weights came from. Components set their own real size. */
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+  font-weight: var(--fw-medium);
+}
+
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: var(--border-thin);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  height: var(--control-h-md);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-dim);
+}
+
+/* The text-field box above is wrong for native ticks: every checkbox inherited a
+   30px height and 6px/8px padding, so a list of them ran ~66px per row. */
+input[type="checkbox"],
+input[type="radio"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+input[type="checkbox"]:focus,
+input[type="radio"]:focus {
+  box-shadow: none;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Reduced motion: disable non-essential animation/transition
+   ───────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Custom scrollbar (WebKit — dark, subtle)
+   ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Utility: mono
+   Use sparingly — prefer the <code> element or component props.
+   ───────────────────────────────────────────────────────────── */
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "zero" 1;
+}

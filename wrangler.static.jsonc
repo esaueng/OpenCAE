@@ -1,12 +1,12 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   // Static/local-first Worker. Do not deploy to the production custom domains.
-  "name": "opencae-static",
-  "main": "apps/opencae-web/worker/index.ts",
+  "name": "openfea-static",
+  "main": "apps/openfea-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
-    "directory": "apps/opencae-web/dist",
+    "directory": "apps/openfea-web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health", "/healthz"]

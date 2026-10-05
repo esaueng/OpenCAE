@@ -18,8 +18,11 @@ const rootDir = resolve(import.meta.dirname, "..");
 const RETIRED_TOKENS = [
   "/api/cloud-core",
   "runOpenCaeCoreCloudSimulation",
+  "runOpenFeaCoreCloudSimulation",
   "startOpenCaeCoreCloudRun",
+  "startOpenFeaCoreCloudRun",
   "openCaeCoreCloudSolveRequest",
+  "openFeaCoreCloudSolveRequest",
   "CORE_CLOUD_CONTAINER",
   "CORE_CLOUD_ARTIFACTS",
   "EXPECTED_CORE_CLOUD_RUNNER_VERSION",
@@ -27,7 +30,7 @@ const RETIRED_TOKENS = [
 ];
 
 /** Tokens that indicate the repo still depends on a sibling Core checkout. */
-const STANDALONE_FORBIDDEN_TOKENS = ["../opencae-core/", "OPENCAE_CORE_REF"];
+const STANDALONE_FORBIDDEN_TOKENS = ["../opencae-core/", "OPENCAE_CORE_REF", "../openfea-core/", "OPENFEA_CORE_REF"];
 const STANDALONE_TOKEN_ALLOWLIST = new Set([
   "scripts/cloud-retirement-guard.test.mjs",
   "scripts/verify-cloudflare-config.test.mjs"
@@ -53,21 +56,21 @@ const STANDALONE_TOKEN_ALLOWLIST = new Set([
 const ALLOWLIST = [
   { path: "scripts/cloud-retirement-guard.test.mjs", tokens: "*", reason: "this guard names the tokens it hunts" },
   { path: "scripts/record-core-cloud-golden.mts", tokens: "*", reason: "frozen-contract recorder (permanent keeper)" },
-  { path: "apps/opencae-web/src/testdata/core-cloud-golden/", tokens: "*", reason: "golden fixtures + provenance README (permanent keepers)" },
-  { path: "apps/opencae-web/src/lib/coreCloudGolden.test.ts", tokens: "*", reason: "characterization test of the frozen contract" },
+  { path: "apps/openfea-web/src/testdata/core-cloud-golden/", tokens: "*", reason: "golden fixtures + provenance README (permanent keepers)" },
+  { path: "apps/openfea-web/src/lib/coreCloudGolden.test.ts", tokens: "*", reason: "characterization test of the frozen contract" },
   { path: "docs/cloud-retirement.md", tokens: "*", reason: "the historical record of what was retired" },
   {
-    path: "apps/opencae-web/worker/index.ts",
+    path: "apps/openfea-web/worker/index.ts",
     tokens: ["/api/cloud-core"],
     reason: "the 410 tombstone must recognize the retired route to answer it honestly"
   },
   {
-    path: "apps/opencae-web/worker/index.test.ts",
+    path: "apps/openfea-web/worker/index.test.ts",
     tokens: ["/api/cloud-core", "CORE_CLOUD_CONTAINER", "CORE_CLOUD_ARTIFACTS", "EXPECTED_CORE_CLOUD_RUNNER_VERSION", "x-opencae-run-token"],
     reason: "tests the 410 tombstone and asserts the infrastructure tokens are ABSENT from the worker"
   },
   {
-    path: "apps/opencae-web/src/lib/api.test.ts",
+    path: "apps/openfea-web/src/lib/api.test.ts",
     tokens: ["/api/cloud-core", "x-opencae-run-token"],
     reason: "negative assertions that the client carries no cloud-solve plumbing (B4a)"
   },
@@ -98,7 +101,7 @@ const SWEPT_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
   ".json", ".jsonc", ".md", ".yml", ".yaml", ".html", ".css", ".txt", ".toml", ".sh"
 ]);
-const SWEPT_EXTENSIONLESS = new Set(["Dockerfile", "_headers", "OPENCAE_CORE_REF"]);
+const SWEPT_EXTENSIONLESS = new Set(["Dockerfile", "_headers", "OPENFEA_CORE_REF"]);
 const SKIPPED_DIRECTORIES = new Set(["node_modules", "dist", ".git", ".claude", "coverage"]);
 const SKIPPED_RELATIVE_DIRECTORIES = new Set(["data/artifacts", "data/logs", "data/reports", "data/sqlite"]);
 
@@ -161,7 +164,7 @@ describe("cloud retirement guard", () => {
 
   test("the retired infrastructure files stay deleted", () => {
     for (const retiredPath of [
-      "services/opencae-core-cloud",
+      "services/openfea-core-cloud",
       "wrangler.containers.jsonc",
       "wrangler.local-first.jsonc",
       "scripts/verify-runner-version.mjs"
@@ -170,7 +173,7 @@ describe("cloud retirement guard", () => {
     }
   });
 
-  test("production files do not depend on a sibling OpenCAE Core checkout", () => {
+  test("production files do not depend on a sibling OpenFEA Core checkout", () => {
     const offenders = [];
     for (const path of sweptFiles()) {
       if (path.startsWith("docs/") || path.startsWith("plans/") || STANDALONE_TOKEN_ALLOWLIST.has(path)) continue;
@@ -184,9 +187,9 @@ describe("cloud retirement guard", () => {
 
   // Bundle proof: when a production build exists, the emitted chunks must be
   // free of ALL retired tokens — no allowlist applies to shipped bytes.
-  // (CI runs tests without a dist; run `pnpm --filter @opencae/web build`
+  // (CI runs tests without a dist; run `pnpm --filter @openfea/web build`
   // first to exercise this locally or in a build-then-test pipeline.)
-  const distDir = resolve(rootDir, "apps/opencae-web/dist");
+  const distDir = resolve(rootDir, "apps/openfea-web/dist");
   test.skipIf(!existsSync(distDir))("emitted web bundle contains no retired cloud symbols", () => {
     const offenders = [];
     scanDist(distDir, offenders);

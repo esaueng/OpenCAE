@@ -1,7 +1,7 @@
 {
-  "name": "@opencae/core",
+  "name": "@openfea/core",
   "version": "0.1.5",
-  "description": "Core model, validation, DOF, and numerical utilities for OpenCAE Core.",
+  "description": "Core model, validation, DOF, and numerical utilities for OpenFEA Core.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",

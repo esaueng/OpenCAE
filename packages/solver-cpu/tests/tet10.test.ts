@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { elevateTet4MeshToTet10, normalizeModelJson, type OpenCAEModelJson } from "@opencae/core";
+import { elevateTet4MeshToTet10, normalizeModelJson, type OpenFEAModelJson } from "@openfea/core";
 import {
   computeTet10ElementStiffness,
   computeTet10Volume,
@@ -141,7 +141,7 @@ describe("Tet10 element", () => {
 });
 
 type BeamMesh = {
-  model: OpenCAEModelJson;
+  model: OpenFEAModelJson;
   tipNodeCount: number;
 };
 
@@ -205,7 +205,7 @@ function buildCantileverBeamModel(elementType: "Tet4" | "Tet10", cellsX: number)
     if (Math.abs(x - BEAM_LENGTH) < 1e-9) tipNodes.push(node);
   }
 
-  const model: OpenCAEModelJson = {
+  const model: OpenFEAModelJson = {
     schema: "opencae.model",
     schemaVersion: "0.1.0",
     nodes: { coordinates: finalCoordinates },
@@ -247,12 +247,12 @@ function buildCantileverBeamModel(elementType: "Tet4" | "Tet10", cellsX: number)
         loads: ["tipLoad"]
       }
     ]
-  } as OpenCAEModelJson;
+  } as OpenFEAModelJson;
 
   return { model, tipNodeCount: tipNodes.length };
 }
 
-function tipDeflection(model: OpenCAEModelJson): number {
+function tipDeflection(model: OpenFEAModelJson): number {
   const result = solveStaticLinearTet4Cpu(model, { tolerance: 1e-12 });
   expect(result.ok).toBe(true);
   if (!result.ok) return 0;
@@ -367,7 +367,7 @@ describe("Tet10 cantilever fidelity", () => {
 
   test("predicts the first cantilever frequency within ten percent of Euler-Bernoulli theory", () => {
     const { model } = buildCantileverBeamModel("Tet10", 8);
-    const modalModel: OpenCAEModelJson = {
+    const modalModel: OpenFEAModelJson = {
       ...model,
       schemaVersion: "0.3.0",
       loads: [],

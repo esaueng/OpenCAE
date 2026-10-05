@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const PORT = Number(process.env.PORT ?? 5199);
 const CDP_PORT = Number(process.env.CDP_PORT ?? 9337);
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const profileDir = mkdtempSync(join(tmpdir(), "opencae-project-results-"));
+const profileDir = mkdtempSync(join(tmpdir(), "openfea-project-results-"));
 const children = [];
 
 function chromeBinary() {
@@ -131,7 +131,7 @@ async function callInPage(cdp, fn, ...args) {
 let activeCdp;
 
 async function run() {
-  spawnChild("pnpm", ["--filter", "@opencae/web", "exec", "vite", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: repoRoot });
+  spawnChild("pnpm", ["--filter", "@openfea/web", "exec", "vite", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], { cwd: repoRoot });
   await waitFor("Vite", async () => (await fetch(`http://127.0.0.1:${PORT}/`)).ok);
   spawnChild(chromeBinary(), ["--headless=new", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check", `--user-data-dir=${profileDir}`, `--remote-debugging-port=${CDP_PORT}`, "about:blank"]);
   const cdp = await connectCdp();
@@ -141,7 +141,7 @@ async function run() {
   await cdp.send("Page.enable");
   cdp.on("Runtime.exceptionThrown", (params) => errors.push(params.exceptionDetails?.exception?.description ?? params.exceptionDetails?.text));
   await cdp.send("Page.navigate", { url: `http://127.0.0.1:${PORT}/` });
-  await waitFor("app", () => evaluate(cdp, 'document.title.includes("OpenCAE") && document.body.innerText.includes("Create new project")'));
+  await waitFor("app", () => evaluate(cdp, 'document.title.includes("OpenFEA") && document.body.innerText.includes("Create new project")'));
   const fixture = await waitFor("fixture imports", () => evaluate(cdp, `(async () => {
     const { loadSampleProject } = await import('/src/lib/api.ts');
     const { project, displayModel } = await loadSampleProject('cantilever', 'dynamic_structural');
@@ -157,11 +157,11 @@ async function run() {
   async function restore(projectFile, ui) {
     const token = `${Date.now()}-${Math.random()}`;
     await callInPage(cdp, (projectFile, ui, token) => {
-      sessionStorage.setItem('opencae-test-fixture', JSON.stringify({ projectFile, ui, token }));
+      sessionStorage.setItem('openfea-test-fixture', JSON.stringify({ projectFile, ui, token }));
     }, projectFile, ui, token);
     const injection = await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
-      const fixture = JSON.parse(sessionStorage.getItem('opencae-test-fixture'));
-      sessionStorage.removeItem('opencae-test-fixture');
+      const fixture = JSON.parse(sessionStorage.getItem('openfea-test-fixture'));
+      sessionStorage.removeItem('openfea-test-fixture');
       window.__projectFixtureToken = fixture.token;
       localStorage.clear();
       localStorage.setItem('opencae.workspace.autosave.v1', JSON.stringify({ version: 1, savedAt: new Date().toISOString(), projectFile: fixture.projectFile, ui: fixture.ui }));
@@ -171,14 +171,14 @@ async function run() {
     await cdp.send("Page.removeScriptToEvaluateOnNewDocument", { identifier: injection.result.identifier });
     await evaluate(cdp, `(() => {
       window.__savedProject = null;
-      window.showSaveFilePicker = async () => ({ name: 'proof.opencae.json', createWritable: async () => ({ write: async blob => { window.__savedProject = JSON.parse(await blob.text()); }, close: async () => {} }) });
+      window.showSaveFilePicker = async () => ({ name: 'proof.openfea.json', createWritable: async () => ({ write: async blob => { window.__savedProject = JSON.parse(await blob.text()); }, close: async () => {} }) });
     })()`);
   }
   async function save() {
     await evaluate(cdp, `(() => { window.__savedProject = null; window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })); })()`);
     return waitFor("saved project", () => evaluate(cdp, 'window.__savedProject'));
   }
-  const projectFile = { format: "opencae-local-project", version: 2, savedAt: new Date().toISOString(), project: fixture.project, displayModel: fixture.displayModel, results: fixture.results };
+  const projectFile = { format: "openfea-local-project", version: 2, savedAt: new Date().toISOString(), project: fixture.project, displayModel: fixture.displayModel, results: fixture.results };
   const ui = { activeStep: "results", viewMode: "results", homeRequested: false, resultMode: "stress", logs: [], undoStack: [fixture.previous], redoStack: [], runProgress: 100, completedRunId: "run-local-history-proof" };
   for (const direction of ["Undo", "Redo"]) {
     await restore(projectFile, { ...ui, undoStack: direction === "Undo" ? [fixture.previous] : [], redoStack: direction === "Redo" ? [fixture.previous] : [] });

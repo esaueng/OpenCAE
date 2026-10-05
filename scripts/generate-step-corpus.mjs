@@ -1,5 +1,5 @@
 // Regenerates the A-M3 STEP robustness corpus fixtures under
-// libs/opencae-mesh-intake/fixtures/ from the deterministic gmsh-wasm OCC
+// libs/openfea-mesh-intake/fixtures/ from the deterministic gmsh-wasm OCC
 // generators in stepFixtures.ts (box-with-bore.step predates this corpus and
 // keeps its original generator, generateBoxWithBoreStep).
 //
@@ -7,8 +7,8 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const fixturesDir = new URL("../libs/opencae-mesh-intake/fixtures/", import.meta.url);
-const generators = await import("../libs/opencae-mesh-intake/src/stepFixtures.ts");
+const fixturesDir = new URL("../libs/openfea-mesh-intake/fixtures/", import.meta.url);
+const generators = await import("../libs/openfea-mesh-intake/src/stepFixtures.ts");
 
 const corpus = [
   ["filleted-block.step", generators.generateFilletedBlockStep],

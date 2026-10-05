@@ -19,7 +19,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     const readme = readFileSync(resolve(rootDir, "README.md"), "utf8");
 
     expect(defaultConfig.name).toBe("opencae");
-    expect(staticConfig.name).toBe("opencae-static");
+    expect(staticConfig.name).toBe("openfea-static");
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
@@ -36,22 +36,25 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
   test("retired container and local-first wrangler variants stay deleted", () => {
     expect(existsSync(resolve(rootDir, "wrangler.containers.jsonc"))).toBe(false);
     expect(existsSync(resolve(rootDir, "wrangler.local-first.jsonc"))).toBe(false);
-    expect(existsSync(resolve(rootDir, "services/opencae-core-cloud"))).toBe(false);
+    expect(existsSync(resolve(rootDir, "services/openfea-core-cloud"))).toBe(false);
     expect(existsSync(resolve(rootDir, "scripts/verify-runner-version.mjs"))).toBe(false);
   });
 
-  test("OpenCAE Core packages are in-repo and sibling bootstrap files stay deleted", () => {
+  test("OpenFEA Core packages are in-repo and sibling bootstrap files stay deleted", () => {
     for (const packageDir of ["core", "examples", "solver-cpu", "solver-webgpu", "viewer"]) {
       expect(existsSync(resolve(rootDir, "packages", packageDir, "package.json")), packageDir).toBe(true);
     }
     for (const retiredPath of [
       "OPENCAE_CORE_REF",
+      "OPENFEA_CORE_REF",
       "scripts/ensure-opencae-core.mjs",
+      "scripts/ensure-openfea-core.mjs",
       "scripts/verify-core-ref-reachable.mjs"
     ]) {
       expect(existsSync(resolve(rootDir, retiredPath)), retiredPath).toBe(false);
     }
     const workspace = readFileSync(resolve(rootDir, "pnpm-workspace.yaml"), "utf8");
+    expect(workspace).not.toContain("../openfea-core");
     expect(workspace).not.toContain("../opencae-core");
     const packageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
     expect(packageJson.scripts).not.toHaveProperty("ensure:core");
@@ -127,7 +130,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
   test("fails if retired container scripts return to package.json", () => {
     const { defaultConfig, staticConfig } = readCloudflareConfigs(rootDir);
     const packageJson = clone(JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8")));
-    packageJson.scripts["containers:build:core-cloud"] = "wrangler containers build services/opencae-core-cloud";
+    packageJson.scripts["containers:build:core-cloud"] = "wrangler containers build services/openfea-core-cloud";
 
     expect(() => validateCloudflareConfigs({ defaultConfig, staticConfig, packageJson })).toThrow(
       /containers:build:core-cloud was retired/

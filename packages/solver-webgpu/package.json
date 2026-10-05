@@ -1,7 +1,7 @@
 {
-  "name": "@opencae/solver-webgpu",
+  "name": "@openfea/solver-webgpu",
   "version": "0.1.2",
-  "description": "WebGPU solver backend for OpenCAE Core.",
+  "description": "WebGPU solver backend for OpenFEA Core.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -13,11 +13,11 @@
     }
   },
   "dependencies": {
-    "@opencae/core": "workspace:*",
-    "@opencae/solver-cpu": "workspace:*"
+    "@openfea/core": "workspace:*",
+    "@openfea/solver-cpu": "workspace:*"
   },
   "devDependencies": {
-    "@opencae/examples": "workspace:*"
+    "@openfea/examples": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

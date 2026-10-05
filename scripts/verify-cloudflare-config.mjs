@@ -2,7 +2,7 @@
 
 // Deploy gate for the post-cloud-retirement Cloudflare configs (2026-07).
 // The production Worker serves static assets plus consent-gated encrypted
-// recovery backups; simulations still run in the browser with OpenCAE Core. This script fails the deploy if a config or
+// recovery backups; simulations still run in the browser with OpenFEA Core. This script fails the deploy if a config or
 // package script quietly reintroduces the retired OpenCAE Core Cloud
 // infrastructure (container, Durable Object, R2 artifact bucket) or drops
 // the production domain/asset wiring. See docs/cloud-retirement.md.

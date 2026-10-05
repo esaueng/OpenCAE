@@ -1,15 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { bracketActualMeshFixture, singleTetStaticFixture } from "@opencae/examples";
+import { bracketActualMeshFixture, singleTetStaticFixture } from "@openfea/examples";
 import {
   connectedComponents,
   nodeSetFromSurfaceSet,
   normalizeModelJson,
   solverSurfaceMeshFromModel,
   surfaceArea,
-  type OpenCAEModelJson,
+  type OpenFEAModelJson,
   type SolverSurfaceMesh,
   type SurfaceSetJson
-} from "@opencae/core";
+} from "@openfea/core";
 import { createHexBarModel, createStructuredCantileverModel, dynamicLoadedModel } from "./helpers";
 import {
   solveDynamicLinearTetMDOF,
@@ -27,7 +27,7 @@ import {
 
 describe("Core validation suite static benchmarks", () => {
   test("produces equivalent physical results in m-Pa and mm-MPa solver units", () => {
-    const meterModel: OpenCAEModelJson = {
+    const meterModel: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
       materials: [{
@@ -35,7 +35,7 @@ describe("Core validation suite static benchmarks", () => {
         yieldStrength: 250e6
       }]
     };
-    const millimeterModel: OpenCAEModelJson = {
+    const millimeterModel: OpenFEAModelJson = {
       ...meterModel,
       coordinateSystem: { solverUnits: "mm-N-s-MPa", renderCoordinateSpace: "solver" },
       nodes: {
@@ -79,12 +79,12 @@ describe("Core validation suite static benchmarks", () => {
   });
 
   test("produces equivalent physical dynamics in m and mm-MPa solver units", () => {
-    const meterModel: OpenCAEModelJson = {
+    const meterModel: OpenFEAModelJson = {
       ...dynamicLoadedModel("ramp"),
       coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
       materials: [{ ...dynamicLoadedModel("ramp").materials[0], density: 2700, yieldStrength: 250e6 }]
     };
-    const millimeterModel: OpenCAEModelJson = {
+    const millimeterModel: OpenFEAModelJson = {
       ...meterModel,
       coordinateSystem: { solverUnits: "mm-N-s-MPa", renderCoordinateSpace: "solver" },
       nodes: { coordinates: meterModel.nodes.coordinates.map((coordinate) => coordinate * 1_000) },
@@ -128,7 +128,7 @@ describe("Core validation suite static benchmarks", () => {
 
   test("produces equivalent physical modal frequencies in m and mm-MPa solver units", () => {
     const density = 2700;
-    const meterModel: OpenCAEModelJson = {
+    const meterModel: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.3.0",
       coordinateSystem: { solverUnits: "m-N-s-Pa", renderCoordinateSpace: "solver" },
@@ -141,7 +141,7 @@ describe("Core validation suite static benchmarks", () => {
         modeCount: 1
       }]
     };
-    const millimeterModel: OpenCAEModelJson = {
+    const millimeterModel: OpenFEAModelJson = {
       ...meterModel,
       coordinateSystem: { solverUnits: "mm-N-s-MPa", renderCoordinateSpace: "solver" },
       nodes: { coordinates: meterModel.nodes.coordinates.map((coordinate) => coordinate * 1_000) },
@@ -175,7 +175,7 @@ describe("Core validation suite static benchmarks", () => {
   });
 
   test("produces equivalent physical conduction in m and mm-MPa solver units", () => {
-    const build = (solverUnits: "m-N-s-Pa" | "mm-N-s-MPa", lengthScale: number, conductivity: number): OpenCAEModelJson => ({
+    const build = (solverUnits: "m-N-s-Pa" | "mm-N-s-MPa", lengthScale: number, conductivity: number): OpenFEAModelJson => ({
       schema: "opencae.model",
       schemaVersion: "0.4.0",
       nodes: { coordinates: [0, 0, 0, lengthScale, 0, 0, 0, lengthScale, 0, 0, 0, lengthScale] },
@@ -587,7 +587,7 @@ describe("Core validation suite sparse solver", () => {
   });
 
   test("singular unconstrained model fails clearly while constrained model solves", () => {
-    const singular: OpenCAEModelJson = {
+    const singular: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       boundaryConditions: [],
       steps: [{ name: "loadStep", type: "staticLinear", boundaryConditions: [], loads: ["tipLoad"] }]
@@ -724,11 +724,11 @@ describe("Core validation suite complex geometry regression", () => {
   });
 });
 
-function getNodeSet(model: OpenCAEModelJson, name: string): number[] {
+function getNodeSet(model: OpenFEAModelJson, name: string): number[] {
   return model.nodeSets.find((nodeSet) => nodeSet.name === name)?.nodes ?? [];
 }
 
-function getSurfaceSet(model: OpenCAEModelJson, name: string): SurfaceSetJson {
+function getSurfaceSet(model: OpenFEAModelJson, name: string): SurfaceSetJson {
   const surfaceSet = model.surfaceSets?.find((set) => set.name === name);
   if (!surfaceSet) throw new Error(`Missing surface set ${name}`);
   return surfaceSet;

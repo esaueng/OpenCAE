@@ -19,14 +19,14 @@ Correction recorded during audit: gmsh's default element order is **1**, so uplo
 
 ## Current state (verified excerpts)
 
-Units default — `services/opencae-core-cloud/src/mesh/generateCoreVolumeMesh.ts:22-23`:
+Units default — `services/openfea-core-cloud/src/mesh/generateCoreVolumeMesh.ts:22-23`:
 
 ```ts
 if (geometry.kind === "uploaded_cad") return generateGmshVolumeMeshFromUpload(geometry, { units: geometry.units ?? "m", ...options });
 if (geometry.kind === "uploaded_mesh") return parseUploadedMeshGeometry(geometry, { units: geometry.units ?? "m", ...options });
 ```
 
-Quality summary is volumes-only — `services/opencae-core-cloud/src/mesh/gmsh.ts:481-490`:
+Quality summary is volumes-only — `services/openfea-core-cloud/src/mesh/gmsh.ts:481-490`:
 
 ```ts
 return {
@@ -38,7 +38,7 @@ return {
 
 Default gmsh args have no element-order flag — `gmsh.ts:524-531` (`[input, "-3", "-format", "msh2", "-o", output]`). Parser retains Tet10 (typeCode 11). Solver rejects Tet4-less blocks late (`packages/solver-cpu/src/solver.ts:428`).
 
-Unpinned mesher — `services/opencae-core-cloud/Dockerfile:8-9`: `apt-get install -y --no-install-recommends gmsh ca-certificates`.
+Unpinned mesher — `services/openfea-core-cloud/Dockerfile:8-9`: `apt-get install -y --no-install-recommends gmsh ca-certificates`.
 
 Artifacts deleted after parse — `gmsh.ts:120-122` (`finally { await rm(workdir, …) }`); only the parsed mesh survives.
 
@@ -50,7 +50,7 @@ Verified-good behavior to preserve: inverted-element rejection at intake (`coreM
 
 - Errors: `CoreCloudMeshingError(code, message, { status?, diagnostics? })` (`gmsh.ts`); kebab-case codes; server maps them in `solvePreparationErrorResponse` (`server.ts:333-347`).
 - Diagnostics: plain objects via `cloudMeshDiagnostics.ts` — extend, don't restructure.
-- Tests: `services/opencae-core-cloud/tests/{mesh.test.ts,geometry-intake.test.ts}` — match style; gmsh may be unavailable on dev machines, so tests must skip or mock where the suite already does (read how existing meshing tests handle gmsh absence first).
+- Tests: `services/openfea-core-cloud/tests/{mesh.test.ts,geometry-intake.test.ts}` — match style; gmsh may be unavailable on dev machines, so tests must skip or mock where the suite already does (read how existing meshing tests handle gmsh absence first).
 - Plan 002 also edits `gmsh.ts` (availability caching, top of file); this plan's edits are in parsing/args/quality regions — coordinate if both in flight.
 
 ## Steps
@@ -59,13 +59,13 @@ Verified-good behavior to preserve: inverted-element rejection at intake (`coreM
 
 In `generateCoreVolumeMesh.ts`, for `uploaded_cad` and `uploaded_mesh`: when `geometry.units` is absent, throw `CoreCloudMeshingError("units-required", "Uploaded geometry requires an explicit units field (\"mm\" or \"m\"). No default is applied.", { status: 400 })`. Procedural/structured sources keep their own explicit unit handling (bracket declares mm; structured block resolves its own scale — leave both alone).
 
-This changes behavior for any client relying on the meter default. Search this repo's tests for uploads without units and update them to declare units; flag in your report that **external clients must be notified** (the OpenCAE app proxy repo is external — out of reach from here).
+This changes behavior for any client relying on the meter default. Search this repo's tests for uploads without units and update them to declare units; flag in your report that **external clients must be notified** (the OpenFEA app proxy repo is external — out of reach from here).
 
 Additionally: after parsing, include the mesh bounding-box extents (in meters) in the mesh diagnostics so scale errors are visible at a glance (e.g. `boundingBoxMeters: [dx, dy, dz]`).
 
 ### Step 2 — Pin gmsh in the Docker image
 
-In `services/opencae-core-cloud/Dockerfile`, pin the gmsh package version: determine the version available in the base image's Debian release (`docker run --rm node:22-slim bash -lc "apt-get update >/dev/null && apt-cache madison gmsh"`) and pin it (`gmsh=<version>`). Add a comment with the pinned upstream gmsh version string. If the repo offers exactly one version and it can drift only with the Debian snapshot, pin the **base image by digest** instead and document that the digest pins gmsh transitively. Health already reports `gmshVersion` at runtime — no code change needed.
+In `services/openfea-core-cloud/Dockerfile`, pin the gmsh package version: determine the version available in the base image's Debian release (`docker run --rm node:22-slim bash -lc "apt-get update >/dev/null && apt-cache madison gmsh"`) and pin it (`gmsh=<version>`). Add a comment with the pinned upstream gmsh version string. If the repo offers exactly one version and it can drift only with the Debian snapshot, pin the **base image by digest** instead and document that the digest pins gmsh transitively. Health already reports `gmshVersion` at runtime — no code change needed.
 
 ### Step 3 — Element-quality metrics in the mesh summary
 
@@ -80,7 +80,7 @@ Surface these through `cloudMeshDiagnostics.ts` into solve diagnostics. **Warn o
 ### Step 4 — Early, clear element-order handling
 
 - Add `"-order", "1"` to the default gmsh args (`gmsh.ts:524-531`) — makes today's implicit default explicit and immune to gmsh config drift. The bracket geo script's `Mesh.ElementOrder = 1` stays (harmless duplication of intent).
-- In the upload intake path (`parseUploadedMeshGeometry` / model build in `coreModelFromMesh.ts`): when parsed elements include Tet10 (and the solve will therefore fail), throw `CoreCloudMeshingError("tet10-not-solvable", "Uploaded mesh contains Tet10 elements; the CPU solver currently solves Tet4 only. Re-export as first-order tetrahedra.", { status: 422 })` **before** model validation/solve. Keep Tet10 schema-validity in `@opencae/core` untouched (documented design) — this guard is cloud-intake-only.
+- In the upload intake path (`parseUploadedMeshGeometry` / model build in `coreModelFromMesh.ts`): when parsed elements include Tet10 (and the solve will therefore fail), throw `CoreCloudMeshingError("tet10-not-solvable", "Uploaded mesh contains Tet10 elements; the CPU solver currently solves Tet4 only. Re-export as first-order tetrahedra.", { status: 422 })` **before** model validation/solve. Keep Tet10 schema-validity in `@openfea/core` untouched (documented design) — this guard is cloud-intake-only.
 
 ### Step 5 — Clear non-watertight STL errors
 
@@ -96,16 +96,16 @@ Support `solverSettings.keepMeshArtifacts: true`: when set, attach the generated
 
 ## Hard boundaries
 
-- **In scope:** `services/opencae-core-cloud/src/mesh/{generateCoreVolumeMesh.ts,gmsh.ts}`, `coreModelFromMesh.ts` (Tet10 guard + DOF fast-fail only), `cloudMeshDiagnostics.ts`, `Dockerfile`, service tests, `docs/validation/core.md` (geometry request `units` now required for uploads — update the schema snippet).
+- **In scope:** `services/openfea-core-cloud/src/mesh/{generateCoreVolumeMesh.ts,gmsh.ts}`, `coreModelFromMesh.ts` (Tet10 guard + DOF fast-fail only), `cloudMeshDiagnostics.ts`, `Dockerfile`, service tests, `docs/validation/core.md` (geometry request `units` now required for uploads — update the schema snippet).
 - **Out of scope:** solver packages (`packages/*`); auth/handler layer (plan 002 owns it); procedural geometry dimensions; mesh optimization flags (`-optimize` — rejected as speculative, see index); watertightness pre-checking libraries; changing the 30000 DOF limit.
 
 ## Done criteria (machine-checkable)
 
-1. `grep -n '"units-required"\|"tet10-not-solvable"\|"mesh-exceeds-dof-limit"\|"surface-not-closed"' services/opencae-core-cloud/src -r` → all four codes present.
-2. `grep -n '"-order"' services/opencae-core-cloud/src/mesh/gmsh.ts` → present in default args.
-3. `grep -n "gmsh=" services/opencae-core-cloud/Dockerfile` → version-pinned (or base image digest-pinned with a comment naming the gmsh version).
-4. `grep -n "worstAspectRatio\|minDihedralAngleDeg" services/opencae-core-cloud/src` → quality metrics wired through to diagnostics.
-5. From `services/opencae-core-cloud`: `vitest run` green; new tests cover: units-required rejection, Tet10 intake rejection, DOF fast-fail, quality metrics on a known small mesh (hand-computable aspect/dihedral for a unit tet — compute expected values in the test comment).
+1. `grep -n '"units-required"\|"tet10-not-solvable"\|"mesh-exceeds-dof-limit"\|"surface-not-closed"' services/openfea-core-cloud/src -r` → all four codes present.
+2. `grep -n '"-order"' services/openfea-core-cloud/src/mesh/gmsh.ts` → present in default args.
+3. `grep -n "gmsh=" services/openfea-core-cloud/Dockerfile` → version-pinned (or base image digest-pinned with a comment naming the gmsh version).
+4. `grep -n "worstAspectRatio\|minDihedralAngleDeg" services/openfea-core-cloud/src` → quality metrics wired through to diagnostics.
+5. From `services/openfea-core-cloud`: `vitest run` green; new tests cover: units-required rejection, Tet10 intake rejection, DOF fast-fail, quality metrics on a known small mesh (hand-computable aspect/dihedral for a unit tet — compute expected values in the test comment).
 6. From root: `pnpm build && pnpm test:only` green.
 7. `docs/validation/core.md` geometry schema snippet shows `units` as required for uploads.
 

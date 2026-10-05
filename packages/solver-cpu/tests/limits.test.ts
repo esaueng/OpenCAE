@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { singleTetStaticFixture } from "@opencae/examples";
+import { singleTetStaticFixture } from "@openfea/examples";
 import {
   boundedStructuralMaxDofs,
   DEFAULT_STRUCTURAL_MAX_DOFS,

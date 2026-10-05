@@ -1,0 +1,13 @@
+{
+  "name": "@openfea/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5"
+  },
+  "license": "Apache-2.0"
+}

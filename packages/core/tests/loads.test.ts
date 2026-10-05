@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { OpenCAEModelJson, SurfaceFacetJson, SurfaceSetJson } from "../src";
+import type { OpenFEAModelJson, SurfaceFacetJson, SurfaceSetJson } from "../src";
 import {
   assembleNodalLoadVector,
   assembleNodalLoadVectorWithDiagnostics
@@ -19,8 +19,8 @@ const coordinates = [
   0, 0, 1
 ];
 
-function baseModel(): OpenCAEModelJson {
-  const model: OpenCAEModelJson = {
+function baseModel(): OpenFEAModelJson {
+  const model: OpenFEAModelJson = {
     schema: "opencae.model",
     schemaVersion: "0.2.0",
     nodes: { coordinates },
@@ -361,7 +361,7 @@ describe("assembleNodalLoadVector", () => {
   });
 });
 
-function tet10Model(): OpenCAEModelJson {
+function tet10Model(): OpenFEAModelJson {
   const model = baseModel();
   model.schemaVersion = "0.3.0";
   model.nodes.coordinates = [
@@ -388,7 +388,7 @@ function tet10Model(): OpenCAEModelJson {
   return model;
 }
 
-function boltModel(): OpenCAEModelJson {
+function boltModel(): OpenFEAModelJson {
   return {
     ...baseModel(),
     schemaVersion: "0.3.0",
@@ -427,8 +427,8 @@ function boltModel(): OpenCAEModelJson {
   };
 }
 
-function scaleModelGeometry(source: OpenCAEModelJson, scale: number): OpenCAEModelJson {
-  const model = JSON.parse(JSON.stringify(source)) as OpenCAEModelJson;
+function scaleModelGeometry(source: OpenFEAModelJson, scale: number): OpenFEAModelJson {
+  const model = JSON.parse(JSON.stringify(source)) as OpenFEAModelJson;
   model.nodes.coordinates = model.nodes.coordinates.map((value) => value * scale);
   model.surfaceFacets = model.surfaceFacets?.map((facet) => ({
     ...facet,

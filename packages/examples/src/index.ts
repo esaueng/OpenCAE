@@ -2,8 +2,8 @@ export const PLACEHOLDER_MODEL_FIXTURE = "fixtures/placeholder-model.json";
 import {
   deriveFixedSupportNodeSetFromSurface,
   volumeMeshToModelJson,
-  type OpenCAEModelJson
-} from "@opencae/core";
+  type OpenFEAModelJson
+} from "@openfea/core";
 
 export const singleTetStaticFixture = {
   schema: "opencae.model",
@@ -94,7 +94,7 @@ export const singleTetStaticFixture = {
       loads: ["tipLoad"]
     }
   ]
-} satisfies OpenCAEModelJson;
+} satisfies OpenFEAModelJson;
 
 export const twoTetStaticFixture = {
   ...singleTetStaticFixture,
@@ -176,7 +176,7 @@ export const twoTetStaticFixture = {
       loads: ["tipLoad"]
     }
   ]
-} satisfies OpenCAEModelJson;
+} satisfies OpenFEAModelJson;
 
 export const invalidConnectivityFixture = {
   ...singleTetStaticFixture,
@@ -189,7 +189,7 @@ export const invalidConnectivityFixture = {
     }
   ],
   elementSets: []
-} satisfies OpenCAEModelJson;
+} satisfies OpenFEAModelJson;
 
 const bracketMeshBase = volumeMeshToModelJson({
   nodes: {
@@ -245,7 +245,7 @@ const bracketMeshBase = volumeMeshToModelJson({
   ]
 });
 
-export const bracketActualMeshFixture: OpenCAEModelJson = {
+export const bracketActualMeshFixture: OpenFEAModelJson = {
   ...bracketMeshBase,
   nodeSets: [
     deriveFixedSupportNodeSetFromSurface("fixedBaseNodes", "base_mount", bracketMeshBase),

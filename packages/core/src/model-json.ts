@@ -1,20 +1,20 @@
-export const OPENCAE_MODEL_SCHEMA = "opencae.model";
-export const OPENCAE_MODEL_SCHEMA_VERSION = "0.4.0";
-export const OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION = "0.3.0";
-export const OPENCAE_LEGACY_MODEL_SCHEMA_VERSION = "0.2.0";
-export const OPENCAE_OLDEST_MODEL_SCHEMA_VERSION = "0.1.0";
+export const OPENFEA_MODEL_SCHEMA = "opencae.model";
+export const OPENFEA_MODEL_SCHEMA_VERSION = "0.4.0";
+export const OPENFEA_PREVIOUS_MODEL_SCHEMA_VERSION = "0.3.0";
+export const OPENFEA_LEGACY_MODEL_SCHEMA_VERSION = "0.2.0";
+export const OPENFEA_OLDEST_MODEL_SCHEMA_VERSION = "0.1.0";
 
-export type OpenCAEModelSchemaVersion =
-  | typeof OPENCAE_MODEL_SCHEMA_VERSION
-  | typeof OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION
-  | typeof OPENCAE_LEGACY_MODEL_SCHEMA_VERSION
-  | typeof OPENCAE_OLDEST_MODEL_SCHEMA_VERSION;
+export type OpenFEAModelSchemaVersion =
+  | typeof OPENFEA_MODEL_SCHEMA_VERSION
+  | typeof OPENFEA_PREVIOUS_MODEL_SCHEMA_VERSION
+  | typeof OPENFEA_LEGACY_MODEL_SCHEMA_VERSION
+  | typeof OPENFEA_OLDEST_MODEL_SCHEMA_VERSION;
 
 export type ElementType = "Tet4" | "Tet10";
 
-export type OpenCAEModelJson = {
-  schema: typeof OPENCAE_MODEL_SCHEMA;
-  schemaVersion: OpenCAEModelSchemaVersion;
+export type OpenFEAModelJson = {
+  schema: typeof OPENFEA_MODEL_SCHEMA;
+  schemaVersion: OpenFEAModelSchemaVersion;
   nodes: {
     coordinates: number[];
   };
@@ -345,9 +345,9 @@ export type ValidationReport = {
   warnings: ValidationIssue[];
 };
 
-export type NormalizedOpenCAEModel = {
-  schema: typeof OPENCAE_MODEL_SCHEMA;
-  schemaVersion: typeof OPENCAE_MODEL_SCHEMA_VERSION;
+export type NormalizedOpenFEAModel = {
+  schema: typeof OPENFEA_MODEL_SCHEMA;
+  schemaVersion: typeof OPENFEA_MODEL_SCHEMA_VERSION;
   nodes: {
     coordinates: Float64Array;
   };
@@ -412,7 +412,7 @@ export type ModelNormalizationResult =
   | {
       ok: true;
       report: ValidationReport;
-      model: NormalizedOpenCAEModel;
+      model: NormalizedOpenFEAModel;
     }
   | {
       ok: false;

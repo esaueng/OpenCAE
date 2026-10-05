@@ -1,0 +1,15 @@
+{
+  "name": "@openfea/solve-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./limits": "./src/limits.ts"
+  },
+  "dependencies": {
+    "@openfea/core": "workspace:*",
+    "@openfea/solver-cpu": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

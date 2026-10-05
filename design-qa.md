@@ -1,7 +1,7 @@
 # Design QA: Run Controls
 
 - Source visual truth: browser annotations for `Save project` and the Run-panel `Analysis type` region; supporting capture at `/var/folders/t_/tvn84c292rzdfcbj06vltnsw0000gn/T/codex-clipboard-62f3d5b2-ae6c-4efb-915f-dbbee39f71b1.png`
-- Implementation screenshot: `/private/tmp/opencae-run-controls-live.png`
+- Implementation screenshot: `/private/tmp/openfea-run-controls-live.png`
 - Viewport: 1949 x 1606 desktop; responsive geometry also checked at 390 x 844
 - State: dark theme, Dynamic Bracket Demo, Run step, Dynamic selected
 
@@ -42,8 +42,8 @@ final result: passed
 
 # Design QA: Results Legend Resize Handle
 
-- Source visual truth: current production Results view before this change, captured at `/private/tmp/opencae-legend-handle-before-matched.png`
-- Implementation screenshots: `/private/tmp/opencae-legend-handle-after.png` at the default size and `/private/tmp/opencae-legend-handle-expanded.png` after a down-right drag
+- Source visual truth: current production Results view before this change, captured at `/private/tmp/openfea-legend-handle-before-matched.png`
+- Implementation screenshots: `/private/tmp/openfea-legend-handle-after.png` at the default size and `/private/tmp/openfea-legend-handle-expanded.png` after a down-right drag
 - Viewport: 1280 x 720 desktop
 - State: dark theme, Static Stress Bracket Demo, Results step, stress legend visible
 
@@ -87,8 +87,8 @@ final result: passed
 
 # Design QA: Sample Analysis Projects
 
-- Source visual truth: the production sample-project picker before this change, captured at `/private/tmp/opencae-sample-menu-before.png`
-- Implementation screenshots: `/private/tmp/opencae-sample-menu-after.png`, `/private/tmp/opencae-sample-thermal-run.png`, and `/private/tmp/opencae-sample-menu-mobile.png`
+- Source visual truth: the production sample-project picker before this change, captured at `/private/tmp/openfea-sample-menu-before.png`
+- Implementation screenshots: `/private/tmp/openfea-sample-menu-after.png`, `/private/tmp/openfea-sample-thermal-run.png`, and `/private/tmp/openfea-sample-menu-mobile.png`
 - Viewports: 1280 x 720 desktop and 390 x 844 responsive
 - States: sample picker with Static selected; Modal Beam Demo; Thermal Bracket Demo at the Run step
 

@@ -3,8 +3,8 @@ import {
   invalidConnectivityFixture,
   singleTetStaticFixture,
   twoTetStaticFixture
-} from "@opencae/examples";
-import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
+} from "@openfea/examples";
+import { validateCoreResult, type OpenFEAModelJson } from "@openfea/core";
 import { solveStaticLinearTet, solveStaticLinearTet4Cpu, solveStaticLinearTetSparse } from "../src";
 
 describe("solveStaticLinearTet4Cpu", () => {
@@ -88,7 +88,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("axial tension produces displacement in the loaded direction", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       loads: [
         {
@@ -133,7 +133,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("fails for singular or underconstrained models", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       boundaryConditions: [],
       steps: [
@@ -153,7 +153,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("fails for conflicting prescribed displacements", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       boundaryConditions: [
         ...singleTetStaticFixture.boundaryConditions,
@@ -182,7 +182,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("solves surface force loads with sparse CG and preserves reaction balance", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       surfaceFacets: [
@@ -228,7 +228,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("auto-selects sparse for surface loads", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       surfaceFacets: [
@@ -270,7 +270,7 @@ describe("solveStaticLinearTet4Cpu", () => {
 
   test("solves pressure loads as pressure times facet area", () => {
     const area = 0.8660254037844386;
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       surfaceFacets: [
@@ -313,7 +313,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("resolves fixed supports from surface sets before applying constraints", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       surfaceFacets: [
@@ -370,7 +370,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("solves body gravity loads and balances reactions against mass acceleration", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       materials: [
@@ -443,7 +443,7 @@ describe("solveStaticLinearTet4Cpu", () => {
   });
 
   test("handles a zero-load constrained model without producing nonzero displacement", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       loads: [],
       steps: [

@@ -3,9 +3,9 @@ import type {
   BodyGravityLoadJson,
   EquivalentBoltPreloadLoadJson,
   LoadJson,
-  NormalizedOpenCAEModel,
+  NormalizedOpenFEAModel,
   NodalForceLoadJson,
-  OpenCAEModelJson,
+  OpenFEAModelJson,
   PressureLoadJson,
   RemoteForceLoadJson,
   SurfaceFacetJson,
@@ -29,7 +29,7 @@ import {
   remoteGramPivotTolerance
 } from "./load-policy";
 
-export type LoadAssemblyModel = OpenCAEModelJson | NormalizedOpenCAEModel;
+export type LoadAssemblyModel = OpenFEAModelJson | NormalizedOpenFEAModel;
 
 type LoadSurfaceFacet = Omit<SurfaceFacetJson, "nodes"> & {
   nodes: ArrayLike<number> & Iterable<number>;
@@ -655,7 +655,7 @@ function resolveSurfaceSelection(
     return undefined;
   }
 
-  const surfaceFacets = (model.surfaceFacets ?? extractBoundarySurfaceFacets(model as OpenCAEModelJson)) as LoadSurfaceFacet[];
+  const surfaceFacets = (model.surfaceFacets ?? extractBoundarySurfaceFacets(model as OpenFEAModelJson)) as LoadSurfaceFacet[];
   const facetById = new Map(surfaceFacets.map((facet) => [facet.id, facet]));
   const facets: LoadSurfaceFacet[] = [];
   let area = 0;
@@ -886,7 +886,7 @@ function nodeSetCentroid(model: LoadAssemblyModel, nodeSetName: string): [number
 function surfaceSetCentroid(model: LoadAssemblyModel, surfaceSetName: string): [number, number, number] | undefined {
   const surfaceSet = model.surfaceSets?.find((set) => set.name === surfaceSetName);
   if (!surfaceSet) return undefined;
-  const surfaceFacets = (model.surfaceFacets ?? extractBoundarySurfaceFacets(model as OpenCAEModelJson)) as LoadSurfaceFacet[];
+  const surfaceFacets = (model.surfaceFacets ?? extractBoundarySurfaceFacets(model as OpenFEAModelJson)) as LoadSurfaceFacet[];
   const facetById = new Map(surfaceFacets.map((facet) => [facet.id, facet]));
   const nodes = new Set<number>();
   for (const facetId of surfaceSet.facets) {

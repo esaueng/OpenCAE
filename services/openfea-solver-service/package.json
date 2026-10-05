@@ -1,0 +1,17 @@
+{
+  "name": "@openfea/solver-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@openfea/db": "workspace:*",
+    "@openfea/materials": "workspace:*",
+    "@openfea/schema": "workspace:*",
+    "@openfea/study-core": "workspace:*",
+    "@openfea/storage": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

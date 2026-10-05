@@ -1,4 +1,4 @@
-import type { NormalizedOpenCAEModel } from "@opencae/core";
+import type { NormalizedOpenFEAModel } from "@openfea/core";
 import { addSparseEntry, type SparseMatrixBuilder } from "./sparse";
 import type { CpuSolverError } from "./types";
 
@@ -22,7 +22,7 @@ type Vec3 = [number, number, number];
 
 export function assembleMeshConnectionStiffness(
   builder: SparseMatrixBuilder,
-  model: NormalizedOpenCAEModel
+  model: NormalizedOpenFEAModel
 ): { ok: true; diagnostics: ConnectionAssemblyDiagnostics } | { ok: false; error: CpuSolverError } {
   const connections = model.meshConnections.filter((connection) => connection.type === "tie" || connection.type === "contact");
   const diagnostics: ConnectionAssemblyDiagnostics = {
@@ -162,7 +162,7 @@ function closestPointBarycentric(p: Vec3, a: Vec3, b: Vec3, c: Vec3): Vec3 {
   return [1 - v - w, v, w];
 }
 
-function meshCharacteristicLength(model: NormalizedOpenCAEModel): number {
+function meshCharacteristicLength(model: NormalizedOpenFEAModel): number {
   const coordinates = model.nodes.coordinates;
   let min: Vec3 = [Infinity, Infinity, Infinity], max: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (let node = 0; node < model.counts.nodes; node += 1) for (let axis = 0; axis < 3; axis += 1) {
@@ -173,7 +173,7 @@ function meshCharacteristicLength(model: NormalizedOpenCAEModel): number {
   return Math.max(norm(subtract(max, min)) / Math.cbrt(Math.max(model.counts.elements, 1)), 1e-12);
 }
 
-function point(model: NormalizedOpenCAEModel, node: number): Vec3 {
+function point(model: NormalizedOpenFEAModel, node: number): Vec3 {
   return [model.nodes.coordinates[node * 3], model.nodes.coordinates[node * 3 + 1], model.nodes.coordinates[node * 3 + 2]];
 }
 function cellCoordinates(value: Vec3, size: number): Vec3 { return [Math.floor(value[0] / size), Math.floor(value[1] / size), Math.floor(value[2] / size)]; }

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { singleTetStaticFixture } from "@opencae/examples";
-import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
+import { singleTetStaticFixture } from "@openfea/examples";
+import { validateCoreResult, type OpenFEAModelJson } from "@openfea/core";
 import {
   SOLVER_CPU_VERSION,
   solveCoreDynamic,
@@ -39,7 +39,7 @@ const densityModel = {
       loadProfile: "ramp"
     }
   ]
-} satisfies OpenCAEModelJson;
+} satisfies OpenFEAModelJson;
 
 const modalModel = {
   ...densityModel,
@@ -50,7 +50,7 @@ const modalModel = {
     boundaryConditions: ["fixedSupport", "settlement", "supportY", "supportZ"],
     modeCount: 2
   }]
-} satisfies OpenCAEModelJson;
+} satisfies OpenFEAModelJson;
 
 describe("public Core solver APIs", () => {
   test("exports stable static solver entrypoints", () => {
@@ -135,7 +135,7 @@ describe("public Core solver APIs", () => {
   });
 
   test("production APIs reject display proxy mesh sources without estimate fallback", () => {
-    const proxyModel: OpenCAEModelJson = {
+    const proxyModel: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       meshProvenance: {
@@ -150,12 +150,12 @@ describe("public Core solver APIs", () => {
 
     expect(result.ok).toBe(false);
     expect(result.ok ? undefined : result.error.message).toBe(
-      "OpenCAE Core requires an actual volume mesh for this solve. No estimate fallback was used."
+      "OpenFEA Core requires an actual volume mesh for this solve. No estimate fallback was used."
     );
   });
 
   test("production APIs reject preview or local-estimate provenance inputs", () => {
-    const previewModel: OpenCAEModelJson = {
+    const previewModel: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       meshProvenance: {
@@ -183,7 +183,7 @@ describe("public Core solver APIs", () => {
   });
 
   test("production dynamic solve fails instead of silently falling back to preview", () => {
-    const noDensityDynamic: OpenCAEModelJson = {
+    const noDensityDynamic: OpenFEAModelJson = {
       ...singleTetStaticFixture,
       schemaVersion: "0.2.0",
       steps: densityModel.steps

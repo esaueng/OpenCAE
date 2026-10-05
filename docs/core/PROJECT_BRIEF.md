@@ -1,17 +1,17 @@
-# OpenCAE Core
+# OpenFEA Core
 
 ## Mission
-OpenCAE Core enables local browser-based finite element analysis using WebGPU.
+OpenFEA Core enables local browser-based finite element analysis using WebGPU.
 
 It is a browser-native, GPU-accelerated FEA core for web applications. WebAssembly may be used later for validation, preprocessing, and CPU fallback/reference solving.
 
-OpenCAE Core is not a port of CalculiX, a CUDA solver, or a server-side solver.
+OpenFEA Core is not a port of CalculiX, a CUDA solver, or a server-side solver.
 
 ## Repository
 Repository/code name:
 
 ```text
-opencae-core
+openfea-core
 ```
 
 ## First Product Target

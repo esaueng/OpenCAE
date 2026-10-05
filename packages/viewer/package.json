@@ -1,7 +1,7 @@
 {
-  "name": "@opencae/viewer",
+  "name": "@openfea/viewer",
   "version": "0.1.2",
-  "description": "Browser visualization package for OpenCAE Core FEA results.",
+  "description": "Browser visualization package for OpenFEA Core FEA results.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -19,10 +19,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@opencae/core": "workspace:*"
+    "@openfea/core": "workspace:*"
   },
   "devDependencies": {
-    "@opencae/examples": "workspace:*",
-    "@opencae/solver-cpu": "workspace:*"
+    "@openfea/examples": "workspace:*",
+    "@openfea/solver-cpu": "workspace:*"
   }
 }

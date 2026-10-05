@@ -3,9 +3,9 @@ import {
   elevateTet4MeshToTet10,
   normalizeModelJson,
   validateCoreResult,
-  type OpenCAEModelJson
-} from "@opencae/core";
-import { singleTetStaticFixture } from "@opencae/examples";
+  type OpenFEAModelJson
+} from "@openfea/core";
+import { singleTetStaticFixture } from "@openfea/examples";
 import { linearizeTet10ModelForModal, solveModalLinearTet, solveModalSubspace, toCsrMatrix, createSparseMatrixBuilder, addSparseEntry } from "../src";
 import { assembleLumpedMass, prepareStructuralSystem, type PreparedStructuralSystem } from "../src/structural-system";
 
@@ -26,7 +26,7 @@ function diagonalSystem(stiffness: number[], mass: number[]): PreparedStructural
   };
 }
 
-const modalFixture: OpenCAEModelJson = {
+const modalFixture: OpenFEAModelJson = {
   ...singleTetStaticFixture,
   schemaVersion: "0.3.0",
   materials: [{ ...singleTetStaticFixture.materials[0], density: 1200 }],
@@ -131,7 +131,7 @@ describe("block shift-invert modal solver", () => {
       coordinates: modalFixture.nodes.coordinates,
       elements: [modalFixture.elementBlocks[0].connectivity]
     });
-    const tet10Model: OpenCAEModelJson = {
+    const tet10Model: OpenFEAModelJson = {
       ...modalFixture,
       nodes: { coordinates: elevated.coordinates },
       elementBlocks: [{ ...modalFixture.elementBlocks[0], type: "Tet10", connectivity: elevated.elements.flat() }]

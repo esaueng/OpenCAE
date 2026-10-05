@@ -7,7 +7,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-OpenCAE Core packages are part of this monorepo under `packages/*`. `pnpm build:core` only builds those local packages; it does not install dependencies, clone another repository, or mutate the lockfile. CI and local verification should use `pnpm install --frozen-lockfile`.
+OpenFEA Core packages are part of this monorepo under `packages/*`. `pnpm build:core` only builds those local packages; it does not install dependencies, clone another repository, or mutate the lockfile. CI and local verification should use `pnpm install --frozen-lockfile`.
 
 `pnpm dev` starts the Fastify API on `http://localhost:4317` and the Vite web app on `http://localhost:5173`. The API creates and seeds the SQLite database if needed.
 
@@ -39,7 +39,7 @@ pnpm deploy:cloudflare:static:dry-run
 pnpm deploy:cloudflare:static
 ```
 
-Use the default Cloudflare deploy for the production app domain. It deploys the local-first Worker with the default `wrangler.jsonc` (static assets + security headers, no solver bindings) and targets `opencae`. Use the static commands only for the explicitly non-production `opencae-static` Worker. (The cloud container deploy commands were retired in July 2026; see [docs/cloud-retirement.md](../cloud-retirement.md).)
+Use the default Cloudflare deploy for the production app domain. It deploys the local-first Worker with the default `wrangler.jsonc` (static assets + security headers, no solver bindings) and targets `openfea`. Use the static commands only for the explicitly non-production `openfea-static` Worker. (The cloud container deploy commands were retired in July 2026; see [docs/cloud-retirement.md](../cloud-retirement.md).)
 
 Use `pnpm deploy:cloudflare:retired-do-cleanup` only once if Cloudflare still has the retired `OpenCaeCoreCloudContainer` Durable Object class recorded and rejects the normal deploy with code `10064`.
 

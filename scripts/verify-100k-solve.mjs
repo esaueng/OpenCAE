@@ -1,7 +1,7 @@
 // Cross-engine browser proof for the approximately 100k-DOF validation benchmark (plan 015: the staged cap
 // stays at 60k "until the typed-array builder and a WebKit target-scale run
 // land" — this is that run, automated). Drives the ?solveBench=1 harness
-// (apps/opencae-web/src/workers/solveBenchHarness.ts) through a REAL
+// (apps/openfea-web/src/workers/solveBenchHarness.ts) through a REAL
 // gmsh-wasm mesh + solve-worker solve at ~99.3k DOFs in:
 //   1. headless Chrome via CDP (V8), and
 //   2. Playwright WebKit (JavaScriptCore — the iOS-class engine the staged
@@ -36,7 +36,7 @@
 // Usage (Node >= 22; Chrome installed; playwright-webkit in a SCRATCH dir,
 // never in repo deps — pass PLAYWRIGHT_WEBKIT_DIR or let the script
 // npm-install it into a temp dir on first run):
-//   pnpm --filter @opencae/web build
+//   pnpm --filter @openfea/web build
 //   node scripts/verify-100k-solve.mjs
 // Env: PORT (5199), CDP_PORT (9335), CHROME_BIN, PROOF_TIMEOUT_MS (600000),
 //      SOLVE_BENCH_MAX_MS (120000), MEMORY_STOP_BYTES (1.5e9),
@@ -65,7 +65,7 @@ const BENCH_MESH_SIZE_MM = process.env.BENCH_MESH_SIZE_MM;
 const BENCH_URL = `http://localhost:${PORT}/?solveBench=1${BENCH_MESH_SIZE_MM ? `&meshSizeMm=${BENCH_MESH_SIZE_MM}&minDofs=1` : ""}`;
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const distDir = join(repoRoot, "apps/opencae-web/dist");
+const distDir = join(repoRoot, "apps/openfea-web/dist");
 
 // ── Process helpers (verify-offline-pwa.mjs pattern) ────────────────────────
 const children = [];
@@ -189,7 +189,7 @@ function footprintPeakBytes(pid) {
 }
 
 async function runChromeBench() {
-  const profileDir = mkdtempSync(join(tmpdir(), "opencae-solvebench-chrome-"));
+  const profileDir = mkdtempSync(join(tmpdir(), "openfea-solvebench-chrome-"));
   const chrome = spawnChild(CHROME_BIN, [
     "--headless=new",
     "--disable-gpu",
@@ -226,14 +226,14 @@ async function runChromeBench() {
       "Chrome solve bench result",
       async () => {
         if (!sawSolvingPhase) {
-          const phase = await readBench("window.__opencaeSolveBench ? window.__opencaeSolveBench.phase : null");
+          const phase = await readBench("window.__openfeaSolveBench ? window.__openfeaSolveBench.phase : null");
           if (phase === "solving" || phase === "done") {
             sawSolvingPhase = true;
             preSolveFootprintPeakBytes = footprintPeakBytes(rendererPid ?? maxDescendantRss(chrome.pid).pid);
           }
         }
         const value = await readBench(
-          "window.__opencaeSolveBench && window.__opencaeSolveBench.lastResult ? JSON.stringify(window.__opencaeSolveBench.lastResult) : null"
+          "window.__openfeaSolveBench && window.__openfeaSolveBench.lastResult ? JSON.stringify(window.__openfeaSolveBench.lastResult) : null"
         );
         return typeof value === "string" ? JSON.parse(value) : null;
       },
@@ -270,7 +270,7 @@ const started = Date.now();
 let result = null;
 while (Date.now() - started < timeoutMs) {
   result = await page.evaluate(() => {
-    const bench = window.__opencaeSolveBench;
+    const bench = window.__openfeaSolveBench;
     return bench && bench.lastResult ? JSON.stringify(bench.lastResult) : null;
   });
   if (result) break;
@@ -285,12 +285,12 @@ console.log("SOLVEBENCH_JSON " + result);
 `;
 
 function ensurePlaywrightWebkitDir() {
-  const dir = process.env.PLAYWRIGHT_WEBKIT_DIR ?? join(tmpdir(), "opencae-playwright-webkit");
+  const dir = process.env.PLAYWRIGHT_WEBKIT_DIR ?? join(tmpdir(), "openfea-playwright-webkit");
   if (!existsSync(join(dir, "node_modules", "playwright-webkit"))) {
     console.log(`[webkit] installing playwright-webkit@1.61.1 into scratch dir ${dir} (kept out of repo deps)`);
     mkdirSync(dir, { recursive: true });
     if (!existsSync(join(dir, "package.json"))) {
-      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "opencae-solvebench-webkit", private: true }, null, 2));
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "openfea-solvebench-webkit", private: true }, null, 2));
     }
     // The postinstall step downloads the WebKit build into Playwright's
     // default browser cache (~/Library/Caches/ms-playwright on macOS); only
@@ -306,7 +306,7 @@ function ensurePlaywrightWebkitDir() {
 
 async function runWebkitBench() {
   const dir = ensurePlaywrightWebkitDir();
-  const runnerPath = join(dir, "opencae-solvebench-webkit-runner.mjs");
+  const runnerPath = join(dir, "openfea-solvebench-webkit-runner.mjs");
   writeFileSync(runnerPath, WEBKIT_RUNNER_SOURCE);
   return await new Promise((resolve, reject) => {
     const child = spawn("node", [runnerPath], {
@@ -400,10 +400,10 @@ function engineGates(label, result, gates) {
 // ── Main ────────────────────────────────────────────────────────────────────
 try {
   if (!existsSync(join(distDir, "index.html"))) {
-    throw new Error("apps/opencae-web/dist is missing; run `pnpm --filter @opencae/web build` first.");
+    throw new Error("apps/openfea-web/dist is missing; run `pnpm --filter @openfea/web build` first.");
   }
   const preview = spawnChild("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], {
-    cwd: join(repoRoot, "apps/opencae-web")
+    cwd: join(repoRoot, "apps/openfea-web")
   });
   void preview;
   await waitFor("preview server", async () => (await fetch(`http://localhost:${PORT}/`)).ok);

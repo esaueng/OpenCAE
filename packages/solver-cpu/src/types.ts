@@ -1,6 +1,6 @@
-import type { CoreModalSolveResult as CoreModalFeaResult, CoreSolveResult, CoreStructuralSolveResult, LoadAssemblyDiagnostics, NormalizedOpenCAEModel, OpenCAEModelJson, ValidationReport } from "@opencae/core";
+import type { CoreModalSolveResult as CoreModalFeaResult, CoreSolveResult, CoreStructuralSolveResult, LoadAssemblyDiagnostics, NormalizedOpenFEAModel, OpenFEAModelJson, ValidationReport } from "@openfea/core";
 
-export type CpuSolverInput = OpenCAEModelJson | NormalizedOpenCAEModel;
+export type CpuSolverInput = OpenFEAModelJson | NormalizedOpenFEAModel;
 
 export type SolveProgressEvent = {
   phase: "assemble" | "solve" | "recover" | "frames";

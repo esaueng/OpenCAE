@@ -1,9 +1,9 @@
 import {
-  OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENFEA_MODEL_SCHEMA_VERSION,
   type CoordinateSystemJson,
   type ModelNormalizationResult,
-  type NormalizedOpenCAEModel,
-  type OpenCAEModelJson
+  type NormalizedOpenFEAModel,
+  type OpenFEAModelJson
 } from "./model-json";
 import { nodesPerElement } from "./topology";
 import { validateModelJson } from "./validation";
@@ -17,7 +17,7 @@ export function normalizeModelJson(input: unknown): ModelNormalizationResult {
     };
   }
 
-  const model = input as OpenCAEModelJson;
+  const model = input as OpenFEAModelJson;
   const materialIndexByName = new Map(
     model.materials.map((material, materialIndex) => [material.name, materialIndex])
   );
@@ -26,9 +26,9 @@ export function normalizeModelJson(input: unknown): ModelNormalizationResult {
     renderCoordinateSpace: "solver"
   };
 
-  const normalized: NormalizedOpenCAEModel = {
+  const normalized: NormalizedOpenFEAModel = {
     schema: model.schema,
-    schemaVersion: OPENCAE_MODEL_SCHEMA_VERSION,
+    schemaVersion: OPENFEA_MODEL_SCHEMA_VERSION,
     nodes: {
       coordinates: new Float64Array(model.nodes.coordinates)
     },

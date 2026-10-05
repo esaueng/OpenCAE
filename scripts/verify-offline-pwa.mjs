@@ -18,7 +18,7 @@
 //    matching the applied 500 N.
 //
 // Usage (Node >= 22 for global WebSocket + fetch; Chrome installed):
-//   pnpm --filter @opencae/web build
+//   pnpm --filter @openfea/web build
 //   node scripts/verify-offline-pwa.mjs
 // Env: PORT (5199), CDP_PORT (9334), CHROME_BIN, PROOF_TIMEOUT_MS (240000).
 // Exit codes: 0 proof ok, 1 gate failed, 2 timeout.
@@ -35,7 +35,7 @@ const TIMEOUT_MS = Number(process.env.PROOF_TIMEOUT_MS ?? 240_000);
 const APPLIED_NEWTONS = 500;
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const distDir = join(repoRoot, "apps/opencae-web/dist");
+const distDir = join(repoRoot, "apps/openfea-web/dist");
 
 function fail(message) {
   console.error(`OFFLINEPROOF FAIL: ${message}`);
@@ -170,12 +170,12 @@ async function evaluate(cdp, expression) {
 // ── Phase 2: browser proof ──────────────────────────────────────────────────
 async function browserProof() {
   const preview = spawnChild("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], {
-    cwd: join(repoRoot, "apps/opencae-web")
+    cwd: join(repoRoot, "apps/openfea-web")
   });
   await waitFor("preview server", async () => (await fetch(`http://localhost:${PORT}/`)).ok);
   console.log(`[serve] vite preview on :${PORT}`);
 
-  const profileDir = mkdtempSync(join(tmpdir(), "opencae-offline-proof-"));
+  const profileDir = mkdtempSync(join(tmpdir(), "openfea-offline-proof-"));
   spawnChild(CHROME_BIN, [
     "--headless=new",
     "--disable-gpu",
@@ -275,7 +275,7 @@ async function browserProof() {
     async () => {
       const value = await evaluate(
         cdp,
-        `window.__opencaeMeshProof && window.__opencaeMeshProof.lastRunResult ? JSON.stringify(window.__opencaeMeshProof.lastRunResult) : null`
+        `window.__openfeaMeshProof && window.__openfeaMeshProof.lastRunResult ? JSON.stringify(window.__openfeaMeshProof.lastRunResult) : null`
       );
       return value ? JSON.parse(value) : null;
     },

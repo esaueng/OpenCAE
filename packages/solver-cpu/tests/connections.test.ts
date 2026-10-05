@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { normalizeModelJson, OPENCAE_MODEL_SCHEMA_VERSION, type MeshConnectionJson, type OpenCAEModelJson } from "@opencae/core";
+import { normalizeModelJson, OPENFEA_MODEL_SCHEMA_VERSION, type MeshConnectionJson, type OpenFEAModelJson } from "@openfea/core";
 import { assembleMeshConnectionStiffness, createSparseMatrixBuilder, solveStaticLinearTet4Cpu, toCsrMatrix } from "../src";
 
-function assemblyModel(connection: MeshConnectionJson): OpenCAEModelJson {
+function assemblyModel(connection: MeshConnectionJson): OpenFEAModelJson {
   return {
     schema: "opencae.model",
-    schemaVersion: OPENCAE_MODEL_SCHEMA_VERSION,
+    schemaVersion: OPENFEA_MODEL_SCHEMA_VERSION,
     nodes: { coordinates: [
       0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, -1,
       0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1

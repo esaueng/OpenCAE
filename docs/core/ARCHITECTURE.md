@@ -1,6 +1,6 @@
 # Architecture
 
-OpenCAE Core meshes and solves entirely in the browser. The application has no
+OpenFEA Core meshes and solves entirely in the browser. The application has no
 network solve path and does not fall back to a remote service when local
 meshing or solving fails.
 
@@ -23,7 +23,7 @@ geometry / saved project
                       local result fields + solver provenance
                                      |
                                      v
-                              @opencae/viewer
+                              @openfea/viewer
 ```
 
 The Cloudflare Worker hosts the static application and may support unrelated
@@ -32,18 +32,18 @@ geometry, mesh, load, or result is sent to a server for computation.
 
 ## Local packages
 
-- `@opencae/core` owns the versioned model schema, topology, validation, load
+- `@openfea/core` owns the versioned model schema, topology, validation, load
   definitions, result schemas, and Tet4-to-Tet10 elevation.
-- `@opencae/solver-cpu` owns sparse static elasticity, implicit Newmark MDOF
+- `@openfea/solver-cpu` owns sparse static elasticity, implicit Newmark MDOF
   dynamics, modal analysis, and steady-state conduction. Static and thermal CG
   use automatic SSOR preconditioning.
-- `@opencae/solver-webgpu` provides the matrix-free WebGPU Tet4 static route for
+- `@openfea/solver-webgpu` provides the matrix-free WebGPU Tet4 static route for
   eligible large models.
-- `@opencae/mesh-intake` and the browser meshing adapter provide WebAssembly
+- `@openfea/mesh-intake` and the browser meshing adapter provide WebAssembly
   Gmsh geometry-to-volume-mesh execution. (This is the only WebAssembly
-  subsystem: the never-implemented `@opencae/solver-wasm` placeholder package
+  subsystem: the never-implemented `@openfea/solver-wasm` placeholder package
   was removed in July 2026.)
-- `@opencae/viewer` and the web application render the returned solver surface
+- `@openfea/viewer` and the web application render the returned solver surface
   mesh and aligned result fields.
 
 ## Solver routing

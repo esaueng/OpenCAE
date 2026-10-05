@@ -1,0 +1,533 @@
+import { assessResultFailure, classifyResultProvenance, isModalResultSummary, isThermalResultSummary } from "@openfea/schema";
+import type { ModalResultSummary, ResultField, ResultProvenanceTier, ResultSummary, StructuralResultSummary, Study, ThermalResultSummary } from "@openfea/schema";
+import type { ObjectStorageProvider } from "@openfea/storage";
+
+export class LocalReportProvider {
+  constructor(private readonly storage: ObjectStorageProvider) {}
+
+  async generateReport(args: { projectId: string; runId: string; summary: ResultSummary; study?: Study; fields?: ResultField[] }): Promise<string> {
+    const artifactKey = `${args.projectId}/reports/${args.runId}/report.html`;
+    const pdfKey = `${args.projectId}/reports/${args.runId}/report.pdf`;
+    const html = buildHtmlReport(args.runId, args.summary);
+    const pdf = buildPdfReport(args.runId, args.summary);
+    await this.storage.putObject(artifactKey, html);
+    await this.storage.putObject(pdfKey, pdf);
+    return artifactKey;
+  }
+}
+
+export function reportPdfKeyFor(reportRef: string): string {
+  return reportRef.endsWith(".html") ? reportRef.replace(/\.html$/, ".pdf") : `${reportRef}.pdf`;
+}
+
+const ASSESSMENT_STATUSES = ["pass", "warning", "fail", "unknown"] as const;
+
+export function buildHtmlReport(runId: string, summary: ResultSummary): string {
+  if (isModalResultSummary(summary)) return buildModalHtmlReport(runId, summary);
+  if (isThermalResultSummary(summary)) return buildThermalHtmlReport(runId, summary);
+  const stressScore = summary.safetyFactor > 0 ? clamp(1 / summary.safetyFactor, 0, 1) : 1;
+  const assessment = assessResultFailure(summary);
+  const assessmentStatusClass = ASSESSMENT_STATUSES.includes(assessment.status) ? assessment.status : "unknown";
+  const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
+  const provenanceTier = resultTierForSummary(summary);
+  const provenanceLabel = resultTierLabel(provenanceTier);
+  const provenance = summary.provenance;
+  const banner = nonProductionBanner(provenanceTier);
+  const transientRows = summary.transient
+    ? `
+            <tr><td>Integration method</td><td>${escapeHtml(summary.transient.integrationMethod ?? "--")}</td></tr>
+            <tr><td>Time range</td><td>${format(summary.transient.startTime)}s - ${format(summary.transient.endTime)}s</td></tr>
+            <tr><td>Time step</td><td>${format(summary.transient.timeStep)}s</td></tr>
+            <tr><td>Output interval</td><td>${format(summary.transient.outputInterval)}s</td></tr>
+            <tr><td>Damping ratio</td><td>${summary.transient.dampingRatio !== undefined ? format(summary.transient.dampingRatio) : "--"}</td></tr>
+            <tr><td>Frame count</td><td>${format(summary.transient.frameCount)}</td></tr>
+            <tr><td>Peak displacement time</td><td>${format(summary.transient.peakDisplacementTimeSeconds)}s</td></tr>`
+    : "";
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenFEA ${escapeHtml(analysisLabel)} Report</title>
+    <style>
+      :root { color-scheme: light; --ink:#111827; --muted:#667085; --line:#d8dee8; --blue:#2563eb; --cyan:#1fb6ff; --green:#23c55e; --amber:#f5b84b; --red:#ef4444; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: #f4f7fb; }
+      .page { width: 960px; margin: 32px auto; background: white; border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(15, 23, 42, .12); }
+      header { padding: 42px 48px 34px; color: white; background: linear-gradient(135deg, #0b1220, #14396f 62%, #1c75d8); position: relative; overflow: hidden; }
+      header svg { position: absolute; right: 34px; top: 24px; opacity: .32; }
+      .eyebrow { text-transform: uppercase; letter-spacing: .18em; font-size: 12px; opacity: .72; }
+      h1 { margin: 10px 0 8px; font-size: 38px; line-height: 1.08; letter-spacing: 0; }
+      .run { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; opacity: .76; }
+      section { padding: 30px 48px; border-top: 1px solid var(--line); }
+      h2 { margin: 0 0 16px; font-size: 20px; }
+      .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+      .kpi { border: 1px solid var(--line); border-radius: 8px; padding: 16px; background: #fbfcff; }
+      .kpi span { display: block; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+      .kpi strong { display: block; margin-top: 8px; font-size: 22px; }
+      .grid { display: grid; grid-template-columns: 1.08fr .92fr; gap: 22px; align-items: start; }
+      .card { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 18px; }
+      .visual { width: 100%; display: block; border-radius: 8px; border: 1px solid var(--line); background: #0b1220; }
+      table { width: 100%; border-collapse: collapse; }
+      td { padding: 10px 0; border-bottom: 1px solid #edf1f7; }
+      td:last-child { text-align: right; font-weight: 700; }
+      .bar { height: 10px; border-radius: 999px; background: linear-gradient(90deg, #2563eb, #22c55e, #facc15, #ef4444); overflow: hidden; }
+      .marker { width: 2px; height: 16px; margin-left: ${Math.round(stressScore * 100)}%; background: #111827; transform: translateY(-3px); }
+      .assessment { border-left: 4px solid var(--blue); padding: 14px 16px; background: #f8fbff; margin: 14px 0 0; }
+      .assessment.fail { border-left-color: var(--red); background: #fff5f5; }
+      .assessment.warning { border-left-color: var(--amber); background: #fffbeb; }
+      .assessment.pass { border-left-color: var(--green); background: #f0fdf4; }
+      .assessment strong { display: block; font-size: 18px; }
+      .provenance-banner { margin: 0; padding: 18px 48px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fffbeb; color: #7c2d12; }
+      .provenance-banner strong { display: block; font-size: 18px; letter-spacing: .04em; }
+      .provenance-banner p { margin: 4px 0 0; }
+      .note { color: var(--muted); margin: 12px 0 0; }
+      .footer { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        ${coverSvg()}
+        <div class="eyebrow">OpenFEA ${escapeHtml(analysisLabel.toLowerCase())} simulation</div>
+        <h1>Structural Analysis Report</h1>
+        <div class="run">Run ${escapeHtml(runId)}</div>
+      </header>
+      ${banner ? `<section class="provenance-banner"><strong>${escapeHtml(banner.title)}</strong><p>${escapeHtml(banner.message)}</p></section>` : ""}
+      <section>
+        <div class="kpis">
+          <div class="kpi"><span>Max stress</span><strong>${format(summary.maxStress)} ${escapeHtml(summary.maxStressUnits)}</strong></div>
+          <div class="kpi"><span>Displacement</span><strong>${format(summary.maxDisplacement)} ${escapeHtml(summary.maxDisplacementUnits)}</strong></div>
+          <div class="kpi"><span>Safety factor</span><strong>${format(summary.safetyFactor)}</strong></div>
+          <div class="kpi"><span>Reaction</span><strong>${format(summary.reactionForce)} ${escapeHtml(summary.reactionForceUnits)}</strong></div>
+        </div>
+      </section>
+      <section class="grid">
+        <div class="card">
+          <h2>Stress Field Preview</h2>
+          ${stressFieldSvg(summary)}
+          <p class="note">Schematic illustration - not model geometry. Colors are normalized from the result summary and are not a rendered solver field.</p>
+        </div>
+        <div class="card">
+          <h2>Result Summary</h2>
+          <table>
+            <tr><td>Run ID</td><td>${escapeHtml(runId)}</td></tr>
+            <tr><td>Result source</td><td>${escapeHtml(provenanceLabel)}</td></tr>
+            <tr><td>Solver</td><td>${escapeHtml(provenance?.solver ?? "unknown")}</td></tr>
+            <tr><td>Mesh source</td><td>${escapeHtml(provenance?.meshSource ?? "unknown")}</td></tr>
+            <tr><td>Result provenance</td><td>${escapeHtml(provenance?.resultSource ?? "unknown")}</td></tr>
+            <tr><td>Units basis</td><td>${escapeHtml(provenance?.units ?? "unknown")}</td></tr>
+            <tr><td>Analysis type</td><td>${escapeHtml(analysisLabel)}</td></tr>
+            <tr><td>Stress result</td><td>Von Mises</td></tr>
+            <tr><td>Max stress</td><td>${format(summary.maxStress)} ${escapeHtml(summary.maxStressUnits)}</td></tr>
+            <tr><td>Max displacement</td><td>${format(summary.maxDisplacement)} ${escapeHtml(summary.maxDisplacementUnits)}</td></tr>
+            <tr><td>Factor of safety</td><td>${format(summary.safetyFactor)}</td></tr>
+            <tr><td>Reaction force</td><td>${format(summary.reactionForce)} ${escapeHtml(summary.reactionForceUnits)}</td></tr>
+            ${transientRows}
+          </table>
+        </div>
+      </section>
+      <section>
+        <h2>Assessment</h2>
+        <div class="assessment ${escapeHtml(assessmentStatusClass)}">
+          <strong>${escapeHtml(assessment.title)}</strong>
+          <p class="note">${escapeHtml(assessment.message)}</p>
+        </div>
+        <div class="bar"><div class="marker"></div></div>
+        <p class="note">Stress range is normalized for report visualization. Review the simulation setup, constraints, loads, mesh quality, and material assumptions before using these values for design decisions.</p>
+      </section>
+      <section class="footer"><span>Generated by OpenFEA local mode</span><span>Self-contained HTML companion plus PDF export</span></section>
+    </main>
+  </body>
+</html>`;
+}
+
+export function buildPdfReport(runId: string, summary: ResultSummary): Buffer {
+  if (isModalResultSummary(summary)) return buildModalPdfReport(runId, summary);
+  if (isThermalResultSummary(summary)) return buildThermalPdfReport(runId, summary);
+  const assessment = assessResultFailure(summary);
+  const analysisLabel = summary.transient ? "Dynamic structural" : "Static stress";
+  const provenanceTier = resultTierForSummary(summary);
+  const provenanceLabel = resultTierLabel(provenanceTier);
+  const provenance = summary.provenance;
+  const banner = nonProductionBanner(provenanceTier);
+  const bannerCommands = banner ? [
+    text(banner.title, 48, 654, 13, "F1", [1, 0.76, 0.22]),
+    text(banner.message, 48, 636, 10, "F2", [1, 0.86, 0.5])
+  ] : [];
+  const commands = [
+    "q",
+    "0.95 0.97 1 rg 0 0 612 792 re f",
+    "0.04 0.07 0.13 rg 0 618 612 174 re f",
+    "0.08 0.28 0.56 rg 330 618 282 174 re f",
+    text(`OpenFEA ${analysisLabel.toUpperCase()} SIMULATION`, 48, 744, 10, "F2", [0.75, 0.85, 1]),
+    text("Structural Analysis Report", 48, 704, 26, "F1", [1, 1, 1]),
+    text(`Run ${runId}`, 48, 680, 10, "F2", [0.78, 0.86, 0.96]),
+    ...bannerCommands,
+    text("Key Results", 48, 586, 18, "F1"),
+    kpiBox(48, 510, "MAX STRESS", `${format(summary.maxStress)} ${summary.maxStressUnits}`, [0.91, 0.25, 0.21]),
+    kpiBox(186, 510, "DISPLACEMENT", `${format(summary.maxDisplacement)} ${summary.maxDisplacementUnits}`, [0.12, 0.45, 0.95]),
+    kpiBox(324, 510, "SAFETY FACTOR", format(summary.safetyFactor), [0.12, 0.7, 0.38]),
+    kpiBox(462, 510, "REACTION", `${format(summary.reactionForce)} ${summary.reactionForceUnits}`, [0.95, 0.58, 0.18]),
+    text("Stress Field Preview", 48, 462, 16, "F1"),
+    contourDrawing(48, 226, 310, 204),
+    text("Result Summary", 384, 462, 16, "F1"),
+    tableRow(384, 426, "Analysis type", analysisLabel),
+    tableRow(384, 398, "Stress result", "Von Mises"),
+    tableRow(384, 370, "Max stress", `${format(summary.maxStress)} ${summary.maxStressUnits}`),
+    tableRow(384, 342, "Max displacement", `${format(summary.maxDisplacement)} ${summary.maxDisplacementUnits}`),
+    tableRow(384, 314, "Factor of safety", format(summary.safetyFactor)),
+    tableRow(384, 286, "Reaction force", `${format(summary.reactionForce)} ${summary.reactionForceUnits}`),
+    tableRow(384, 258, "Failure check", assessment.title),
+    tableRow(384, 230, "Result source", provenanceLabel),
+    tableRow(384, 202, "Solver", provenance?.solver ?? "unknown"),
+    tableRow(384, 174, "Mesh source", provenance?.meshSource ?? "unknown"),
+    tableRow(384, 146, "Provenance", provenance?.resultSource ?? "unknown"),
+    text("Engineering Notes", 48, 112, 16, "F1"),
+    wrappedText(
+      `${assessment.title}: ${assessment.message} Result source: ${provenanceLabel}. This report summarizes the local OpenFEA static stress run. The contour image is a schematic illustration, not model geometry. Confirm material properties, boundary conditions, load placement, and mesh quality before using these values for design release.`,
+      48,
+      90,
+      500,
+      9
+    ),
+    text("Generated by OpenFEA local mode", 48, 42, 9, "F2", [0.36, 0.42, 0.5]),
+    "Q"
+  ].join("\n");
+  return makePdf(commands);
+}
+
+function buildThermalHtmlReport(runId: string, summary: ThermalResultSummary): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>OpenFEA Thermal Report</title><style>body{font:14px/1.5 system-ui;margin:40px;color:#111827}main{max-width:760px;margin:auto}header{padding:28px;color:white;background:#14396f}table{width:100%;border-collapse:collapse;margin-top:24px}td{padding:10px;border-bottom:1px solid #d8dee8}td:last-child{text-align:right;font-weight:700}</style></head><body><main><header><small>OpenFEA steady-state thermal simulation</small><h1>Thermal Analysis Report</h1><div>Run ${escapeHtml(runId)}</div></header><table><tr><td>Minimum temperature</td><td>${format(summary.minTemperature)} ${escapeHtml(summary.temperatureUnits)}</td></tr><tr><td>Maximum temperature</td><td>${format(summary.maxTemperature)} ${escapeHtml(summary.temperatureUnits)}</td></tr><tr><td>Maximum heat flux</td><td>${format(summary.maxHeatFlux)} ${escapeHtml(summary.heatFluxUnits)}</td></tr><tr><td>Applied surface heat</td><td>${format(summary.appliedHeat)} W</td></tr><tr><td>Generated heat</td><td>${format(summary.generatedHeat)} W</td></tr><tr><td>Boundary reaction</td><td>${format(summary.reactionHeat)} W</td></tr><tr><td>Energy balance error</td><td>${format(summary.energyBalanceRelativeError * 100)}%</td></tr></table></main></body></html>`;
+}
+
+function buildThermalPdfReport(runId: string, summary: ThermalResultSummary): Buffer {
+  return makePdf([
+    "q", "0.95 0.97 1 rg 0 0 612 792 re f", "0.04 0.07 0.13 rg 0 618 612 174 re f",
+    text("OpenFEA STEADY-STATE THERMAL SIMULATION", 48, 744, 10, "F2", [0.75, 0.85, 1]),
+    text("Thermal Analysis Report", 48, 704, 26, "F1", [1, 1, 1]), text(`Run ${runId}`, 48, 680, 10, "F2", [0.78, 0.86, 0.96]),
+    text("Key Results", 48, 586, 18, "F1"),
+    kpiBox(48, 510, "MIN TEMPERATURE", `${format(summary.minTemperature)} ${summary.temperatureUnits}`, [0.12, 0.45, 0.95]),
+    kpiBox(220, 510, "MAX TEMPERATURE", `${format(summary.maxTemperature)} ${summary.temperatureUnits}`, [0.91, 0.25, 0.21]),
+    kpiBox(392, 510, "MAX HEAT FLUX", `${format(summary.maxHeatFlux)} ${summary.heatFluxUnits}`, [0.95, 0.58, 0.18]),
+    tableRow(48, 430, "Applied surface heat", `${format(summary.appliedHeat)} W`), tableRow(48, 400, "Generated heat", `${format(summary.generatedHeat)} W`),
+    tableRow(48, 370, "Boundary reaction", `${format(summary.reactionHeat)} W`), tableRow(48, 340, "Energy balance error", `${format(summary.energyBalanceRelativeError * 100)}%`), "Q"
+  ].join("\n"));
+}
+
+function buildModalHtmlReport(runId: string, summary: ModalResultSummary): string {
+  const provenanceTier = resultTierForSummary(summary);
+  const provenanceLabel = resultTierLabel(provenanceTier);
+  const modeRows = summary.modes.map((mode) => `
+            <tr><td>${escapeHtml(String(mode.modeIndex))}</td><td>${format(mode.frequencyHz)} Hz</td><td>${format(mode.eigenvalue)}</td><td>${mode.scaledResidual.toExponential(3)}</td></tr>`).join("");
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>OpenFEA Modal Analysis Report</title>
+    <style>
+      body { margin: 0; font: 14px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; color: #111827; background: #f4f7fb; }
+      main { width: 900px; margin: 32px auto; background: white; border: 1px solid #d8dee8; }
+      header { padding: 36px 44px; color: white; background: linear-gradient(135deg, #0b1220, #1c75d8); }
+      section { padding: 28px 44px; border-top: 1px solid #d8dee8; }
+      h1 { margin: 8px 0; font-size: 34px; } h2 { margin: 0 0 14px; }
+      table { width: 100%; border-collapse: collapse; } th, td { padding: 10px; border-bottom: 1px solid #edf1f7; text-align: right; }
+      th:first-child, td:first-child { text-align: left; }
+      .warning { color: #92400e; background: #fffbeb; padding: 12px 14px; border-left: 4px solid #f59e0b; }
+      .note { color: #667085; }
+    </style>
+  </head>
+  <body><main>
+    <header><div>OpenFEA modal simulation</div><h1>Modal Analysis Report</h1><div>Run ${escapeHtml(runId)}</div></header>
+    <section><h2>Convergence</h2><p>${escapeHtml(String(summary.convergedModeCount))} of ${escapeHtml(String(summary.requestedModeCount))} requested modes converged.</p>${summary.warning ? `<p class="warning">${escapeHtml(summary.warning)}</p>` : ""}</section>
+    <section><h2>Natural frequencies</h2><table><thead><tr><th>Mode</th><th>Frequency</th><th>Eigenvalue</th><th>Scaled residual</th></tr></thead><tbody>${modeRows}</tbody></table></section>
+    <section><h2>Result basis</h2><p>Result source: ${escapeHtml(provenanceLabel)}. Solver: ${escapeHtml(summary.provenance?.solver ?? "unknown")}.</p><p class="note">Mode shapes are normalized so the largest nodal vector magnitude is 1. Their sign is deterministic but arbitrary. Display amplitude and phase animation are visualization-only and are not physical displacements.</p></section>
+  </main></body>
+</html>`;
+}
+
+function buildModalPdfReport(runId: string, summary: ModalResultSummary): Buffer {
+  const rows = summary.modes.slice(0, 10).flatMap((mode, index) => {
+    const y = 500 - index * 28;
+    return [
+      tableRow(48, y, `Mode ${mode.modeIndex}`, `${format(mode.frequencyHz)} Hz`),
+      text(`scaled residual ${mode.scaledResidual.toExponential(3)}`, 330, y, 9, "F2", [0.36, 0.42, 0.5])
+    ];
+  });
+  const commands = [
+    "q",
+    "0.95 0.97 1 rg 0 0 612 792 re f",
+    "0.04 0.07 0.13 rg 0 618 612 174 re f",
+    "0.08 0.28 0.56 rg 330 618 282 174 re f",
+    text("OpenFEA MODAL ANALYSIS", 48, 744, 10, "F2", [0.75, 0.85, 1]),
+    text("Modal Analysis Report", 48, 704, 26, "F1", [1, 1, 1]),
+    text(`Run ${runId}`, 48, 680, 10, "F2", [0.78, 0.86, 0.96]),
+    text("Convergence", 48, 586, 18, "F1"),
+    text(`${summary.convergedModeCount} of ${summary.requestedModeCount} requested modes converged`, 48, 558, 12, "F2"),
+    text("Natural Frequencies", 48, 526, 18, "F1"),
+    ...rows,
+    text("Engineering Notes", 48, 184, 16, "F1"),
+    wrappedText(
+      `${summary.warning ? `${summary.warning} ` : ""}Mode shapes are normalized to a maximum nodal vector magnitude of 1. Shape sign is deterministic but arbitrary. Display amplitude and phase animation are visualization-only, not physical displacement.`,
+      48,
+      160,
+      500,
+      9
+    ),
+    text("Generated by OpenFEA local mode", 48, 42, 9, "F2", [0.36, 0.42, 0.5]),
+    "Q"
+  ].join("\n");
+  return makePdf(commands);
+}
+
+function makePdf(content: string): Buffer {
+  const stream = Buffer.from(content, "latin1");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${content}\nendstream`
+  ];
+  const chunks = ["%PDF-1.4\n"];
+  const offsets: number[] = [];
+  for (let index = 0; index < objects.length; index += 1) {
+    offsets.push(Buffer.byteLength(chunks.join(""), "latin1"));
+    chunks.push(`${index + 1} 0 obj\n${objects[index]}\nendobj\n`);
+  }
+  const xrefOffset = Buffer.byteLength(chunks.join(""), "latin1");
+  chunks.push(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
+  for (const offset of offsets) chunks.push(`${String(offset).padStart(10, "0")} 00000 n \n`);
+  chunks.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+  return Buffer.from(chunks.join(""), "latin1");
+}
+
+function kpiBox(x: number, y: number, label: string, value: string, accent: [number, number, number]): string {
+  return [
+    "1 1 1 rg 0.84 0.88 0.94 RG 0.8 w",
+    `${x} ${y} 112 58 re B`,
+    `${accent.join(" ")} rg ${x} ${y + 54} 112 4 re f`,
+    text(label, x + 10, y + 36, 8, "F2", [0.4, 0.45, 0.52]),
+    text(value, x + 10, y + 16, 13, "F1")
+  ].join("\n");
+}
+
+function contourDrawing(x: number, y: number, width: number, height: number): string {
+  const beam = [
+    [x + 58, y + 66],
+    [x + 230, y + 44],
+    [x + 276, y + 72],
+    [x + 98, y + 98]
+  ];
+  const top = [
+    [x + 98, y + 98],
+    [x + 276, y + 72],
+    [x + 246, y + 132],
+    [x + 78, y + 156]
+  ];
+  const side = [
+    [x + 230, y + 44],
+    [x + 276, y + 72],
+    [x + 246, y + 132],
+    [x + 202, y + 104]
+  ];
+  return [
+    "0.04 0.07 0.13 rg",
+    `${x} ${y} ${width} ${height} re f`,
+    "0.08 0.13 0.22 RG 0.35 w",
+    ...gridLines(x, y, width, height),
+    "0.12 0.35 0.78 rg",
+    polygon(beam),
+    "0.12 0.70 0.82 rg",
+    polygon([
+      [x + 92, y + 70],
+      [x + 155, y + 62],
+      [x + 201, y + 90],
+      [x + 136, y + 100]
+    ]),
+    "0.95 0.76 0.20 rg",
+    polygon([
+      [x + 136, y + 100],
+      [x + 201, y + 90],
+      [x + 246, y + 118],
+      [x + 180, y + 130]
+    ]),
+    "0.90 0.18 0.34 rg",
+    polygon([
+      [x + 180, y + 130],
+      [x + 246, y + 118],
+      [x + 246, y + 132],
+      [x + 78, y + 156],
+      [x + 96, y + 134]
+    ]),
+    "0.35 0.47 0.62 rg",
+    polygon(side),
+    "0.62 0.72 0.84 rg",
+    polygon(top),
+    "0.82 0.88 0.95 RG 1.1 w",
+    polyline([...beam, beam[0]!, [x + 78, y + 156], [x + 246, y + 132], [x + 276, y + 72]]),
+    "0.27 0.55 0.90 rg",
+    circle(x + 80, y + 82, 4),
+    circle(x + 88, y + 80, 4),
+    "0.95 0.67 0.13 rg",
+    arrow(x + 238, y + 160, x + 238, y + 130),
+    text("Load", x + 220, y + 168, 7, "F2", [0.85, 0.9, 1]),
+    "0.27 0.70 0.48 rg",
+    supportMarker(x + 72, y + 64),
+    "0.07 0.10 0.16 rg",
+    text("MODEL VIEW", x + 18, y + height - 24, 7, "F2", [0.65, 0.72, 0.82]),
+    "0.15 0.45 0.95 rg",
+    `${x + 20} ${y + 18} 60 5 re f`,
+    "0.15 0.75 0.70 rg",
+    `${x + 80} ${y + 18} 60 5 re f`,
+    "0.96 0.78 0.20 rg",
+    `${x + 140} ${y + 18} 60 5 re f`,
+    "0.90 0.20 0.28 rg",
+    `${x + 200} ${y + 18} 60 5 re f`
+  ].join("\n");
+}
+
+function gridLines(x: number, y: number, width: number, height: number): string[] {
+  const lines: string[] = [];
+  for (let offset = -80; offset <= width + 80; offset += 38) {
+    lines.push(`${x + offset} ${y + 12} m ${x + offset + 110} ${y + height - 18} l S`);
+    lines.push(`${x + offset} ${y + height - 18} m ${x + offset + 138} ${y + 12} l S`);
+  }
+  return lines;
+}
+
+function polygon(points: number[][]): string {
+  const [first, ...rest] = points;
+  if (!first) return "";
+  return `${first[0]} ${first[1]} m ${rest.map((point) => `${point[0]} ${point[1]} l`).join(" ")} h f`;
+}
+
+function polyline(points: number[][]): string {
+  const [first, ...rest] = points;
+  if (!first) return "";
+  return `${first[0]} ${first[1]} m ${rest.map((point) => `${point[0]} ${point[1]} l`).join(" ")} S`;
+}
+
+function circle(x: number, y: number, radius: number): string {
+  const c = radius * 0.55228475;
+  return `${x + radius} ${y} m ${x + radius} ${y + c} ${x + c} ${y + radius} ${x} ${y + radius} c ${x - c} ${y + radius} ${x - radius} ${y + c} ${x - radius} ${y} c ${x - radius} ${y - c} ${x - c} ${y - radius} ${x} ${y - radius} c ${x + c} ${y - radius} ${x + radius} ${y - c} ${x + radius} ${y} c f`;
+}
+
+function arrow(x1: number, y1: number, x2: number, y2: number): string {
+  return [
+    "4 w 0.95 0.67 0.13 RG",
+    `${x1} ${y1} m ${x2} ${y2} l S`,
+    "0.95 0.67 0.13 rg",
+    polygon([[x2, y2], [x2 - 7, y2 + 13], [x2 + 7, y2 + 13]])
+  ].join("\n");
+}
+
+function supportMarker(x: number, y: number): string {
+  return [
+    polygon([[x, y], [x + 10, y - 16], [x - 10, y - 16]]),
+    polygon([[x + 18, y - 2], [x + 28, y - 18], [x + 8, y - 18]]),
+    polygon([[x + 36, y - 4], [x + 46, y - 20], [x + 26, y - 20]])
+  ].join("\n");
+}
+
+function tableRow(x: number, y: number, label: string, value: string): string {
+  return [
+    "0.86 0.89 0.94 RG 0.5 w",
+    `${x} ${y - 8} 176 1 re f`,
+    text(label, x, y, 9, "F2", [0.42, 0.47, 0.54]),
+    text(value, x + 92, y, 9, "F1")
+  ].join("\n");
+}
+
+function wrappedText(value: string, x: number, y: number, width: number, size: number): string {
+  const words = value.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  const maxChars = Math.floor(width / (size * 0.52));
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > maxChars) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.map((item, index) => text(item, x, y - index * (size + 5), size, "F2", [0.25, 0.3, 0.38])).join("\n");
+}
+
+function text(value: string, x: number, y: number, size: number, font = "F2", color: [number, number, number] = [0.07, 0.1, 0.16]): string {
+  return `${color.join(" ")} rg BT /${font} ${size} Tf ${x} ${y} Td (${pdfEscape(value)}) Tj ET`;
+}
+
+function coverSvg(): string {
+  return `<svg width="320" height="180" viewBox="0 0 320 180" aria-hidden="true"><defs><linearGradient id="g" x1="0" x2="1"><stop stop-color="#38bdf8"/><stop offset="1" stop-color="#60a5fa"/></linearGradient></defs><path d="M18 144 112 34l82 62 86-70" fill="none" stroke="url(#g)" stroke-width="18" stroke-linecap="round" opacity=".65"/><circle cx="112" cy="34" r="16" fill="#fff"/><circle cx="194" cy="96" r="12" fill="#fff"/><circle cx="280" cy="26" r="16" fill="#fff"/></svg>`;
+}
+
+function stressFieldSvg(summary: StructuralResultSummary): string {
+  return `<svg class="visual result-model" viewBox="0 0 560 320" role="img" aria-label="Schematic stress contour illustration, not model geometry"><defs><linearGradient id="beamStress" x1="0" x2="1"><stop stop-color="#2563eb"/><stop offset=".36" stop-color="#22d3ee"/><stop offset=".64" stop-color="#facc15"/><stop offset="1" stop-color="#ef4444"/></linearGradient><linearGradient id="sideShade" x1="0" x2="1"><stop stop-color="#334155"/><stop offset="1" stop-color="#64748b"/></linearGradient></defs><rect width="560" height="320" fill="#0b1220"/><g stroke="#172033" stroke-width="1">${Array.from({ length: 15 }, (_, index) => `<path d="M${-80 + index * 48} 288 260 74" />`).join("")}${Array.from({ length: 15 }, (_, index) => `<path d="M${44 + index * 48} 72 392 290" />`).join("")}</g><g transform="translate(54 18)"><path d="M66 194 392 154 462 196 128 244Z" fill="url(#beamStress)"/><path d="M392 154 462 196 430 242 360 202Z" fill="url(#sideShade)"/><path d="M128 244 462 196 430 242 98 290Z" fill="#475569"/><path d="M66 194 392 154 462 196 128 244Z" fill="none" stroke="#cbd5e1" stroke-width="3"/><path d="M128 244 98 290 430 242 462 196M392 154 360 202 430 242" fill="none" stroke="#94a3b8" stroke-width="2"/><circle cx="116" cy="222" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><circle cx="166" cy="214" r="16" fill="#0b1220" stroke="#bfdbfe" stroke-width="6"/><path d="M384 64 384 142" stroke="#f59e0b" stroke-width="10" stroke-linecap="round"/><path d="M384 152 368 120 400 120Z" fill="#f59e0b"/><rect x="324" y="40" width="128" height="28" rx="3" fill="#0f172a" stroke="#f59e0b"/><text x="388" y="59" fill="#e5e7eb" text-anchor="middle" font-size="12" font-family="ui-monospace, monospace">Load</text><g fill="#38bdf8"><path d="M88 256 100 278 76 278Z"/><path d="M132 250 144 272 120 272Z"/><path d="M176 244 188 266 164 266Z"/></g><path d="M260 94 330 116 286 190 218 168Z" fill="#ffffff" opacity=".18" stroke="#e2e8f0" stroke-width="2"/></g><g transform="translate(28 270)" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1"><rect x="0" y="0" width="270" height="10" rx="5" fill="url(#beamStress)"/><text x="0" y="28">Max stress ${escapeHtml(format(summary.maxStress))} ${escapeHtml(summary.maxStressUnits)}</text><text x="0" y="46">Max displacement ${escapeHtml(format(summary.maxDisplacement))} ${escapeHtml(summary.maxDisplacementUnits)}</text></g></svg>`;
+}
+
+function resultTierForSummary(summary: ResultSummary): ResultProvenanceTier {
+  return summary.resultTier ?? classifyResultProvenance(summary.provenance);
+}
+
+function resultTierLabel(tier: ResultProvenanceTier): string {
+  if (tier === "production_fea") return "Production FEA";
+  if (tier === "core_preview") return "OpenFEA Core Preview (coarse block proxy)";
+  if (tier === "local_estimate") return "Estimate (not FEA)";
+  if (tier === "analytical_benchmark") return "Analytical benchmark";
+  if (tier === "imported_legacy") return "Legacy backend result";
+  return "Unknown result source";
+}
+
+function nonProductionBanner(tier: ResultProvenanceTier): { title: string; message: string } | null {
+  if (tier === "production_fea") return null;
+  if (tier === "core_preview") {
+    return {
+      title: "PREVIEW ONLY",
+      message: "This result used a coarse block proxy of the model bounds and is not production FEA."
+    };
+  }
+  if (tier === "local_estimate") {
+    return {
+      title: "NOT ANALYSIS",
+      message: "This result is an estimate or generated demo value, not finite-element analysis."
+    };
+  }
+  if (tier === "analytical_benchmark") {
+    return {
+      title: "BENCHMARK RESULT",
+      message: "This result comes from an analytical benchmark path, not a general model solve."
+    };
+  }
+  if (tier === "imported_legacy") {
+    return {
+      title: "LEGACY RESULT",
+      // OpenCAE Core Cloud was retired in July 2026 (docs/cloud-retirement.md);
+      // re-running now solves locally in the browser.
+      message: "This historical result is read-only. Re-run the simulation to solve it locally with OpenFEA Core."
+    };
+  }
+  return {
+    title: "UNKNOWN PROVENANCE",
+    message: "This result is missing production provenance and should not be treated as validated FEA."
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function format(value: number): string {
+  return Number.isInteger(value) ? value.toLocaleString() : Number(value.toFixed(3)).toLocaleString();
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] ?? char);
+}
+
+function pdfEscape(value: string): string {
+  return value.replace(/[\\()]/g, "\\$&").replace(/[^\x20-\x7e]/g, "-");
+}

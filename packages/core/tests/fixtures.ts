@@ -1,6 +1,6 @@
-import type { OpenCAEModelJson } from "../src/model-json";
+import type { OpenFEAModelJson } from "../src/model-json";
 
-export function createSingleTetModel(): OpenCAEModelJson {
+export function createSingleTetModel(): OpenFEAModelJson {
   return {
     schema: "opencae.model",
     schemaVersion: "0.1.0",
@@ -73,7 +73,7 @@ export function createSingleTetModel(): OpenCAEModelJson {
   };
 }
 
-export function createTwoTetModel(): OpenCAEModelJson {
+export function createTwoTetModel(): OpenFEAModelJson {
   const model = createSingleTetModel();
   return {
     ...model,

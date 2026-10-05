@@ -6,9 +6,10 @@
   // were retired in July 2026 — see docs/cloud-retirement.md. This config was
   // reconciled from the former wrangler.local-first.jsonc variant; solves run
   // in the browser, so the production Worker needs no solver bindings.
+  // Existing production resource identity; OpenFEA branding does not create a new Worker.
   "name": "opencae",
   "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
-  "main": "apps/opencae-web/worker/index.ts",
+  "main": "apps/openfea-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
@@ -19,7 +20,7 @@
     }
   ],
   "assets": {
-    "directory": "apps/opencae-web/dist",
+    "directory": "apps/openfea-web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health", "/healthz"]

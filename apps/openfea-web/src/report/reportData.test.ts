@@ -1,0 +1,452 @@
+import { describe, expect, test } from "vitest";
+import { bracketDemoProject, bracketDisplayModel } from "@openfea/samples";
+import type { Project, ResultField, ResultSummary, Study } from "@openfea/schema";
+import { buildReportData, suggestedReportFilename } from "./reportData";
+import { formatDeformationFactor, resolvedDeformation } from "../resultDeformation";
+
+const productionSummary: ResultSummary = {
+  maxStress: 142,
+  maxStressUnits: "MPa",
+  maxDisplacement: 0.184,
+  maxDisplacementUnits: "mm",
+  safetyFactor: 1.8,
+  reactionForce: 500,
+  reactionForceUnits: "N",
+  provenance: {
+    kind: "opencae_core_fea",
+    solver: "opencae-core-sparse-tet",
+    coreVersion: "0.2.0",
+    solverCpuVersion: "0.2.0",
+    runnerVersion: "browser-0.2.0",
+    meshSource: "actual_volume_mesh",
+    resultSource: "computed",
+    units: "mm-N-s-MPa"
+  },
+  diagnostics: [{ id: "solver-note", severity: "warning", source: "solver", message: "Fixture diagnostic, reproduced verbatim.", suggestedActions: [] }]
+};
+
+const fields: ResultField[] = [
+  { id: "stress", runId: "run", type: "stress", location: "node", values: [0, 142], min: 0, max: 142, units: "MPa" },
+  { id: "displacement", runId: "run", type: "displacement", location: "node", values: [0, 0.184], min: 0, max: 0.184, units: "mm" }
+];
+
+function report(overrides: Partial<Parameters<typeof buildReportData>[0]> = {}) {
+  const project: Project = { ...bracketDemoProject, studies: bracketDemoProject.studies.map((study) => ({ ...study })) };
+  const study = project.studies[0]!;
+  return buildReportData({
+    project,
+    study,
+    displayModel: bracketDisplayModel,
+    resultSummary: productionSummary,
+    resultFields: fields,
+    solverMeshSummary: null,
+    runTiming: { elapsedMs: 1234 },
+    unitSystem: "SI",
+    captures: {
+      stress: { png: "data:image/png;base64,stress", fieldId: "stress", selection: "static" }
+    },
+    generatedAt: new Date("2026-07-10T12:34:56.000Z"),
+    exaggeration: 1.8,
+    showDeformed: true,
+    ...overrides
+  });
+}
+
+describe("buildReportData", () => {
+  test("captions the figure with the exaggeration applied, not the emphasis slider", () => {
+    // The reported defect: the caption printed the panel's slider value (1-4) and called it
+    // the exaggeration, while the shape was auto-fitted to 8% of model extent and THEN
+    // multiplied by that slider — routinely a factor in the hundreds or thousands.
+    const data = report({
+      resolvedDeformation: { kind: "displacement", factor: 2150.4 }
+    });
+
+    const caption = data.figures.stress.caption;
+    expect(caption).toContain("×2,150 exaggeration");
+    expect(caption).toContain("×1.8 emphasis");
+    // The bug was that the slider value stood alone as the exaggeration.
+    expect(caption).not.toContain("×1.8 exaggeration");
+  });
+
+  test("never presents a mode shape's emphasis as a displacement exaggeration", () => {
+    // Modal amplitudes are normalized and carry no physical magnitude.
+    const data = report({
+      resolvedDeformation: { kind: "mode_shape", factor: 1.8 }
+    });
+
+    expect(data.figures.stress.caption).toContain("visual emphasis (unscaled amplitude)");
+    expect(data.figures.stress.caption).not.toContain("exaggeration");
+  });
+
+  test("claims no factor when the viewport could not resolve one", () => {
+    const data = report({ resolvedDeformation: null });
+    expect(data.figures.stress.caption).toContain("Deformed shape (display only)");
+    expect(data.figures.stress.caption).not.toMatch(/×[\d,.]+ exaggeration/);
+  });
+
+  test("reports the same factor the viewport legend derives", () => {
+    // Both sides call resolvedDeformation, so this pins that the report is fed the resolved
+    // number rather than recomputing it — the drift that produced the original bug.
+    const surfaceMesh = {
+      id: "surface-1",
+      nodes: [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]],
+      triangles: [[0, 1, 2]],
+      coordinateSpace: "solver" as const
+    };
+    const displacement: ResultField = {
+      id: "disp",
+      type: "displacement",
+      location: "node",
+      units: "mm",
+      surfaceMeshRef: "surface-1",
+      label: "Displacement",
+      min: 0,
+      max: 0.2,
+      values: [0, 0.1, 0.15, 0.2],
+      vectors: [[0, 0, 0], [0, 0, 0.1], [0, 0, 0.15], [0, 0, 0.2]]
+    } as unknown as ResultField;
+
+    const resolved = resolvedDeformation({
+      surfaceMesh: surfaceMesh as never,
+      resultFields: [displacement],
+      resultMode: "displacement",
+      deformationScale: 1.8,
+      showDeformed: true
+    });
+    expect(resolved?.kind).toBe("displacement");
+    // Auto-fit puts peak displacement at 8% of the model diagonal, then the slider scales it,
+    // and the mm-on-solver-metres correction multiplies by 1000 — nowhere near 1.8.
+    expect(resolved!.factor).toBeGreaterThan(100);
+
+    const data = report({ resolvedDeformation: resolved });
+    expect(data.figures.stress.caption).toContain(`×${Math.round(resolved!.factor).toLocaleString()} exaggeration`);
+  });
+
+  test("keeps sub-10 factors to one decimal and never rounds one away", () => {
+    // formatDeformationFactor switches to whole numbers at 10; below it a factor must keep
+    // its decimal rather than collapsing to a bare integer.
+    expect(formatDeformationFactor(2.5)).toBe("2.5");
+    expect(formatDeformationFactor(9.94)).toBe("9.9");
+    expect(formatDeformationFactor(10)).toBe("10");
+    expect(formatDeformationFactor(2150.4)).toBe("2,150");
+    const data = report({ resolvedDeformation: { kind: "displacement", factor: 2.5 } });
+    expect(data.figures.stress.caption).toContain("×2.5 exaggeration");
+  });
+
+  test("resolves no factor when nothing on the surface is deforming", () => {
+    const surfaceMesh = {
+      id: "surface-1",
+      nodes: [[0, 0, 0], [10, 0, 0], [0, 10, 0], [0, 0, 10]],
+      triangles: [[0, 1, 2]],
+      coordinateSpace: "solver" as const
+    } as never;
+    const base = {
+      id: "disp",
+      type: "displacement",
+      location: "node",
+      units: "mm",
+      surfaceMeshRef: "surface-1",
+      label: "Displacement",
+      min: 0,
+      max: 0.2,
+      values: [0, 0.1, 0.15, 0.2]
+    };
+
+    const common = { surfaceMesh, resultMode: "displacement" as const, deformationScale: 1.8, showDeformed: true };
+
+    // No vectors at all — nothing to displace.
+    expect(resolvedDeformation({ ...common, resultFields: [base as unknown as ResultField] })).toBeNull();
+    // Vectors present but all zero: the auto-fit divides by a zero peak, so the factor
+    // degenerates to 0 and must be reported as "no factor" rather than "×0".
+    const zeroed = { ...base, max: 0, values: [0, 0, 0, 0], vectors: [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]] };
+    expect(resolvedDeformation({ ...common, resultFields: [zeroed as unknown as ResultField] })).toBeNull();
+    // Not deformed, and no surface, are both null regardless of the fields.
+    const real = { ...base, vectors: [[0, 0, 0], [0, 0, 0.1], [0, 0, 0.15], [0, 0, 0.2]] } as unknown as ResultField;
+    expect(resolvedDeformation({ ...common, resultFields: [real], showDeformed: false })).toBeNull();
+    expect(resolvedDeformation({ ...common, resultFields: [real], surfaceMesh: undefined })).toBeNull();
+    // A mode shape with no mode-shape field on this surface reports nothing either: the
+    // field guard gates both modes, matching the viewport legend.
+    expect(resolvedDeformation({ ...common, resultFields: [real], resultMode: "mode_shape" })).toBeNull();
+  });
+
+  test("preserves honest panel formatting and estimated mesh labels", () => {
+    const data = report();
+
+    expect(data.provenanceLabel).toBe("OpenFEA Core Local (in-browser)");
+    expect(data.coverMeta).toContainEqual({ label: "Solver", value: "OpenFEA Core Local (in-browser)" });
+    expect(data.coverMeta).toContainEqual({ label: "Version", value: "0.2.0" });
+    expect(data.keyResults).toContainEqual({ label: "Max von Mises stress", value: "142 MPa" });
+    expect(data.keyResults.map((row) => row.label)).not.toContain("Failure check");
+    expect(data.mesh).toContainEqual({ label: "Nodes", value: "42,381 (est.)" });
+    expect(data.mesh).toContainEqual({ label: "Element type", value: "Tet10" });
+    expect(data.diagnostics).toContain("Fixture diagnostic, reproduced verbatim.");
+    expect(data.figures.displacement.png).toBeUndefined();
+    expect(data.figures.displacement.unavailableLabel).toBe("Not available (--)");
+    expect(data.filename).toBe("OpenFEA-Report_bracket-demo_2026-07-10.pdf");
+  });
+
+  test("uses the same US conversion pipeline as the results panel", () => {    const data = report({ unitSystem: "US" });
+
+    expect(data.pageFormat).toBe("letter");
+    expect(data.keyResults).toContainEqual({ label: "Max von Mises stress", value: "20.6 ksi" });
+    expect(data.keyResults).toContainEqual({ label: "Max displacement", value: "0.007244 in" });
+    expect(data.keyResults).toContainEqual({ label: "Reaction force", value: "112.4 lbf" });
+    expect(data.materials.rows[0]?.[1]).toContain("ksi");
+    expect(data.materials.rows[0]?.[3]).toContain("lb/in^3");
+    expect(data.figures.stress.legendMax).toContain("ksi");
+    expect(data.figures.stress.legendMin).toContain("ksi");
+    expect(data.figures.displacement.legendMax).toContain("in");
+  });
+
+  test("prefers solver-actual mesh counts and marks unresolved material values missing", () => {
+    const study = {
+      ...bracketDemoProject.studies[0]!,
+      materialAssignments: [{ ...bracketDemoProject.studies[0]!.materialAssignments[0]!, materialId: "missing-material" }]
+    } satisfies Study;
+    const data = report({ study, solverMeshSummary: { nodes: 1200, elements: 640, warnings: [], source: "core_solver" } });
+
+    expect(data.mesh).toContainEqual({ label: "Nodes", value: "1,200" });
+    expect(data.mesh).toContainEqual({ label: "Elements", value: "640" });
+    expect(data.materials.rows[0]).toEqual(expect.arrayContaining(["--"]));
+  });
+
+  test("resolves and labels project custom materials as user-supplied and unverified", () => {
+    const custom = {
+      id: "0ac4dbda-1d37-43c0-b3ac-9d1d2cc28e84",
+      name: "Shop aluminum",
+      category: "metal" as const,
+      youngsModulus: 70e9,
+      poissonRatio: 0.33,
+      density: 2710,
+      yieldStrength: 290e6,
+      verification: "user_supplied_unverified" as const
+    };
+    const project = { ...bracketDemoProject, customMaterials: [custom] } satisfies Project;
+    const study = {
+      ...bracketDemoProject.studies[0]!,
+      materialAssignments: [{ ...bracketDemoProject.studies[0]!.materialAssignments[0]!, materialId: custom.id }]
+    } satisfies Study;
+    const data = report({ project, study });
+
+    expect(data.materials.rows[0]?.[0]).toContain("Shop aluminum (user-supplied, unverified)");
+    expect(data.materials.rows[0]?.[1]).toContain("70,000 MPa");
+  });
+
+  test("keeps the demo report honest about procedural sample geometry and mesh warnings", () => {
+    const project: Project = {
+      ...bracketDemoProject,
+      name: "Cantilever Demo",
+      geometryFiles: bracketDemoProject.geometryFiles.map((geometry) => ({
+        ...geometry,
+        filename: "cantilever-beam.step",
+        metadata: { ...geometry.metadata, source: "sample", sampleModel: "cantilever" }
+      })),
+      studies: bracketDemoProject.studies.map((study) => ({ ...study }))
+    };
+    const data = report({
+      project,
+      study: project.studies[0]!,
+      displayModel: {
+        ...bracketDisplayModel,
+        coreCloudGeometry: {
+          kind: "structured_block",
+          sampleId: "cantilever",
+          units: "mm",
+          descriptor: { length: 180, width: 24, height: 24 }
+        }
+      }
+    });
+
+    expect(data.geometry).toContainEqual({ label: "Source", value: "Sample model: Cantilever (procedural)" });
+    expect(data.geometryFiles.rows[0]).toEqual(["cantilever-beam.step", "Sample placeholder (procedural geometry)", "--"]);
+    expect(data.mesh).toContainEqual({ label: "Warnings", value: "Small features simplified in the demo mesh preview." });
+  });
+
+  test("translates legacy internal mesh warnings from saved projects at the report boundary", () => {
+    const study: Study = {
+      ...bracketDemoProject.studies[0]!,
+      meshSettings: {
+        ...bracketDemoProject.studies[0]!.meshSettings,
+        summary: { nodes: 42381, elements: 26944, warnings: ["Small feature simplified for the mock mesh.", "Aspect ratio above 5 on 3 elements."] }
+      }
+    };
+    const data = report({ study });
+
+    expect(data.mesh).toContainEqual({
+      label: "Warnings",
+      value: "Small features simplified in the demo mesh preview.; Aspect ratio above 5 on 3 elements."
+    });
+  });
+
+  test("reports the manufacturing process, print settings, and as-analyzed properties", () => {
+    const baseStudy = bracketDemoProject.studies[0]!;
+    const study: Study = {
+      ...baseStudy,
+      materialAssignments: [{
+        ...baseStudy.materialAssignments[0]!,
+        materialId: "mat-petg",
+        parameters: { manufacturingProcessId: "fdm", printed: true, infillDensity: 40, wallCount: 3, layerOrientation: "x" }
+      }]
+    };
+    const data = report({ study });
+
+    expect(data.manufacturing.headers).toEqual(["Material / target", "Process", "Process settings"]);
+    expect(data.manufacturing.rows[0]?.[0]).toContain("PETG");
+    expect(data.manufacturing.rows[0]?.[1]).toBe("FDM printing");
+    expect(data.manufacturing.rows[0]?.[2]).toBe("3 walls · 40% infill · X build direction");
+
+    const datasheetRow = data.materials.rows[0]!;
+    const analyzedRow = data.materials.rows[1]!;
+    expect(datasheetRow[0]).toContain("PETG");
+    expect(analyzedRow[0]).toBe("As analyzed (FDM, homogenized)");
+    expect(analyzedRow[1]).not.toBe(datasheetRow[1]);
+    expect(analyzedRow[1]).toContain("MPa");
+    expect(analyzedRow[4]).not.toBe(datasheetRow[4]);
+  });
+
+  test("marks a defaulted process as assumed and keeps solid materials to one properties row", () => {
+    const data = report();
+
+    expect(data.manufacturing.rows[0]).toEqual([
+      "Aluminum 6061 / Bracket body",
+      "CNC machining (assumed)",
+      "Solid stock · Isotropic"
+    ]);
+    expect(data.materials.rows).toHaveLength(1);
+  });
+
+  test("reports the reverse-check load capacity using the panel's target factor", () => {
+    const data = report({ targetSafetyFactor: 2 });
+
+    expect(data.loadCapacity).toEqual([
+      { label: "Current applied load", value: "500 N" },
+      { label: "Max theoretical load (at FoS 1.0)", value: "900 N" },
+      { label: "Target factor of safety", value: "2" },
+      { label: "Max load at target FoS", value: "450 N (0.9x current)" }
+    ]);
+  });
+
+  test("defaults the reverse-check target to 1.5 and omits it when the reaction force is invalid", () => {
+    const data = report();
+    expect(data.loadCapacity).toContainEqual({ label: "Target factor of safety", value: "1.5" });
+    expect(data.loadCapacity).toContainEqual({ label: "Max load at target FoS", value: "600 N (1.2x current)" });
+
+    const invalid = report({ resultSummary: { ...productionSummary, reactionForce: 0 } });
+    expect(invalid.loadCapacity).toEqual([]);
+  });
+
+  test("adds dynamic solver and transient rows", () => {
+    const dynamicStudy: Study = {
+      ...bracketDemoProject.studies[0]!,
+      type: "dynamic_structural",
+      name: "Dynamic Structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const dynamicSummary: ResultSummary = {
+      ...productionSummary,
+      transient: {
+        analysisType: "dynamic_structural",
+        integrationMethod: "newmark_average_acceleration",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.01,
+        dampingRatio: 0.02,
+        frameCount: 11,
+        peakDisplacementTimeSeconds: 0.08,
+        peakDisplacement: 0.184
+      }
+    };
+    const dynamicFields: ResultField[] = [
+      { id: "stress-0", runId: "run", type: "stress", location: "node", values: [0], min: 0, max: 142, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+      { id: "stress-4", runId: "run", type: "stress", location: "node", values: [142], min: 0, max: 142, units: "MPa", frameIndex: 4, timeSeconds: 0.04 },
+      { id: "displacement-0", runId: "run", type: "displacement", location: "node", values: [0], min: 0, max: 0.184, units: "mm", frameIndex: 0, timeSeconds: 0 },
+      { id: "displacement-8", runId: "run", type: "displacement", location: "node", values: [0.184], min: 0, max: 0.184, units: "mm", frameIndex: 8, timeSeconds: 0.08 }
+    ];
+    const data = report({
+      study: dynamicStudy,
+      resultSummary: dynamicSummary,
+      resultFields: dynamicFields,
+      captures: {
+        stress: {
+          png: "data:image/png;base64,stress-peak",
+          fieldId: "stress-4",
+          selection: "peak",
+          frameIndex: 4,
+          timeSeconds: 0.04
+        },
+        displacement: {
+          png: "data:image/png;base64,displacement-peak",
+          fieldId: "displacement-8",
+          selection: "peak",
+          frameIndex: 8,
+          timeSeconds: 0.08
+        }
+      }
+    });
+
+    expect(data.title).toBe("Dynamic Structural Simulation Report");
+    expect(data.solver).toContainEqual({ label: "Time step", value: "0.005 s" });
+    expect(data.transientResults).toContainEqual({ label: "Frames", value: "11" });
+    expect(data.transientResults).toContainEqual({ label: "Peak displacement", value: "0.184 mm at 0.08 s" });
+    expect(data.figures.stress.legendMax).toBe("142 MPa");
+    expect(data.figures.stress.caption).toContain("Automatically selected peak von Mises stress frame (frame 2 of 3, 0.0400 s)");
+    expect(data.figures.displacement.caption).toContain("Automatically selected peak displacement magnitude frame (frame 3 of 3, 0.0800 s)");
+  });
+
+  test("omits the convergence section when no ladder has run", () => {
+    expect(report().meshConvergence).toBeNull();
+  });
+
+  test("renders the latest ladder's rung table, verdict, and skipped rungs", () => {
+    const record = {
+      id: "convergence-1",
+      studyId: "study-1",
+      caseId: "case-default",
+      createdAt: "2026-09-01T00:00:00.000Z",
+      completedAt: "2026-09-01T00:01:00.000Z",
+      probe: { point: [0, 0, 0] as [number, number, number], source: "explicit" as const },
+      rungs: [
+        { requestedPreset: "coarse" as const, status: "complete" as const, actualNodeCount: 1000, actualElementCount: 500, totalDofs: 3000, probeDisplacement: 0.1, displacementUnits: "mm", rawElementPeakVonMises: 100, stressUnits: "MPa" },
+        { requestedPreset: "medium" as const, status: "skipped" as const, skipReason: "150k DOF ceiling" },
+        { requestedPreset: "fine" as const, status: "complete" as const, actualNodeCount: 4000, actualElementCount: 2000, totalDofs: 12000, probeDisplacement: 0.11, displacementUnits: "mm", rawElementPeakVonMises: 105, stressUnits: "MPa" }
+      ],
+      classification: "apparent_convergence" as const,
+      lastStepChanges: { displacement: 0.1, stress: 0.05 }
+    };
+    const data = report({ convergenceRecords: [record] });
+
+    expect(data.meshConvergence?.headers).toEqual(["Rung", "Elements", "DOFs", "Probe displacement", "Peak von Mises", "Status"]);
+    expect(data.meshConvergence?.rows).toHaveLength(3);
+    expect(data.meshConvergence?.rows[1]).toContain("skipped: 150k DOF ceiling");
+    expect(data.meshConvergence?.footnote).toContain("Verdict: apparent convergence.");
+  });
+
+  test("renders multi-face supports/loads as joined targets (Decision 2)", () => {
+    const project = { ...bracketDemoProject, studies: bracketDemoProject.studies.map((study) => ({ ...study })) };
+    const study = project.studies[0]!;
+    study.namedSelections = [
+      ...study.namedSelections,
+      { id: "extra-face", name: "Extra face", entityType: "face", geometryRefs: [], fingerprint: "extra" }
+    ];
+    study.constraints = study.constraints.map((constraint) => ({ ...constraint, selectionRefs: ["extra-face"] }));
+    const data = report({ project, study });
+
+    expect(data.supports.rows[0]?.[1]).toContain("+");
+  });
+});
+
+describe("suggestedReportFilename", () => {
+  test("sanitizes the project name like the project-save filename", () => {
+    expect(suggestedReportFilename("  Wing / Rev B!  ", new Date("2026-07-10T23:59:00Z")))
+      .toBe("OpenFEA-Report_wing-rev-b_2026-07-10.pdf");
+  });
+});

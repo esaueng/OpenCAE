@@ -3,9 +3,10 @@
   // One-off production cleanup config. Use only to record the Durable Object
   // class deletion required after retiring the former container-backed Worker.
   // Normal Cloudflare Builds must keep using wrangler.jsonc without migrations.
+  // Existing production resource identity; OpenFEA branding does not create a new Worker.
   "name": "opencae",
   "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
-  "main": "apps/opencae-web/worker/index.ts",
+  "main": "apps/openfea-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
@@ -16,7 +17,7 @@
     }
   ],
   "assets": {
-    "directory": "apps/opencae-web/dist",
+    "directory": "apps/openfea-web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health", "/healthz"]
