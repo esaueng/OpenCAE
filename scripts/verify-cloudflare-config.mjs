@@ -12,8 +12,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const productionDomains = ["cae.esau.app"];
-const productionWorkerName = "opencae";
+const productionDomains = ["fea.esau.app"];
+const productionWorkerName = "openfea";
 const legacySolverToken = ["calcu", "lix"].join("");
 const retiredCloudTokens = ["CORE_CLOUD_CONTAINER", "CORE_CLOUD_ARTIFACTS", "opencae-core-cloud-artifacts"];
 

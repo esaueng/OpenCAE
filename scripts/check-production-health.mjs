@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-export const PRODUCTION_HEALTH_URL = "https://cae.esau.app/health";
+export const PRODUCTION_HEALTH_URL = "https://fea.esau.app/health";
 
 const EXPECTED_HEALTH = {
   ok: true,

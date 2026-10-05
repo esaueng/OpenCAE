@@ -18,7 +18,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     const { defaultConfig, retiredDoCleanupConfig, staticConfig, packageJson } = readCloudflareConfigs(rootDir);
     const readme = readFileSync(resolve(rootDir, "README.md"), "utf8");
 
-    expect(defaultConfig.name).toBe("opencae");
+    expect(defaultConfig.name).toBe("openfea");
     expect(staticConfig.name).toBe("openfea-static");
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
@@ -157,7 +157,7 @@ describe("Cloudflare deployment config guard (post cloud retirement)", () => {
     );
   });
 
-  test.each(["cae.esau.app"])("fails when the production config loses %s", (productionDomain) => {
+  test.each(["fea.esau.app"])("fails when the production config loses %s", (productionDomain) => {
     const { staticConfig, packageJson } = readCloudflareConfigs(rootDir);
     const defaultConfig = clone(readConfig("wrangler.jsonc"));
     defaultConfig.routes = defaultConfig.routes.filter((route) => route.pattern !== productionDomain);

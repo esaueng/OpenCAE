@@ -102,8 +102,8 @@ describe("Cloudflare local-first worker", () => {
       triggers?: { crons?: string[] };
     };
 
-    expect(defaultConfig.name).toBe("opencae");
-    expect(defaultConfig.routes).toEqual([{ pattern: "cae.esau.app", custom_domain: true }]);
+    expect(defaultConfig.name).toBe("openfea");
+    expect(defaultConfig.routes).toEqual([{ pattern: "fea.esau.app", custom_domain: true }]);
     expect(defaultConfig.containers).toBeUndefined();
     expect(defaultConfig.durable_objects).toBeUndefined();
     expect(defaultConfig.r2_buckets).toEqual([{ binding: "PROJECT_BACKUPS", bucket_name: "opencae-project-backups" }]);
@@ -133,7 +133,7 @@ describe("Cloudflare local-first worker", () => {
   });
 
   test("health advertises the browser OpenFEA Core runtime", async () => {
-    const response = await dispatchWorker(new Request("https://cae.esau.app/health"), createEnv());
+    const response = await dispatchWorker(new Request("https://fea.esau.app/health"), createEnv());
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
@@ -155,7 +155,7 @@ describe("Cloudflare local-first worker", () => {
     ["GET", "/api/cloud-fea/runs/run-1/results"],
     ["GET", "/api/cloud-fea/health"]
   ])("retired cloud route %s %s returns an honest 410", async (method, path) => {
-    const response = await dispatchWorker(new Request(`https://cae.esau.app${path}`, { method }), createEnv());
+    const response = await dispatchWorker(new Request(`https://fea.esau.app${path}`, { method }), createEnv());
     const body = await response.json() as { error?: string; retired?: boolean; solverRuntime?: string };
 
     expect(response.status).toBe(410);
@@ -166,7 +166,7 @@ describe("Cloudflare local-first worker", () => {
   });
 
   test("other api routes explain the local-first Worker", async () => {
-    const response = await dispatchWorker(new Request("https://cae.esau.app/api/projects"), createEnv());
+    const response = await dispatchWorker(new Request("https://fea.esau.app/api/projects"), createEnv());
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toMatchObject({
@@ -179,7 +179,7 @@ describe("Cloudflare local-first worker", () => {
     const backupId = "11111111-1111-4111-8111-111111111111";
     const token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234567890-_";
     const encrypted = new Uint8Array(32).fill(7);
-    const put = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+    const put = await dispatchWorker(new Request(`https://fea.esau.app/api/project-backups/${backupId}`, {
       method: "PUT",
       headers: {
         "content-type": "application/octet-stream",
@@ -191,7 +191,7 @@ describe("Cloudflare local-first worker", () => {
     }), env);
 
     expect(put.status).toBe(201);
-    const get = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+    const get = await dispatchWorker(new Request(`https://fea.esau.app/api/project-backups/${backupId}`, {
       headers: { "x-opencae-backup-token": token }
     }), env);
     expect(get.status).toBe(200);
@@ -200,7 +200,7 @@ describe("Cloudflare local-first worker", () => {
 
   test("does not disclose encrypted backups without the capability token", async () => {
     const backupId = "11111111-1111-4111-8111-111111111111";
-    const response = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`), createEnv());
+    const response = await dispatchWorker(new Request(`https://fea.esau.app/api/project-backups/${backupId}`), createEnv());
 
     expect(response.status).toBe(401);
   });
@@ -210,14 +210,14 @@ describe("Cloudflare local-first worker", () => {
     const backupId = "11111111-1111-4111-8111-111111111111";
     const firstToken = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234567890-_";
     const otherToken = "zyxwvutsrqponmlkjihgfedcbaABCDEFGHIJ1234567890-_";
-    const request = (token: string, fill: number) => new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+    const request = (token: string, fill: number) => new Request(`https://fea.esau.app/api/project-backups/${backupId}`, {
       method: "PUT",
       headers: { "content-length": "32", "x-opencae-backup-token": token },
       body: new Uint8Array(32).fill(fill)
     });
     expect((await dispatchWorker(request(firstToken, 1), env)).status).toBe(201);
     expect((await dispatchWorker(request(otherToken, 2), env)).status).toBe(403);
-    const restored = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+    const restored = await dispatchWorker(new Request(`https://fea.esau.app/api/project-backups/${backupId}`, {
       headers: { "x-opencae-backup-token": firstToken }
     }), env);
     expect(new Uint8Array(await restored.arrayBuffer())).toEqual(new Uint8Array(32).fill(1));
@@ -229,7 +229,7 @@ describe("Cloudflare local-first worker", () => {
     const token = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN1234567890-_";
     // 200 bytes streamed under a 32-byte claimed length.
     const oversized = new Uint8Array(200).fill(9);
-    const put = await dispatchWorker(new Request(`https://cae.esau.app/api/project-backups/${backupId}`, {
+    const put = await dispatchWorker(new Request(`https://fea.esau.app/api/project-backups/${backupId}`, {
       method: "PUT",
       headers: { "content-length": "32", "x-opencae-backup-token": token },
       body: oversized
@@ -248,14 +248,14 @@ describe("Cloudflare local-first worker", () => {
   });
 
   test("serves static assets for non-api routes", async () => {
-    const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
+    const response = await dispatchWorker(new Request("https://fea.esau.app/"), createEnv("<html></html>"));
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe("<html></html>");
   });
 
   test("asset responses include browser security headers", async () => {
-    const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
+    const response = await dispatchWorker(new Request("https://fea.esau.app/"), createEnv("<html></html>"));
 
     expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
@@ -264,14 +264,14 @@ describe("Cloudflare local-first worker", () => {
   });
 
   test("csp permits the OCCT STEP importer embind runtime", async () => {
-    const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
+    const response = await dispatchWorker(new Request("https://fea.esau.app/"), createEnv("<html></html>"));
 
     expect(response.headers.get("content-security-policy")).toContain("script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'");
   });
 
   test("static asset _headers ships the same security headers the worker applies", async () => {
     const headersFile = readFileSync(resolve(__dirname, "../public/_headers"), "utf8");
-    const response = await dispatchWorker(new Request("https://cae.esau.app/"), createEnv("<html></html>"));
+    const response = await dispatchWorker(new Request("https://fea.esau.app/"), createEnv("<html></html>"));
 
     const workerCsp = response.headers.get("content-security-policy");
     expect(workerCsp).toBeTruthy();

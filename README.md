@@ -12,7 +12,7 @@ The workspace supports linear static stress, transient structural dynamics, moda
 
 The application, workspace folders, package scope (`@openfea/*`), reports, and installable PWA are named OpenFEA. Health responses identify the service as `openfea` / `openfea-web` and the solver runtime as `browser-openfea-core`; health-monitor consumers must use the updated contract. New project downloads use `.openfea.json` and the `openfea-local-project` envelope; existing `.opencae` / `.opencae.json` files and browser autosaves remain readable. Package consumers and local scripts must use the new `@openfea/*` names and `apps/openfea-*`, `libs/openfea-*`, `services/openfea-*`, and `runners/openfea-*` paths.
 
-Persisted browser storage keys, the local SQLite filename, Core model schema and solver provenance IDs, backup request headers, and archived cloud fixtures retain their original identifiers for compatibility. The deployed production Worker (`opencae`), R2 backup bucket (`opencae-project-backups`), recorded Durable Object migrations, production domain (`cae.esau.app`), analytics domain, and feedback form URL retain their existing resource identities. Renaming those external resources requires a separate infrastructure migration. Historical plans and protected agent instructions retain their original wording. If an existing local reference-backend checkout has ignored `data/` directories inside the renamed workspaces, move that local data from each old `opencae-*` directory to the corresponding `openfea-*` directory before starting the reference backend.
+Persisted browser storage keys, the local SQLite filename, Core model schema and solver provenance IDs, backup request headers, and archived cloud fixtures retain their original identifiers for compatibility. The deployment target matches the existing `openfea` Worker at `fea.esau.app`, verified in the Cloudflare dashboard. The R2 backup bucket (`opencae-project-backups`), recorded Durable Object migrations, configured Plausible analytics domain (`cae.esau.app`), and feedback form URL retain their existing resource identities. Renaming those retained resources requires a separate infrastructure migration. Historical plans and protected agent instructions retain their original wording. If an existing local reference-backend checkout has ignored `data/` directories inside the renamed workspaces, move that local data from each old `opencae-*` directory to the corresponding `openfea-*` directory before starting the reference backend.
 
 ## Local Development
 
@@ -66,7 +66,7 @@ node scripts/check-production-health.mjs
 
 ## Cloudflare Worker Deploy
 
-The production Cloudflare target for `cae.esau.app` serves the Vite web app from Workers Static Assets. Simulations run entirely in the browser with OpenFEA Core — the Worker hosts no solver. If browser autosave overflows, the app can ask for explicit permission to upload a client-encrypted 30-day recovery snapshot; the Worker never receives its decryption key. (The former OpenCAE Core Cloud container/R2 solve path was retired in July 2026; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
+The production Cloudflare target for `fea.esau.app` serves the Vite web app from Workers Static Assets. Simulations run entirely in the browser with OpenFEA Core — the Worker hosts no solver. If browser autosave overflows, the app can ask for explicit permission to upload a client-encrypted 30-day recovery snapshot; the Worker never receives its decryption key. (The former OpenCAE Core Cloud container/R2 solve path was retired in July 2026; see [docs/cloud-retirement.md](docs/cloud-retirement.md).)
 
 ```bash
 pnpm install --frozen-lockfile
@@ -105,10 +105,10 @@ That records the retired Durable Object delete-class migration server-side. Afte
 
 ## Production Uptime
 
-The live app runs at `https://cae.esau.app`. Uptime monitors should check the Worker health endpoint:
+The live app runs at `https://fea.esau.app`. Uptime monitors should check the Worker health endpoint:
 
 ```bash
-curl -fsS https://cae.esau.app/health
+curl -fsS https://fea.esau.app/health
 ```
 
 The scheduled [Production Health workflow](.github/workflows/production-health.yml) checks this contract every 30 minutes and powers the badge at the top of this README. It requires HTTP 200 plus the expected Worker, service, and `solverRuntime: "browser-openfea-core"` fields, so a generic success page cannot produce a false green result.

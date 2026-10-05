@@ -31,7 +31,7 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   `wrangler.containers.jsonc` was deleted; the former
   `wrangler.local-first.jsonc` shape was promoted into `wrangler.jsonc`
   (production identity kept: Worker name `openfea`, custom domain
-  `cae.esau.app`). `wrangler.static.jsonc` remains the non-production variant.
+  `fea.esau.app`). `wrangler.static.jsonc` remains the non-production variant.
   The checked-in config carries **no migrations** — Workers Builds uploads PR
   preview versions, and pending Durable Object migrations cannot ride a
   version upload (this failed CI on PR #31 until removed).
