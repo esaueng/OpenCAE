@@ -12,7 +12,7 @@ import {
   TOTAL_JS_GZIP_BUDGET_BYTES
 } from "./web-asset-budgets.mjs";
 
-const distAssetsDir = new URL("../apps/opencae-web/dist/assets/", import.meta.url);
+const distAssetsDir = new URL("../apps/openfea-web/dist/assets/", import.meta.url);
 
 function jsFiles(directoryUrl) {
   return readdirSync(directoryUrl)
@@ -20,7 +20,7 @@ function jsFiles(directoryUrl) {
     .map((name) => join(fileURLToPath(directoryUrl), name));
 }
 
-const distDir = new URL("../apps/opencae-web/dist/", import.meta.url);
+const distDir = new URL("../apps/openfea-web/dist/", import.meta.url);
 const indexHtml = readFileSync(new URL("index.html", distDir), "utf8");
 const initialScriptMatch = indexHtml.match(/<script[^>]+type="module"[^>]+src="(?<src>\/assets\/[^"]+\.js)"/);
 if (!initialScriptMatch?.groups?.src) {

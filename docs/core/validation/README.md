@@ -1,13 +1,13 @@
-# OpenCAE Core Validation
+# OpenFEA Core Validation
 
 See [core.md](./core.md) for the runnable Core validation suite, solver benchmark tolerances, mesh-quality requirements, and current solver limitations.
 
-OpenCAE Core solves the volume mesh supplied in the model JSON. Complex geometry must provide an actual Tet4 or Tet10 volume mesh with surface facets and surface sets. Core must not create or solve a rectangular display-bounds proxy for brackets, holes, ribs, gussets, uploaded CAD, or other non-block shapes.
+OpenFEA Core solves the volume mesh supplied in the model JSON. Complex geometry must provide an actual Tet4 or Tet10 volume mesh with surface facets and surface sets. Core must not create or solve a rectangular display-bounds proxy for brackets, holes, ribs, gussets, uploaded CAD, or other non-block shapes.
 
 If a complex display model has no actual volume mesh, preflight should fail with:
 
 ```text
-OpenCAE Core requires an actual volume mesh for complex geometry. Generate a Core mesh locally in the browser.
+OpenFEA Core requires an actual volume mesh for complex geometry. Generate a Core mesh locally in the browser.
 ```
 
 ## Model Schema

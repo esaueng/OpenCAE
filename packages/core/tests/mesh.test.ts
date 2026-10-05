@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { OpenCAEModelJson, SurfaceSetJson } from "../src";
+import type { OpenFEAModelJson, SurfaceSetJson } from "../src";
 import {
   connectedComponents,
   elementFaces,
@@ -20,7 +20,7 @@ const material = {
   poissonRatio: 0.3
 };
 
-function modelWith(connectivity: number[], coordinates: number[]): OpenCAEModelJson {
+function modelWith(connectivity: number[], coordinates: number[]): OpenFEAModelJson {
   return {
     schema: "opencae.model",
     schemaVersion: "0.2.0",

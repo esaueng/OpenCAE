@@ -1,7 +1,7 @@
 # OpenCAE Core Cloud retirement (July 2026)
 
-OpenCAE went fully local-first in July 2026: every simulation meshes and solves
-in the browser with OpenCAE Core (wasm meshing since A-M4, local solve pipeline
+OpenFEA went fully local-first in July 2026: every simulation meshes and solves
+in the browser with OpenFEA Core (wasm meshing since A-M4, local solve pipeline
 since B4a). The cloud solve infrastructure was removed in two steps:
 
 - **B4a** removed the client cloud-solve path (request builder, run dispatch,
@@ -11,7 +11,7 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 
 ## What was removed (B4b)
 
-- **Worker routes** (`apps/opencae-web/worker/index.ts`): `/api/cloud-core/*`
+- **Worker routes** (`apps/openfea-web/worker/index.ts`): `/api/cloud-core/*`
   and legacy alias `/api/cloud-fea/*` — run creation, start, events, results,
   cancel, and the Core Cloud health check, plus run tokens
   (`x-opencae-run-token`, `auth.json`), the R2 artifact read/write under
@@ -22,16 +22,16 @@ since B4a). The cloud solve infrastructure was removed in two steps:
   later, separate `PROJECT_BACKUPS` R2 binding stores only client-encrypted,
   user-consented recovery snapshots; it does not run simulations and cannot
   decrypt those snapshots.
-- **Container service mirror**: `services/opencae-core-cloud/` (Dockerfile,
+- **Container service mirror**: `services/openfea-core-cloud/` (Dockerfile,
   `RUNNER_VERSION`, contract-mirror source, its validation tests). The browser
-  build now consumes OpenCAE Core directly from this monorepo's `packages/*`
+  build now consumes OpenFEA Core directly from this monorepo's `packages/*`
   workspace packages.
 - **Wrangler configs**: container, Durable Object (`CORE_CLOUD_CONTAINER` /
   `OpenCaeCoreCloudContainer`), and R2 (`CORE_CLOUD_ARTIFACTS`) bindings.
   `wrangler.containers.jsonc` was deleted; the former
   `wrangler.local-first.jsonc` shape was promoted into `wrangler.jsonc`
-  (production identity kept: Worker name `opencae`, custom domain
-  `cae.esau.app`). `wrangler.static.jsonc` remains the non-production variant.
+  (production identity kept: Worker name `openfea`, custom domain
+  `fea.esau.app`). `wrangler.static.jsonc` remains the non-production variant.
   The checked-in config carries **no migrations** — Workers Builds uploads PR
   preview versions, and pending Durable Object migrations cannot ride a
   version upload (this failed CI on PR #31 until removed).
@@ -62,7 +62,7 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 ## What deliberately stays
 
 - **Golden fixtures + recorder**
-  (`apps/opencae-web/src/testdata/core-cloud-golden/`,
+  (`apps/openfea-web/src/testdata/core-cloud-golden/`,
   `scripts/record-core-cloud-golden.mts`, `coreCloudGolden.test.ts`,
   `goldenParity.test.ts`): they freeze the retired runner's request/response
   contract as a numeric oracle. Replays keep the current local solver identity
@@ -73,7 +73,7 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 - **Schema alias**: `solverSettings.backend: "opencae_core_cloud"` still
   parses (as an alias for `auto`) so old project files round-trip; loading one
   logs a one-time migration note.
-- **OpenCAE Core packages**: `packages/core`, `packages/examples`,
+- **OpenFEA Core packages**: `packages/core`, `packages/examples`,
   `packages/solver-cpu`, `packages/solver-wasm`, `packages/solver-webgpu`, and
   `packages/viewer` are now part of this repository and build before the web
   bundle.
@@ -84,8 +84,8 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 
 - The last-good container image is `opencae/opencae-core-cloud:0.1.6`
   (Cloudflare container application `opencae-core-cloud-0.1.1`).
-- The runner source remains buildable from the sibling **opencae-core** repo
-  (`services/opencae-core-cloud` there); the golden fixtures record the exact
+- The runner source remains buildable from the sibling **openfea-core** repo
+  (`services/openfea-core-cloud` there); the golden fixtures record the exact
   ref (`meta.coreRef = 5fff27782df894ecf28d65097f63461d69771f16`) and contract.
 - Restoring would mean reverting the B4b/B5 commits and redeploying with a
   container-bearing wrangler config. The guard test exists precisely so this
@@ -110,7 +110,7 @@ since B4a). The cloud solve infrastructure was removed in two steps:
 
 ## Repo consolidation coda
 
-OpenCAE Core was consolidated into this monorepo in July 2026 from Core commit
+OpenFEA Core was consolidated into this monorepo in July 2026 from Core commit
 `bc6c305272bd2789634f5e4c9006e0eae21e116b`, the production-equivalent solver
 lineage used by the local browser build. The imported packages live under
 `packages/*`, Core reference docs live under `docs/core/`, and the old Core
@@ -118,5 +118,5 @@ advisory plans rescued from the stale checkout live under `docs/core/plans/`.
 
 After this consolidation, a fresh checkout of this repository plus
 `pnpm install --frozen-lockfile` is the build source of truth. The former
-OpenCAE-Core GitHub repository can be tombstoned and archived after this branch
+OpenFEA-Core GitHub repository can be tombstoned and archived after this branch
 lands and the production deploy is verified.

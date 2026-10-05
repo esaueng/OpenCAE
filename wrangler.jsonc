@@ -1,25 +1,26 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  // Production local-first Worker (cae.esau.app): static assets plus
+  // Production local-first Worker (fea.esau.app): static assets plus
   // consent-gated, client-encrypted recovery backups only.
   // The OpenCAE Core Cloud container, Durable Object, and R2 artifact bindings
   // were retired in July 2026 — see docs/cloud-retirement.md. This config was
   // reconciled from the former wrangler.local-first.jsonc variant; solves run
   // in the browser, so the production Worker needs no solver bindings.
-  "name": "opencae",
+  // Existing OpenFEA production Worker, verified in the Cloudflare dashboard.
+  "name": "openfea",
   "account_id": "747b74cbd7d019dd7aeecb2c24a4bf10",
-  "main": "apps/opencae-web/worker/index.ts",
+  "main": "apps/openfea-web/worker/index.ts",
   "compatibility_date": "2026-04-27",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "routes": [
     {
-      "pattern": "cae.esau.app",
+      "pattern": "fea.esau.app",
       "custom_domain": true
     }
   ],
   "assets": {
-    "directory": "apps/opencae-web/dist",
+    "directory": "apps/openfea-web/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/health", "/healthz"]

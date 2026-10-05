@@ -2,17 +2,17 @@
 // real headless Chrome via CDP, loads the built app with ?meshProof=1 (A-M2
 // bracket .geo proof) or ?meshProof=step (A-M3 STEP end-to-end: face
 // registry -> attribution -> byFace mapping -> in-browser solve), captures
-// console output, and polls window.__opencaeMeshProof for evidence.
+// console output, and polls window.__openfeaMeshProof for evidence.
 // Verified 2026-07-06: bracket 1,140 nodes / 562 Tet10 (matches the A-M1
 // Node spike); STEP proof reports mapping modes + reaction-vs-applied load.
 //
 // Usage (manual; needs Node >= 22 for global WebSocket, plus Chrome).
 // Wasm meshing is the production default (A-M4), so a plain build carries it:
-//   pnpm --filter @opencae/web build
-//   pnpm --filter @opencae/web preview --port 5199 &
+//   pnpm --filter @openfea/web build
+//   pnpm --filter @openfea/web preview --port 5199 &
 //   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
 //     --headless=new --disable-gpu --no-first-run \
-//     --user-data-dir=/tmp/opencae-meshproof-profile \
+//     --user-data-dir=/tmp/openfea-meshproof-profile \
 //     --remote-debugging-port=9333 about:blank &
 //   node scripts/verify-wasm-mesh-browser.mjs            # bracket proof
 //   PROOF=step node scripts/verify-wasm-mesh-browser.mjs # STEP proof
@@ -90,7 +90,7 @@ const started = Date.now();
 let result = null;
 while (Date.now() - started < TIMEOUT_MS) {
   const evaluated = await send("Runtime.evaluate", {
-    expression: `window.__opencaeMeshProof && window.__opencaeMeshProof.${RESULT_FIELD} ? JSON.stringify(window.__opencaeMeshProof.${RESULT_FIELD}) : (window.__opencaeMeshProof ? 'HARNESS_LOADED' : 'NO_HARNESS')`,
+    expression: `window.__openfeaMeshProof && window.__openfeaMeshProof.${RESULT_FIELD} ? JSON.stringify(window.__openfeaMeshProof.${RESULT_FIELD}) : (window.__openfeaMeshProof ? 'HARNESS_LOADED' : 'NO_HARNESS')`,
     returnByValue: true
   });
   const value = evaluated.result?.result?.value;

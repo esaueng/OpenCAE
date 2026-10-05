@@ -1,0 +1,28 @@
+{
+  "name": "@openfea/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sample-data": "./src/sampleData.ts"
+  },
+  "scripts": {
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx src/seed.ts",
+    "reset": "tsx src/reset.ts"
+  },
+  "dependencies": {
+    "@openfea/materials": "workspace:*",
+    "@openfea/post-service": "workspace:*",
+    "@openfea/samples": "workspace:*",
+    "@openfea/schema": "workspace:*",
+    "@openfea/storage": "workspace:*",
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5"
+  },
+  "license": "Apache-2.0"
+}

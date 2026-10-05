@@ -4,36 +4,36 @@
  * PERMANENT KEEPER after the cloud retirement (B4b/B5, 2026-07): the fixtures
  * freeze the RETIRED cloud runner's exact request/response contract so the
  * local (in-browser) solve pipeline can be compared against it bit-for-bit
- * (libs/opencae-solve-pipeline/src/goldenParity.test.ts). Re-record only if
+ * (libs/openfea-solve-pipeline/src/goldenParity.test.ts). Re-record only if
  * the frozen contract must be regenerated: build the runner from the archived
- * OpenCAE Core repo's services/opencae-core-cloud source at the ref recorded
+ * OpenFEA Core repo's services/openfea-core-cloud source at the ref recorded
  * in the fixtures' meta.coreRef (see
- * apps/opencae-web/src/testdata/core-cloud-golden/README.md), then:
+ * apps/openfea-web/src/testdata/core-cloud-golden/README.md), then:
  *
  *   CORE_CLOUD_GOLDEN_URL=http://127.0.0.1:8080 \
  *   CORE_CLOUD_API_KEY=golden-local \
  *   pnpm exec tsx scripts/record-core-cloud-golden.mts
  *
  * The request builder below is a frozen copy of the web app's retired
- * openCaeCoreCloudSolveRequest() (client cloud solves were removed in B4a).
- * It is built from the same @opencae/core-adapter pieces the production path
+ * openFeaCoreCloudSolveRequest() (client cloud solves were removed in B4a).
+ * It is built from the same @openfea/core-adapter pieces the production path
  * used, and is intentionally exempt from the cloud-retirement guard test.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createLocalSampleProject } from "../apps/opencae-web/src/localProjectFactory";
-import type { SampleAnalysisType, SampleModelId } from "../apps/opencae-web/src/lib/api";
+import { createLocalSampleProject } from "../apps/openfea-web/src/localProjectFactory";
+import type { SampleAnalysisType, SampleModelId } from "../apps/openfea-web/src/lib/api";
 import {
-  buildOpenCaeCoreModelForStudy,
+  buildOpenFeaCoreModelForStudy,
   geometrySourceForStudy,
   hasActualCoreVolumeMesh,
   isComplexGeometry,
   studyForCoreGeometryDispatch,
-  OPENCAE_CORE_MESH_REQUIRED_REASON,
+  OPENFEA_CORE_MESH_REQUIRED_REASON,
   type CoreCloudGeometrySource
-} from "@opencae/core-adapter";
-import type { DisplayModel, MeshQuality, Study } from "@opencae/schema";
+} from "@openfea/core-adapter";
+import type { DisplayModel, MeshQuality, Study } from "@openfea/schema";
 
 // Frozen copy of the retired client request builder (see file header).
 const CLOUD_PROCEDURAL_MESH_SIZE_MM: Record<MeshQuality, number> = {
@@ -49,11 +49,11 @@ function geometryWithMeshPreset(geometry: CoreCloudGeometrySource, study: Study)
   return { ...geometry, descriptor: { ...geometry.descriptor, meshSize } };
 }
 
-function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
+function openFeaCoreCloudSolveRequest(runId: string, study: Study, displayModel: DisplayModel | undefined) {
   const actualMesh = hasActualCoreVolumeMesh(study, displayModel);
   const geometry = actualMesh ? null : geometrySourceForStudy(study, displayModel);
   if (!actualMesh && !geometry && isComplexGeometry(displayModel, study)) {
-    throw new Error(OPENCAE_CORE_MESH_REQUIRED_REASON);
+    throw new Error(OPENFEA_CORE_MESH_REQUIRED_REASON);
   }
   if (geometry) {
     const useLinearGmshElements = geometry.kind === "sample_procedural" && geometry.sampleId === "bracket";
@@ -84,7 +84,7 @@ function openCaeCoreCloudSolveRequest(runId: string, study: Study, displayModel:
     };
   }
 
-  const coreBuild = buildOpenCaeCoreModelForStudy(study, displayModel);
+  const coreBuild = buildOpenFeaCoreModelForStudy(study, displayModel);
   return {
     runId,
     analysisType: study.type,
@@ -117,7 +117,7 @@ const CORE_REF = process.env.CORE_CLOUD_GOLDEN_CORE_REF
 // Fixed timestamp keeps createdAt/updatedAt/run timestamps in requests deterministic.
 const FIXED_NOW = "2026-07-05T00:00:00.000Z";
 
-const OUTPUT_DIR = resolve(scriptDir, "../apps/opencae-web/src/testdata/core-cloud-golden");
+const OUTPUT_DIR = resolve(scriptDir, "../apps/openfea-web/src/testdata/core-cloud-golden");
 
 interface GoldenCase {
   name: string;
@@ -152,7 +152,7 @@ async function recordCase(golden: GoldenCase, runnerVersion: string, coreVersion
   const baseStudy = project.studies[0] as Study | undefined;
   if (!baseStudy) throw new Error(`Sample ${golden.sample} produced no study.`);
   const study = golden.adjustStudy ? golden.adjustStudy(baseStudy) : baseStudy;
-  const request = openCaeCoreCloudSolveRequest(`run-golden-${golden.name}`, study, displayModel);
+  const request = openFeaCoreCloudSolveRequest(`run-golden-${golden.name}`, study, displayModel);
 
   const response = await fetch(`${RUNNER_URL}/solve`, {
     method: "POST",

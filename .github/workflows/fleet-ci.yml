@@ -6,7 +6,7 @@ permissions:
 jobs:
   quality:
     timeout-minutes: 60
-    runs-on: &fleet-runner ${{ fromJSON(vars.CI_FLEET_ENABLED == 'true' && (github.repository == 'esaueng/OpenCAE' && github.repository_id == '1222078082' && github.actor == 'petergstfsn' && github.actor_id == '171875562' && github.triggering_actor == 'petergstfsn' && ((github.event_name == 'pull_request' && github.event.pull_request.state == 'open' && github.event.pull_request.user.login == 'petergstfsn' && github.event.pull_request.user.id == 171875562 && github.event.pull_request.head.repo.id == 1222078082 && github.event.pull_request.base.repo.id == 1222078082 && github.event.pull_request.head.repo.fork == false && github.event.pull_request.base.repo.fork == false && github.event.pull_request.base.ref == 'main' && github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.ref_protected == true))) && (vars.CI_FLEET_TARGET == 'ci-server-jane' && '{"group":"ci-trusted-main","labels":"ci-server-jane"}' || vars.CI_FLEET_TARGET == 'ci-server-john' && '{"group":"ci-trusted-main","labels":"ci-server-john"}') || '"ubuntu-latest"') }}
+    runs-on: &fleet-runner ${{ fromJSON(vars.CI_FLEET_ENABLED == 'true' && (github.repository == 'esaueng/OpenFEA' && github.repository_id == '1222078082' && github.actor == 'petergstfsn' && github.actor_id == '171875562' && github.triggering_actor == 'petergstfsn' && ((github.event_name == 'pull_request' && github.event.pull_request.state == 'open' && github.event.pull_request.user.login == 'petergstfsn' && github.event.pull_request.user.id == 171875562 && github.event.pull_request.head.repo.id == 1222078082 && github.event.pull_request.base.repo.id == 1222078082 && github.event.pull_request.head.repo.fork == false && github.event.pull_request.base.repo.fork == false && github.event.pull_request.base.ref == 'main' && github.ref == format('refs/pull/{0}/merge', github.event.pull_request.number)) || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.ref_protected == true))) && (vars.CI_FLEET_TARGET == 'ci-server-jane' && '{"group":"ci-trusted-main","labels":"ci-server-jane"}' || vars.CI_FLEET_TARGET == 'ci-server-john' && '{"group":"ci-trusted-main","labels":"ci-server-john"}') || '"ubuntu-latest"') }}
     env:
       CI: "true"
     steps:
@@ -72,15 +72,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build OpenCAE Core packages
+      - name: Build OpenFEA Core packages
         run: |
-          pnpm --filter @opencae/core build
-          pnpm --filter @opencae/examples build
-          pnpm --filter @opencae/solver-cpu build
-          pnpm --filter @opencae/solver-webgpu build
-          pnpm --filter @opencae/viewer build
+          pnpm --filter @openfea/core build
+          pnpm --filter @openfea/examples build
+          pnpm --filter @openfea/solver-cpu build
+          pnpm --filter @openfea/solver-webgpu build
+          pnpm --filter @openfea/viewer build
 
-      - name: Test OpenCAE Core packages
+      - name: Test OpenFEA Core packages
         run: pnpm --filter "./packages/*" --if-present test
 
       - name: Verify Cloudflare config
@@ -93,7 +93,7 @@ jobs:
         run: pnpm test
 
       - name: Build web app
-        run: pnpm --filter @opencae/web build
+        run: pnpm --filter @openfea/web build
 
       - name: Enforce retired-token bundle proof on the fresh build
         run: pnpm exec vitest run scripts/cloud-retirement-guard.test.mjs
@@ -120,16 +120,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build OpenCAE Core packages
+      - name: Build OpenFEA Core packages
         run: |
-          pnpm --filter @opencae/core build
-          pnpm --filter @opencae/examples build
-          pnpm --filter @opencae/solver-cpu build
-          pnpm --filter @opencae/solver-webgpu build
-          pnpm --filter @opencae/viewer build
+          pnpm --filter @openfea/core build
+          pnpm --filter @openfea/examples build
+          pnpm --filter @openfea/solver-cpu build
+          pnpm --filter @openfea/solver-webgpu build
+          pnpm --filter @openfea/viewer build
 
       - name: Build web app
-        run: pnpm --filter @opencae/web build
+        run: pnpm --filter @openfea/web build
 
       - name: Verify STEP selection across display LODs in Chrome
         run: |

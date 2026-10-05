@@ -2,8 +2,8 @@ import { extractBoundarySurfaceFacets } from "./mesh";
 import { finiteExtrema } from "./numeric";
 import type {
   ElementBlockJson,
-  NormalizedOpenCAEModel,
-  OpenCAEModelJson,
+  NormalizedOpenFEAModel,
+  OpenFEAModelJson,
   SurfaceFacetJson
 } from "./model-json";
 
@@ -185,12 +185,12 @@ export type ProductionSurfaceFieldInvariantOptions = {
   requireDisplacementVectors?: boolean;
 };
 
-type ResultModel = Pick<OpenCAEModelJson, "nodes" | "elementBlocks" | "coordinateSystem"> & {
+type ResultModel = Pick<OpenFEAModelJson, "nodes" | "elementBlocks" | "coordinateSystem"> & {
   surfaceFacets?: Array<SurfaceFacetJson | { id: number; nodes: ArrayLike<number> }>;
 };
 
 export function solverSurfaceMeshFromModel(
-  model: OpenCAEModelJson | NormalizedOpenCAEModel,
+  model: OpenFEAModelJson | NormalizedOpenFEAModel,
   id = "solver-surface"
 ): SolverSurfaceMesh {
   const coordinates = model.nodes.coordinates;
@@ -563,7 +563,7 @@ function validateProvenance(provenance: CoreSolveProvenance, errors: CoreResultV
     provenance.solver !== "opencae-core-modal-tet" &&
     provenance.solver !== "opencae-core-webgpu-matrix-free-tet4"
   ) {
-    errors.push(issue("invalid-provenance", "Production Core result solver must be an OpenCAE Core solver.", "provenance.solver"));
+    errors.push(issue("invalid-provenance", "Production Core result solver must be an OpenFEA Core solver.", "provenance.solver"));
   }
   if (provenance.meshSource !== "actual_volume_mesh" && provenance.meshSource !== "structured_block_core") {
     errors.push(issue("invalid-provenance", "Production Core result meshSource must be actual Core mesh data.", "provenance.meshSource"));
@@ -573,7 +573,7 @@ function validateProvenance(provenance: CoreSolveProvenance, errors: CoreResultV
   }
 }
 
-function collectSurfaceFacets(model: OpenCAEModelJson | NormalizedOpenCAEModel): SurfaceFacetJson[] {
+function collectSurfaceFacets(model: OpenFEAModelJson | NormalizedOpenFEAModel): SurfaceFacetJson[] {
   // model.surfaceFacets is a boundary-condition selection artifact and may cover only the
   // tagged faces (Gmsh writes 2D elements solely for physical groups), so the render skin
   // must be derived from the volume connectivity: faces owned by exactly one element.

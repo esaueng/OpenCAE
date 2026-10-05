@@ -1,10 +1,10 @@
 import {
-  OPENCAE_LEGACY_MODEL_SCHEMA_VERSION,
-  OPENCAE_MODEL_SCHEMA,
-  OPENCAE_MODEL_SCHEMA_VERSION,
-  OPENCAE_OLDEST_MODEL_SCHEMA_VERSION,
-  OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION,
-  type OpenCAEModelJson,
+  OPENFEA_LEGACY_MODEL_SCHEMA_VERSION,
+  OPENFEA_MODEL_SCHEMA,
+  OPENFEA_MODEL_SCHEMA_VERSION,
+  OPENFEA_OLDEST_MODEL_SCHEMA_VERSION,
+  OPENFEA_PREVIOUS_MODEL_SCHEMA_VERSION,
+  type OpenFEAModelJson,
   type ElementType,
   type ValidationIssue,
   type ValidationReport
@@ -31,15 +31,15 @@ export function validateModelJson(input: unknown): ValidationReport {
     ]);
   }
 
-  if (input.schema !== OPENCAE_MODEL_SCHEMA) {
+  if (input.schema !== OPENFEA_MODEL_SCHEMA) {
     errors.push(issue("invalid-schema", "Model schema must be opencae.model.", "$.schema"));
   }
 
   if (
-    input.schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION &&
-    input.schemaVersion !== OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION &&
-    input.schemaVersion !== OPENCAE_LEGACY_MODEL_SCHEMA_VERSION &&
-    input.schemaVersion !== OPENCAE_OLDEST_MODEL_SCHEMA_VERSION
+    input.schemaVersion !== OPENFEA_MODEL_SCHEMA_VERSION &&
+    input.schemaVersion !== OPENFEA_PREVIOUS_MODEL_SCHEMA_VERSION &&
+    input.schemaVersion !== OPENFEA_LEGACY_MODEL_SCHEMA_VERSION &&
+    input.schemaVersion !== OPENFEA_OLDEST_MODEL_SCHEMA_VERSION
   ) {
     errors.push(
       issue("invalid-schema-version", "Model schemaVersion must be 0.1.0, 0.2.0, 0.3.0, or 0.4.0.", "$.schemaVersion")
@@ -103,7 +103,7 @@ export type CoreModelPreflightReport = {
 };
 
 export function preflightCoreModel(
-  model: OpenCAEModelJson,
+  model: OpenFEAModelJson,
   options: CoreModelPreflightOptions = {}
 ): CoreModelPreflightReport {
   const validation = validateModelJson(model);
@@ -625,7 +625,7 @@ function validateLoads(
     validateUniqueName(load.name, names, "load", `${path}.name`, errors);
     if (isNonEmptyString(load.name) && typeof load.type === "string") types.set(load.name, load.type);
     if (
-      schemaVersion !== OPENCAE_MODEL_SCHEMA_VERSION && schemaVersion !== OPENCAE_PREVIOUS_MODEL_SCHEMA_VERSION &&
+      schemaVersion !== OPENFEA_MODEL_SCHEMA_VERSION && schemaVersion !== OPENFEA_PREVIOUS_MODEL_SCHEMA_VERSION &&
       (load.type === "surfaceTraction" || load.type === "bodyForceDensity" || load.type === "remoteForce" || load.type === "equivalentBoltPreload")
     ) {
       errors.push(issue("advanced-load-requires-schema-0.3.0", "Advanced load primitives require schemaVersion 0.3.0.", `${path}.type`));
@@ -696,7 +696,7 @@ function validateLoads(
       if (!isFiniteNumber(load.generation)) errors.push(issue("invalid-volumetric-heat-generation", "Volumetric heat generation must be finite.", `${path}.generation`));
       return;
     }
-    errors.push(issue("invalid-load-type", "Load type is not supported by OpenCAE Core.", `${path}.type`));
+    errors.push(issue("invalid-load-type", "Load type is not supported by OpenFEA Core.", `${path}.type`));
   });
   return types;
 }
@@ -775,7 +775,7 @@ function validateThermalSchemaVersion(
   steps: unknown,
   errors: ValidationIssue[]
 ): void {
-  if (schemaVersion === OPENCAE_MODEL_SCHEMA_VERSION) return;
+  if (schemaVersion === OPENFEA_MODEL_SCHEMA_VERSION) return;
   if (Array.isArray(boundaryConditions)) {
     boundaryConditions.forEach((condition, index) => {
       if (isRecord(condition) && condition.type === "prescribedTemperature") {
@@ -844,13 +844,13 @@ function validateMeshProvenance(meshProvenance: unknown, errors: ValidationIssue
     "display_bounds_proxy"
   ]);
   if (typeof meshProvenance.meshSource !== "string" || !meshSources.has(meshProvenance.meshSource)) {
-    errors.push(issue("invalid-mesh-source", "meshSource must be a supported OpenCAE Core mesh source.", "$.meshProvenance.meshSource"));
+    errors.push(issue("invalid-mesh-source", "meshSource must be a supported OpenFEA Core mesh source.", "$.meshProvenance.meshSource"));
   }
   if (meshProvenance.meshSource === "display_bounds_proxy") {
     errors.push(
       issue(
         "display-bounds-proxy-not-production",
-        "Production OpenCAE Core solves require an actual volume mesh, not display_bounds_proxy.",
+        "Production OpenFEA Core solves require an actual volume mesh, not display_bounds_proxy.",
         "$.meshProvenance.meshSource"
       )
     );
@@ -859,7 +859,7 @@ function validateMeshProvenance(meshProvenance: unknown, errors: ValidationIssue
     errors.push(
       issue(
         "preview-provenance-not-allowed",
-        "Production OpenCAE Core models cannot use local_estimate or computed_preview provenance.",
+        "Production OpenFEA Core models cannot use local_estimate or computed_preview provenance.",
         "$.meshProvenance"
       )
     );
@@ -1038,11 +1038,11 @@ function validateMeshConnectionCoverage(
   }
 }
 
-function countElements(elementBlocks: OpenCAEModelJson["elementBlocks"]): number {
+function countElements(elementBlocks: OpenFEAModelJson["elementBlocks"]): number {
   return elementBlocks.reduce((sum, block) => sum + Math.floor(block.connectivity.length / nodesPerElement(block.type)), 0);
 }
 
-function activeBoundaryNodes(model: OpenCAEModelJson, boundaryConditionNames: string[]): Set<number> {
+function activeBoundaryNodes(model: OpenFEAModelJson, boundaryConditionNames: string[]): Set<number> {
   const active = new Set(boundaryConditionNames);
   const nodeSets = new Map(model.nodeSets.map((set) => [set.name, set.nodes]));
   const surfaceSets = new Map((model.surfaceSets ?? []).map((set) => [set.name, set]));
@@ -1062,7 +1062,7 @@ function activeBoundaryNodes(model: OpenCAEModelJson, boundaryConditionNames: st
   return nodes;
 }
 
-function activeLoadNodes(model: OpenCAEModelJson, loadNames: string[], facets = model.surfaceFacets ?? []): Set<number> {
+function activeLoadNodes(model: OpenFEAModelJson, loadNames: string[], facets = model.surfaceFacets ?? []): Set<number> {
   const active = new Set(loadNames);
   const nodeSets = new Map(model.nodeSets.map((set) => [set.name, set.nodes]));
   const surfaceSets = new Map((model.surfaceSets ?? []).map((set) => [set.name, set]));
@@ -1100,7 +1100,7 @@ function activeLoadNodes(model: OpenCAEModelJson, loadNames: string[], facets = 
   return nodes;
 }
 
-function hasBoundarySurfaceSelection(model: OpenCAEModelJson, boundaryConditionNames: string[], facets: OpenCAEModelJson["surfaceFacets"] = []): boolean {
+function hasBoundarySurfaceSelection(model: OpenFEAModelJson, boundaryConditionNames: string[], facets: OpenFEAModelJson["surfaceFacets"] = []): boolean {
   // Each support maps to its own surface selection, so check every condition
   // against the surface sets individually — supports on different faces must
   // not be unioned into one node set that no single surface can contain.
@@ -1126,7 +1126,7 @@ function hasBoundarySurfaceSelection(model: OpenCAEModelJson, boundaryConditionN
   return sawSupportedCondition;
 }
 
-function hasLoadSurfaceSelection(model: OpenCAEModelJson, loadNames: string[]): boolean {
+function hasLoadSurfaceSelection(model: OpenFEAModelJson, loadNames: string[]): boolean {
   const active = new Set(loadNames);
   const surfaceSets = new Map((model.surfaceSets ?? []).map((set) => [set.name, set]));
   const nodeSets = new Map(model.nodeSets.map((set) => [set.name, set]));
@@ -1164,7 +1164,7 @@ function hasLoadSurfaceSelection(model: OpenCAEModelJson, loadNames: string[]): 
   return sawLoad || loadNames.length === 0;
 }
 
-function nodesForElementSet(model: OpenCAEModelJson, elementSetName: string): number[] {
+function nodesForElementSet(model: OpenFEAModelJson, elementSetName: string): number[] {
   const selected = new Set(model.elementSets.find((set) => set.name === elementSetName)?.elements ?? []);
   const nodes = new Set<number>();
   let globalElement = 0;

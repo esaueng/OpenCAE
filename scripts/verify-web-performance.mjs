@@ -7,7 +7,7 @@ import { gzipSync } from "node:zlib";
 import { INITIAL_JS_GZIP_BUDGET_BYTES } from "./web-asset-budgets.mjs";
 
 const root = new URL("../", import.meta.url);
-const dist = new URL("apps/opencae-web/dist/", root);
+const dist = new URL("apps/openfea-web/dist/", root);
 const indexHtml = readFileSync(new URL("index.html", dist), "utf8");
 const initialScript = indexHtml.match(/<script[^>]+type="module"[^>]+src="(?<src>\/assets\/[^"]+\.js)"/)?.groups?.src;
 const modulePreloads = [...indexHtml.matchAll(/rel="modulepreload"[^>]+href="(?<href>[^"]+)"/g)].map((match) => match.groups?.href ?? "");
@@ -31,10 +31,10 @@ const result = {
   initialJsFiles: [...initialFiles].map((file) => file.replace(fileURLToPath(dist), "/")),
   heavyModulePreloads: modulePreloads,
   preview: null,
-  browserProbe: "skipped: install Playwright and set OPENCAE_PERF_BROWSER=1 to record viewer frame timing"
+  browserProbe: "skipped: install Playwright and set OPENFEA_PERF_BROWSER=1 to record viewer frame timing"
 };
 
-const preview = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["--filter", "@opencae/web", "exec", "vite", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"], {
+const preview = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["--filter", "@openfea/web", "exec", "vite", "preview", "--host", "127.0.0.1", "--port", "4173", "--strictPort"], {
   cwd: fileURLToPath(root),
   detached: process.platform !== "win32",
   stdio: ["ignore", "pipe", "pipe"]
@@ -57,7 +57,7 @@ try {
     shellBytes: html.length
   };
 
-  if (process.env.OPENCAE_PERF_BROWSER === "1") {
+  if ((process.env.OPENFEA_PERF_BROWSER ?? process.env.OPENCAE_PERF_BROWSER) === "1") {
     result.browserProbe = await runBrowserProbe(previewUrl);
   }
 

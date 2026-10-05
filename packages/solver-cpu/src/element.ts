@@ -1,5 +1,5 @@
 import { computeTet4Geometry } from "./geometry";
-import type { NormalizedOpenCAEModel } from "@opencae/core";
+import type { NormalizedOpenFEAModel } from "@openfea/core";
 import type { Tet4ElementStiffnessResult, Tet4GeometryResult } from "./types";
 
 export function computeTet4BMatrix(gradients: Float64Array): Float64Array {
@@ -180,7 +180,7 @@ export function collectTetCoordinates(
 }
 
 export function smoothNodalScalarField(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   nodalValues: ArrayLike<number>,
   iterations: number
 ): Float64Array {
@@ -205,7 +205,7 @@ export function smoothNodalScalarField(
   return current;
 }
 
-function nodeAdjacency(model: NormalizedOpenCAEModel): Set<number>[] {
+function nodeAdjacency(model: NormalizedOpenFEAModel): Set<number>[] {
   const adjacency = Array.from({ length: model.counts.nodes }, () => new Set<number>());
   for (const block of model.elementBlocks) {
     const nodesPerElement = block.type === "Tet10" ? 10 : 4;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { singleTetStaticFixture } from "@opencae/examples";
+import { singleTetStaticFixture } from "@openfea/examples";
 import { automaticTetSolverBackend, buildTet4DofAdjacency, buildTet4ElementData, solveStaticTet4ModelWebGpu, solveTet4MatrixFreeWebGpu, tet4MatrixFreeInternalForce, tet4MatrixFreeMatVec, type Tet4MatrixFreeData } from "../src";
 
 describe("matrix-free Tet4 backend", () => {

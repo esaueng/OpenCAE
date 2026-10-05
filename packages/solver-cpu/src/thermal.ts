@@ -1,4 +1,4 @@
-import { normalizeModelJson, type NormalizedOpenCAEModel } from "@opencae/core";
+import { normalizeModelJson, type NormalizedOpenFEAModel } from "@openfea/core";
 import { computeTet4Geometry } from "./geometry";
 import {
   computeTet10PhysicalGradients,
@@ -52,7 +52,7 @@ export function solveSteadyStateThermal(
   options: CpuSolverOptions = {}
 ): SteadyStateThermalSolveResult {
   const normalized = isNormalized(input) ? { ok: true as const, model: input } : normalizeModelJson(input);
-  if (!normalized.ok) return { ok: false, error: { code: "validation-failed", message: "Thermal model failed OpenCAE Core validation.", report: normalized.report } };
+  if (!normalized.ok) return { ok: false, error: { code: "validation-failed", message: "Thermal model failed OpenFEA Core validation.", report: normalized.report } };
   const model = normalized.model;
   const nodeCount = model.counts.nodes;
   const maxDofs = options.maxDofs ?? DEFAULT_THERMAL_MAX_DOFS;
@@ -126,7 +126,7 @@ export function solveSteadyStateThermal(
   };
 }
 
-function assembleThermalConductivity(model: NormalizedOpenCAEModel, options: CpuSolverOptions):
+function assembleThermalConductivity(model: NormalizedOpenFEAModel, options: CpuSolverOptions):
   | { ok: true; matrix: ReturnType<typeof toCsrMatrix> }
   | { ok: false; error: CpuSolverError } {
   const builder = createSparseMatrixBuilder(model.counts.nodes);
@@ -185,7 +185,7 @@ function tet10Conductivity(coordinates: Float64Array, conductivity: number): { o
   return { ok: true, matrix, volume };
 }
 
-function collectTemperatureConstraints(model: NormalizedOpenCAEModel, names: string[]):
+function collectTemperatureConstraints(model: NormalizedOpenFEAModel, names: string[]):
   | { ok: true; values: Map<number, number> }
   | { ok: false; error: CpuSolverError } {
   const active = new Set(names);
@@ -209,7 +209,7 @@ function collectTemperatureConstraints(model: NormalizedOpenCAEModel, names: str
   return { ok: true, values };
 }
 
-function assembleThermalLoads(model: NormalizedOpenCAEModel, names: string[]):
+function assembleThermalLoads(model: NormalizedOpenFEAModel, names: string[]):
   | { ok: true; vector: Float64Array; appliedSurfaceHeatW: number; generatedHeatW: number }
   | { ok: false; error: CpuSolverError } {
   const active = new Set(names);
@@ -259,7 +259,7 @@ function assembleThermalLoads(model: NormalizedOpenCAEModel, names: string[]):
   return { ok: true, vector, appliedSurfaceHeatW, generatedHeatW };
 }
 
-function recoverNodalHeatFlux(model: NormalizedOpenCAEModel, temperature: Float64Array):
+function recoverNodalHeatFlux(model: NormalizedOpenFEAModel, temperature: Float64Array):
   | { ok: true; vectors: Float64Array; magnitude: Float64Array }
   | { ok: false; error: CpuSolverError } {
   const accumulated = new Float64Array(model.counts.nodes * 3);
@@ -325,7 +325,7 @@ function enumerateFreeNodes(count: number, constraints: Map<number, number>): In
   return free;
 }
 
-function isNormalized(input: CpuSolverInput): input is NormalizedOpenCAEModel {
+function isNormalized(input: CpuSolverInput): input is NormalizedOpenFEAModel {
   return input.nodes.coordinates instanceof Float64Array;
 }
 

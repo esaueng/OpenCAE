@@ -1,0 +1,19 @@
+{
+  "name": "@openfea/core-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@openfea/core": "workspace:*",
+    "@openfea/materials": "workspace:*",
+    "@openfea/schema": "workspace:*",
+    "@openfea/solve-pipeline": "workspace:*",
+    "@openfea/solver-cpu": "workspace:*",
+    "@openfea/solver-webgpu": "workspace:*",
+    "@openfea/study-core": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

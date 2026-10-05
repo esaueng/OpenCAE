@@ -36,7 +36,7 @@ importers:
         specifier: ^4.114.0
         version: 4.114.0(@types/node@22.19.17)
 
-  apps/opencae-api:
+  apps/openfea-api:
     dependencies:
       '@fastify/cors':
         specifier: ^10.0.2
@@ -44,42 +44,42 @@ importers:
       '@fastify/rate-limit':
         specifier: ^10.3.0
         version: 10.3.0
-      '@opencae/cad-service':
+      '@openfea/cad-service':
         specifier: workspace:*
-        version: link:../../services/opencae-cad-service
-      '@opencae/core-adapter':
+        version: link:../../services/openfea-cad-service
+      '@openfea/core-adapter':
         specifier: workspace:*
-        version: link:../../libs/opencae-core-adapter
-      '@opencae/db':
+        version: link:../../libs/openfea-core-adapter
+      '@openfea/db':
         specifier: workspace:*
-        version: link:../../libs/opencae-db
-      '@opencae/jobs':
+        version: link:../../libs/openfea-db
+      '@openfea/jobs':
         specifier: workspace:*
-        version: link:../../libs/opencae-jobs
-      '@opencae/materials':
+        version: link:../../libs/openfea-jobs
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../../libs/opencae-materials
-      '@opencae/mesh-service':
+        version: link:../../libs/openfea-materials
+      '@openfea/mesh-service':
         specifier: workspace:*
-        version: link:../../services/opencae-mesh-service
-      '@opencae/post-service':
+        version: link:../../services/openfea-mesh-service
+      '@openfea/post-service':
         specifier: workspace:*
-        version: link:../../services/opencae-post-service
-      '@opencae/schema':
+        version: link:../../services/openfea-post-service
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../../libs/opencae-schema
-      '@opencae/solver-service':
+        version: link:../../libs/openfea-schema
+      '@openfea/solver-service':
         specifier: workspace:*
-        version: link:../../services/opencae-solver-service
-      '@opencae/storage':
+        version: link:../../services/openfea-solver-service
+      '@openfea/storage':
         specifier: workspace:*
-        version: link:../../libs/opencae-storage
-      '@opencae/study-core':
+        version: link:../../libs/openfea-storage
+      '@openfea/study-core':
         specifier: workspace:*
-        version: link:../../libs/opencae-study-core
-      '@opencae/units':
+        version: link:../../libs/openfea-study-core
+      '@openfea/units':
         specifier: workspace:*
-        version: link:../../libs/opencae-units
+        version: link:../../libs/openfea-units
       fastify:
         specifier: ^5.12.1
         version: 5.12.3
@@ -91,38 +91,38 @@ importers:
         specifier: ^4.23.1
         version: 4.23.1
 
-  apps/opencae-web:
+  apps/openfea-web:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@opencae/core-adapter':
+      '@openfea/core-adapter':
         specifier: workspace:*
-        version: link:../../libs/opencae-core-adapter
-      '@opencae/materials':
+        version: link:../../libs/openfea-core-adapter
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../../libs/opencae-materials
-      '@opencae/mesh-intake':
+        version: link:../../libs/openfea-materials
+      '@openfea/mesh-intake':
         specifier: workspace:*
-        version: link:../../libs/opencae-mesh-intake
-      '@opencae/samples':
+        version: link:../../libs/openfea-mesh-intake
+      '@openfea/samples':
         specifier: workspace:*
-        version: link:../../libs/opencae-samples
-      '@opencae/schema':
+        version: link:../../libs/openfea-samples
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../../libs/opencae-schema
-      '@opencae/solve-pipeline':
+        version: link:../../libs/openfea-schema
+      '@openfea/solve-pipeline':
         specifier: workspace:*
-        version: link:../../libs/opencae-solve-pipeline
-      '@opencae/step':
+        version: link:../../libs/openfea-solve-pipeline
+      '@openfea/step':
         specifier: workspace:*
-        version: link:../../libs/opencae-step
-      '@opencae/study-core':
+        version: link:../../libs/openfea-step
+      '@openfea/study-core':
         specifier: workspace:*
-        version: link:../../libs/opencae-study-core
-      '@opencae/units':
+        version: link:../../libs/openfea-study-core
+      '@openfea/units':
         specifier: workspace:*
-        version: link:../../libs/opencae-units
+        version: link:../../libs/openfea-units
       '@plausible-analytics/tracker':
         specifier: ^0.4.5
         version: 0.4.5
@@ -179,47 +179,47 @@ importers:
         specifier: 7.4.1
         version: 7.4.1
 
-  libs/opencae-core-adapter:
+  libs/openfea-core-adapter:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@opencae/materials':
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../opencae-materials
-      '@opencae/schema':
+        version: link:../openfea-materials
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
-      '@opencae/solve-pipeline':
+        version: link:../openfea-schema
+      '@openfea/solve-pipeline':
         specifier: workspace:*
-        version: link:../opencae-solve-pipeline
-      '@opencae/solver-cpu':
+        version: link:../openfea-solve-pipeline
+      '@openfea/solver-cpu':
         specifier: workspace:*
         version: link:../../packages/solver-cpu
-      '@opencae/solver-webgpu':
+      '@openfea/solver-webgpu':
         specifier: workspace:*
         version: link:../../packages/solver-webgpu
-      '@opencae/study-core':
+      '@openfea/study-core':
         specifier: workspace:*
-        version: link:../opencae-study-core
+        version: link:../openfea-study-core
 
-  libs/opencae-db:
+  libs/openfea-db:
     dependencies:
-      '@opencae/materials':
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../opencae-materials
-      '@opencae/post-service':
+        version: link:../openfea-materials
+      '@openfea/post-service':
         specifier: workspace:*
-        version: link:../../services/opencae-post-service
-      '@opencae/samples':
+        version: link:../../services/openfea-post-service
+      '@openfea/samples':
         specifier: workspace:*
-        version: link:../opencae-samples
-      '@opencae/schema':
+        version: link:../openfea-samples
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
-      '@opencae/storage':
+        version: link:../openfea-schema
+      '@openfea/storage':
         specifier: workspace:*
-        version: link:../opencae-storage
+        version: link:../openfea-storage
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0
@@ -231,183 +231,183 @@ importers:
         specifier: ^22.10.5
         version: 22.19.17
 
-  libs/opencae-jobs:
+  libs/openfea-jobs:
     dependencies:
-      '@opencae/schema':
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
+        version: link:../openfea-schema
 
-  libs/opencae-materials:
+  libs/openfea-materials:
     dependencies:
-      '@opencae/schema':
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
+        version: link:../openfea-schema
 
-  libs/opencae-mesh-intake:
+  libs/openfea-mesh-intake:
     dependencies:
       '@loumalouomega/gmsh-wasm':
         specifier: 0.1.2
         version: 0.1.2
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@opencae/materials':
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../opencae-materials
-      '@opencae/solve-pipeline':
+        version: link:../openfea-materials
+      '@openfea/solve-pipeline':
         specifier: workspace:*
-        version: link:../opencae-solve-pipeline
+        version: link:../openfea-solve-pipeline
     devDependencies:
-      '@opencae/core-adapter':
+      '@openfea/core-adapter':
         specifier: workspace:*
-        version: link:../opencae-core-adapter
-      '@opencae/schema':
+        version: link:../openfea-core-adapter
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
-      '@opencae/solver-cpu':
+        version: link:../openfea-schema
+      '@openfea/solver-cpu':
         specifier: workspace:*
         version: link:../../packages/solver-cpu
       occt-import-js:
         specifier: ^0.0.23
         version: 0.0.23
 
-  libs/opencae-samples:
+  libs/openfea-samples:
     dependencies:
-      '@opencae/schema':
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
+        version: link:../openfea-schema
 
-  libs/opencae-schema:
+  libs/openfea-schema:
     dependencies:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
 
-  libs/opencae-solve-pipeline:
+  libs/openfea-solve-pipeline:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@opencae/solver-cpu':
+      '@openfea/solver-cpu':
         specifier: workspace:*
         version: link:../../packages/solver-cpu
 
-  libs/opencae-step:
+  libs/openfea-step:
     devDependencies:
       occt-import-js:
         specifier: ^0.0.23
         version: 0.0.23
 
-  libs/opencae-storage:
+  libs/openfea-storage:
     devDependencies:
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.17
 
-  libs/opencae-study-core:
+  libs/openfea-study-core:
     dependencies:
-      '@opencae/materials':
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../opencae-materials
-      '@opencae/schema':
+        version: link:../openfea-materials
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../opencae-schema
+        version: link:../openfea-schema
 
-  libs/opencae-units: {}
+  libs/openfea-units: {}
 
   packages/core: {}
 
   packages/examples:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../core
 
   packages/solver-cpu:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
-      '@opencae/examples':
+      '@openfea/examples':
         specifier: workspace:*
         version: link:../examples
 
   packages/solver-webgpu:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../core
-      '@opencae/solver-cpu':
+      '@openfea/solver-cpu':
         specifier: workspace:*
         version: link:../solver-cpu
     devDependencies:
-      '@opencae/examples':
+      '@openfea/examples':
         specifier: workspace:*
         version: link:../examples
 
   packages/viewer:
     dependencies:
-      '@opencae/core':
+      '@openfea/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
-      '@opencae/examples':
+      '@openfea/examples':
         specifier: workspace:*
         version: link:../examples
-      '@opencae/solver-cpu':
+      '@openfea/solver-cpu':
         specifier: workspace:*
         version: link:../solver-cpu
 
-  runners/opencae-runner-local: {}
+  runners/openfea-runner-local: {}
 
-  services/opencae-cad-service:
+  services/openfea-cad-service:
     dependencies:
-      '@opencae/db':
+      '@openfea/db':
         specifier: workspace:*
-        version: link:../../libs/opencae-db
-      '@opencae/schema':
+        version: link:../../libs/openfea-db
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../../libs/opencae-schema
-      '@opencae/storage':
+        version: link:../../libs/openfea-schema
+      '@openfea/storage':
         specifier: workspace:*
-        version: link:../../libs/opencae-storage
+        version: link:../../libs/openfea-storage
 
-  services/opencae-mesh-service:
+  services/openfea-mesh-service:
     dependencies:
-      '@opencae/schema':
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../../libs/opencae-schema
-      '@opencae/storage':
+        version: link:../../libs/openfea-schema
+      '@openfea/storage':
         specifier: workspace:*
-        version: link:../../libs/opencae-storage
+        version: link:../../libs/openfea-storage
 
-  services/opencae-post-service:
+  services/openfea-post-service:
     dependencies:
-      '@opencae/schema':
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../../libs/opencae-schema
-      '@opencae/storage':
+        version: link:../../libs/openfea-schema
+      '@openfea/storage':
         specifier: workspace:*
-        version: link:../../libs/opencae-storage
+        version: link:../../libs/openfea-storage
 
-  services/opencae-solver-service:
+  services/openfea-solver-service:
     dependencies:
-      '@opencae/db':
+      '@openfea/db':
         specifier: workspace:*
-        version: link:../../libs/opencae-db
-      '@opencae/materials':
+        version: link:../../libs/openfea-db
+      '@openfea/materials':
         specifier: workspace:*
-        version: link:../../libs/opencae-materials
-      '@opencae/schema':
+        version: link:../../libs/openfea-materials
+      '@openfea/schema':
         specifier: workspace:*
-        version: link:../../libs/opencae-schema
-      '@opencae/storage':
+        version: link:../../libs/openfea-schema
+      '@openfea/storage':
         specifier: workspace:*
-        version: link:../../libs/opencae-storage
-      '@opencae/study-core':
+        version: link:../../libs/openfea-storage
+      '@openfea/study-core':
         specifier: workspace:*
-        version: link:../../libs/opencae-study-core
+        version: link:../../libs/openfea-study-core
 
 packages:
 

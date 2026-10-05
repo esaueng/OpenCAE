@@ -94,7 +94,7 @@ Verification: unit test for the two-frequency fit — with targets `[f, f]`-adja
 
 ### Step 6 — Cloud pass-through check
 
-`services/opencae-core-cloud/src/server.ts` `boundedSolverSettings` spreads `...input` (line 586-591), so `rayleighTargetFrequenciesHz` flows through automatically — verify nothing strips it, and confirm the field is validated (finite, ordered) solver-side since cloud clients are untrusted. No server code change expected; if one proves necessary, it is in scope but minimal.
+`services/openfea-core-cloud/src/server.ts` `boundedSolverSettings` spreads `...input` (line 586-591), so `rayleighTargetFrequenciesHz` flows through automatically — verify nothing strips it, and confirm the field is validated (finite, ordered) solver-side since cloud clients are untrusted. No server code change expected; if one proves necessary, it is in scope but minimal.
 
 ## Hard boundaries
 

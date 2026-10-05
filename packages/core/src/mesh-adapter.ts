@@ -1,6 +1,6 @@
 import {
-  OPENCAE_MODEL_SCHEMA,
-  OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENFEA_MODEL_SCHEMA,
+  OPENFEA_MODEL_SCHEMA_VERSION,
   type BoundaryConditionJson,
   type CoordinateSystemJson,
   type ElementBlockJson,
@@ -8,7 +8,7 @@ import {
   type LoadJson,
   type MeshProvenanceJson,
   type NodeSetJson,
-  type OpenCAEModelJson,
+  type OpenFEAModelJson,
   type PhysicalGroupJson,
   type StepJson,
   type SurfaceSetJson
@@ -72,7 +72,7 @@ export type DisplayModelLike = {
   actualCoreMesh?: unknown;
 };
 
-export function volumeMeshToModelJson(input: VolumeMeshToModelInput): OpenCAEModelJson {
+export function volumeMeshToModelJson(input: VolumeMeshToModelInput): OpenFEAModelJson {
   const surfaceFacets = buildSurfaceFacets({
     coordinates: input.nodes.coordinates,
     elementBlocks: input.elementBlocks,
@@ -106,8 +106,8 @@ export function volumeMeshToModelJson(input: VolumeMeshToModelInput): OpenCAEMod
   });
 
   return {
-    schema: OPENCAE_MODEL_SCHEMA,
-    schemaVersion: OPENCAE_MODEL_SCHEMA_VERSION,
+    schema: OPENFEA_MODEL_SCHEMA,
+    schemaVersion: OPENFEA_MODEL_SCHEMA_VERSION,
     nodes: {
       coordinates: [...input.nodes.coordinates]
     },
@@ -157,7 +157,7 @@ export function volumeMeshToModelJson(input: VolumeMeshToModelInput): OpenCAEMod
 export function deriveFixedSupportNodeSetFromSurface(
   name: string,
   surfaceSetName: string,
-  model: Pick<OpenCAEModelJson, "surfaceFacets" | "surfaceSets">
+  model: Pick<OpenFEAModelJson, "surfaceFacets" | "surfaceSets">
 ): NodeSetJson {
   const surfaceSet = model.surfaceSets?.find((set) => set.name === surfaceSetName);
   if (!surfaceSet) {

@@ -1,7 +1,7 @@
 {
-  "name": "@opencae/solver-cpu",
+  "name": "@openfea/solver-cpu",
   "version": "0.1.5",
-  "description": "CPU reference solver backend with static sparse and MDOF dynamic APIs for OpenCAE Core.",
+  "description": "CPU reference solver backend with static sparse and MDOF dynamic APIs for OpenFEA Core.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -13,10 +13,10 @@
     }
   },
   "dependencies": {
-    "@opencae/core": "workspace:*"
+    "@openfea/core": "workspace:*"
   },
   "devDependencies": {
-    "@opencae/examples": "workspace:*"
+    "@openfea/examples": "workspace:*"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

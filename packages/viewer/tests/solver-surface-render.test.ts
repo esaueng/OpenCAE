@@ -1,6 +1,6 @@
-import { singleTetStaticFixture } from "@opencae/examples";
+import { singleTetStaticFixture } from "@openfea/examples";
 import { describe, expect, test } from "vitest";
-import { solveCoreStatic } from "@opencae/solver-cpu";
+import { solveCoreStatic } from "@openfea/solver-cpu";
 import { buildSolverSurfaceRenderGeometry } from "../src";
 
 describe("buildSolverSurfaceRenderGeometry", () => {

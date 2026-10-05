@@ -1,0 +1,310 @@
+import { describe, expect, test } from "vitest";
+import { ProjectSchema, isStructuralResultSummary } from "@openfea/schema";
+import { validateStudy } from "@openfea/study-core";
+import { attachUploadedModelToProject, createLocalBlankProject, createLocalModalStudy, createLocalSampleProject, createLocalStaticStressStudy, createLocalThermalStudy, openLocalProjectPayload, uploadedDisplayModelFor } from "./localProjectFactory";
+import { BRACKET_CORE_CLOUD_GEOMETRY, BRACKET_GEOMETRY_MIGRATION_NOTE } from "./bracketGeometryMigration";
+
+const sizedAsciiStlBase64 = btoa(`
+solid beam
+facet normal 0 0 1
+outer loop
+vertex 0 0 0
+vertex 100 0 0
+vertex 0 25 10
+endloop
+endfacet
+endsolid beam
+`);
+
+describe("local project factory workflow", () => {
+  test("creates blank projects without an active study", () => {
+    const response = createLocalBlankProject("2026-04-28T12:00:00.000Z");
+
+    expect(response.project.studies).toEqual([]);
+    expect(response.displayModel.bodyCount).toBe(0);
+  });
+
+  test("creates a static stress study after model upload while preserving geometry selections", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const displayModel = uploadedDisplayModelFor("sample-bar.stl", sizedAsciiStlBase64);
+    const projectWithGeometry = attachUploadedModelToProject(blank, {
+      geometryId: "geom-upload",
+      filename: "sample-bar.stl",
+      artifactKey: "project/geometry/uploaded-display.json",
+      now: "2026-04-28T12:01:00.000Z",
+      displayModel
+    });
+
+    const study = createLocalStaticStressStudy(projectWithGeometry, displayModel, "study-static", "2026-04-28T12:02:00.000Z");
+
+    expect(projectWithGeometry.studies).toEqual([]);
+    expect(study.projectId).toBe(projectWithGeometry.id);
+    expect(study.geometryScope[0]?.label).toBe("sample-bar body");
+    expect(study.namedSelections.filter((selection) => selection.entityType === "face")).toHaveLength(displayModel.faces.length);
+    expect(study.materialAssignments).toEqual([]);
+    expect(study.constraints).toEqual([]);
+    expect(study.loads).toEqual([]);
+    expect(study.type === "modal_analysis" ? undefined : study.loadCases).toEqual([{ id: "case-default", name: "Default", enabled: true, loadIds: [] }]);
+    expect(study.meshSettings.status).toBe("not_started");
+  });
+
+  test("creates modal studies with six modes and no loads", () => {
+    const project = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const displayModel = uploadedDisplayModelFor("sample-bar.stl", sizedAsciiStlBase64);
+    const study = createLocalModalStudy(project, displayModel, "study-modal");
+    expect(study.type).toBe("modal_analysis");
+    expect(study.solverSettings).toMatchObject({ modeCount: 6 });
+    expect(study.loads).toEqual([]);
+  });
+
+  test("creates steady thermal studies without structural load cases", () => {
+    const project = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const displayModel = uploadedDisplayModelFor("sample-bar.stl", sizedAsciiStlBase64);
+    const study = createLocalThermalStudy(project, displayModel, "study-thermal", "2026-04-28T12:02:00.000Z");
+    expect(study.type).toBe("steady_state_thermal");
+    expect(study.name).toBe("Steady-State Thermal");
+    expect(study.constraints).toEqual([]);
+    expect(study.loads).toEqual([]);
+    expect(study.loadCases).toEqual([]);
+  });
+
+  test("uses the uploaded file name as the default project name", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const displayModel = uploadedDisplayModelFor("Force Sample v1.step", "U1RFUA==");
+    const projectWithGeometry = attachUploadedModelToProject(blank, {
+      geometryId: "geom-upload",
+      filename: "Force Sample v1.step",
+      artifactKey: "project/geometry/uploaded-display.json",
+      now: "2026-04-28T12:01:00.000Z",
+      displayModel
+    });
+
+    expect(projectWithGeometry.name).toBe("Force Sample v1");
+  });
+
+  test("keeps a user-edited project name when replacing an uploaded model", () => {
+    const customProject = { ...createLocalBlankProject("2026-04-28T12:00:00.000Z").project, name: "Payload Calibration" };
+    const displayModel = uploadedDisplayModelFor("Force Sample v1.step", "U1RFUA==");
+    const projectWithGeometry = attachUploadedModelToProject(customProject, {
+      geometryId: "geom-upload",
+      filename: "Force Sample v1.step",
+      artifactKey: "project/geometry/uploaded-display.json",
+      now: "2026-04-28T12:01:00.000Z",
+      displayModel
+    });
+
+    expect(projectWithGeometry.name).toBe("Payload Calibration");
+  });
+
+  test("seeds cantilever loads in model space for viewer global -Z", async () => {
+    const response = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const load = response.project.studies[0]?.loads[0];
+
+    expect(load?.parameters.direction).toEqual([0, -1, 0]);
+    expect(response.project.studies[0]?.type === "modal_analysis" ? undefined : response.project.studies[0]?.loadCases?.[0]?.loadIds).toEqual([load?.id]);
+  });
+
+  test("creates ready-to-configure modal samples for every built-in model", async () => {
+    for (const sampleModel of ["bracket", "plate", "cantilever"] as const) {
+      const response = await createLocalSampleProject(sampleModel, "modal_analysis", "2026-04-28T12:00:00.000Z");
+      const study = response.project.studies[0];
+
+      expect(response.project.name).toContain("Modal Demo");
+      expect(response.message).toContain("modal sample loaded");
+      expect(study?.type).toBe("modal_analysis");
+      expect(study?.constraints).toHaveLength(1);
+      expect(study?.constraints[0]?.type).toBe("fixed");
+      expect(study?.loads).toEqual([]);
+      expect(study?.solverSettings).toMatchObject({ modeCount: 6 });
+      expect(study?.runs).toEqual([]);
+      expect(study ? validateStudy(study) : []).toEqual([]);
+      expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe("modal_analysis");
+      expect(ProjectSchema.safeParse(response.project).success).toBe(true);
+    }
+  });
+
+  test("creates steady thermal samples with a temperature reference and surface heat flux", async () => {
+    for (const sampleModel of ["bracket", "plate", "cantilever"] as const) {
+      const response = await createLocalSampleProject(sampleModel, "steady_state_thermal", "2026-04-28T12:00:00.000Z");
+      const study = response.project.studies[0];
+
+      expect(response.project.name).toContain("Thermal Demo");
+      expect(response.message).toContain("thermal sample loaded");
+      expect(study?.type).toBe("steady_state_thermal");
+      expect(study?.constraints).toEqual([expect.objectContaining({
+        type: "prescribed_temperature",
+        selectionRef: "selection-fixed-face",
+        parameters: { value: 20, units: "°C" }
+      })]);
+      expect(study?.loads).toEqual([expect.objectContaining({
+        type: "heat_flux",
+        selectionRef: "selection-load-face",
+        parameters: expect.objectContaining({ value: 10_000, units: "W/m²" })
+      })]);
+      expect(study?.materialAssignments).toHaveLength(1);
+      expect(study?.runs).toEqual([]);
+      expect(study ? validateStudy(study) : []).toEqual([]);
+      expect(response.project.geometryFiles[0]?.metadata.sampleAnalysisType).toBe("steady_state_thermal");
+      expect(ProjectSchema.safeParse(response.project).success).toBe(true);
+    }
+  });
+
+  test("rejects payloads without a valid project", () => {
+    expect(() => openLocalProjectPayload("not a project")).toThrow("The selected file is not a valid OpenFEA project JSON.");
+    expect(() => openLocalProjectPayload({ project: { id: "broken" } })).toThrow("The selected file is not a valid OpenFEA project JSON.");
+  });
+
+  test("notes the migration once when a loaded study carried the retired cloud backend", async () => {
+    const sample = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const cloudProject = {
+      ...sample.project,
+      studies: sample.project.studies.map((studyValue) => ({
+        ...studyValue,
+        solverSettings: { ...studyValue.solverSettings, backend: "opencae_core_cloud" }
+      }))
+    };
+
+    const response = openLocalProjectPayload({ project: cloudProject });
+
+    // Honest, not silent: the raw payload carried the retired cloud pin, the
+    // parsed study is normalized to auto/local, and the run log says why.
+    expect(response.message).toContain("opened from local file.");
+    expect(response.message).toContain("retired OpenCAE Core Cloud backend");
+    expect(response.message).toContain("run locally in your browser");
+    expect(response.project.studies[0]?.solverSettings.backend).not.toBe("opencae_core_cloud");
+
+    // Projects without the retired pin stay note-free.
+    const clean = openLocalProjectPayload({ project: sample.project });
+    expect(clean.message).not.toContain("retired OpenCAE Core Cloud backend");
+  });
+
+  test("refreshes an outdated bracket descriptor and clears the stale mesh when opening a saved project", async () => {
+    const sample = await createLocalSampleProject("bracket", "static_stress", "2026-04-28T12:00:00.000Z");
+    // A pre-fix save: the persisted descriptor still carries the full-width
+    // 34 mm gusset (the wedge), and the study kept the mesh built from it.
+    const staleGeometry = structuredClone(BRACKET_CORE_CLOUD_GEOMETRY);
+    staleGeometry.descriptor.gusset.thickness = 34;
+    const staleProject = {
+      ...sample.project,
+      geometryFiles: sample.project.geometryFiles.map((geometry) => ({
+        ...geometry,
+        metadata: { ...geometry.metadata, coreCloudGeometry: staleGeometry }
+      })),
+      studies: sample.project.studies.map((studyValue) => ({
+        ...studyValue,
+        meshSettings: {
+          preset: "medium" as const,
+          status: "complete" as const,
+          meshRef: "mesh-wedge",
+          summary: { nodes: 2150, elements: 1126, warnings: [], artifacts: { actualCoreModel: { model: { elementBlocks: [] } } } }
+        }
+      }))
+    };
+    const staleDisplayModel = { ...sample.displayModel, coreCloudGeometry: staleGeometry };
+
+    const response = openLocalProjectPayload(JSON.parse(JSON.stringify({ project: staleProject, displayModel: staleDisplayModel })));
+
+    expect(response.project.geometryFiles[0]?.metadata.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    expect(response.displayModel.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+    // The wedge mesh is invalidated so the user re-meshes the corrected shape.
+    expect(response.project.studies[0]?.meshSettings).toEqual({ preset: "medium", status: "not_started" });
+    expect(response.message).toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
+  });
+
+  test("leaves up-to-date bracket and non-bracket saves note-free with their mesh intact", async () => {
+    const sample = await createLocalSampleProject("bracket", "static_stress", "2026-04-28T12:00:00.000Z");
+    const response = openLocalProjectPayload(JSON.parse(JSON.stringify({ project: sample.project, displayModel: sample.displayModel })));
+
+    expect(response.message).not.toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
+    expect(response.project.studies[0]?.meshSettings).toEqual(sample.project.studies[0]?.meshSettings);
+    expect(response.project.geometryFiles[0]?.metadata.coreCloudGeometry).toEqual(BRACKET_CORE_CLOUD_GEOMETRY);
+
+    const cantilever = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const cantileverResponse = openLocalProjectPayload(JSON.parse(JSON.stringify({ project: cantilever.project })));
+    expect(cantileverResponse.message).not.toContain(BRACKET_GEOMETRY_MIGRATION_NOTE);
+  });
+
+  test("discards solver models embedded in imported project files", async () => {
+    const sample = await createLocalSampleProject("cantilever", "static_stress", "2026-04-28T12:00:00.000Z");
+    const project = structuredClone(sample.project);
+    const study = project.studies[0]!;
+    study.meshSettings = {
+      preset: "fine",
+      status: "complete",
+      meshRef: "attacker-controlled-mesh",
+      summary: {
+        nodes: 4,
+        elements: 1,
+        warnings: [],
+        artifacts: {
+          meshConnectivity: { connectedComponents: 1 },
+          actualCoreModel: { model: { meshProvenance: { meshSource: "actual_volume_mesh" } } }
+        }
+      }
+    };
+
+    const response = openLocalProjectPayload({ project, displayModel: sample.displayModel });
+
+    expect(response.project.studies[0]?.meshSettings).toEqual({ preset: "fine", status: "not_started" });
+  });
+
+  test("ignores crafted display models with malformed faces instead of crashing face selection", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const response = openLocalProjectPayload({
+      project: blank,
+      displayModel: {
+        id: "display-crafted",
+        name: "Crafted model",
+        bodyCount: 1,
+        faces: [{ id: "face-crafted", label: "Crafted face" }]
+      }
+    });
+
+    // The malformed faces (missing center/normal vectors) are rejected and a safe fallback model is used.
+    expect(response.displayModel.id).toBe("display-blank");
+    expect(response.displayModel.faces).toEqual([]);
+  });
+
+  test("ignores crafted result bundles with malformed summaries", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const response = openLocalProjectPayload({
+      project: blank,
+      results: {
+        summary: { maxStress: "very high", maxStressUnits: "MPa" },
+        fields: [{ id: "field-crafted" }]
+      }
+    });
+
+    expect(response.results).toBeUndefined();
+  });
+
+  test("keeps well-formed display models and result bundles from project files", () => {
+    const blank = createLocalBlankProject("2026-04-28T12:00:00.000Z").project;
+    const response = openLocalProjectPayload({
+      project: blank,
+      displayModel: {
+        id: "display-saved",
+        name: "Saved model",
+        bodyCount: 1,
+        faces: [{ id: "face-1", label: "Face 1", color: "#fff", center: [0, 0, 0], normal: [0, 0, 1], stressValue: 12 }]
+      },
+      results: {
+        summary: {
+          maxStress: 12,
+          maxStressUnits: "MPa",
+          maxDisplacement: 0.2,
+          maxDisplacementUnits: "mm",
+          safetyFactor: 2,
+          reactionForce: 500,
+          reactionForceUnits: "N"
+        },
+        fields: [{ id: "field-1", runId: "run-1", type: "stress", location: "face", values: [12], min: 12, max: 12, units: "MPa" }]
+      }
+    });
+
+    expect(response.displayModel.id).toBe("display-saved");
+    if (!response.results || !isStructuralResultSummary(response.results.summary)) throw new Error("Expected structural results.");
+    expect(response.results?.summary.maxStress).toBe(12);
+    expect(response.results?.fields).toHaveLength(1);
+  });
+});

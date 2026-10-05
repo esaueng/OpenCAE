@@ -1,4 +1,4 @@
-import { normalizeModelJson, type CoreStructuralSolveResult, type OpenCAEModelJson } from "@opencae/core";
+import { normalizeModelJson, type CoreStructuralSolveResult, type OpenFEAModelJson } from "@openfea/core";
 import {
   assembleNodalForcesWithDiagnostics,
   boundedStructuralMaxDofs,
@@ -10,7 +10,7 @@ import {
   type CpuSolverDiagnostics,
   type SolverHooks,
   type StaticLinearTet4CpuResult
-} from "@opencae/solver-cpu";
+} from "@openfea/solver-cpu";
 import {
   buildTet4DofAdjacency,
   buildTet4ElementData,
@@ -36,7 +36,7 @@ export type StaticTet4WebGpuResult =
  * rejected because both require an additional affine/operator contribution.
  */
 export async function solveStaticTet4ModelWebGpu(
-  input: OpenCAEModelJson,
+  input: OpenFEAModelJson,
   stepIndex: number,
   options: StaticTet4WebGpuOptions = {}
 ): Promise<StaticTet4WebGpuResult> {

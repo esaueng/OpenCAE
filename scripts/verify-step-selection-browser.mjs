@@ -18,7 +18,7 @@ const PORT = Number(process.env.PORT ?? 5198);
 const CDP_PORT = Number(process.env.CDP_PORT ?? 9336);
 const TIMEOUT_MS = Number(process.env.PROOF_TIMEOUT_MS ?? 120_000);
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const profileDir = mkdtempSync(join(tmpdir(), "opencae-step-selection-"));
+const profileDir = mkdtempSync(join(tmpdir(), "openfea-step-selection-"));
 const children = [];
 
 function chromeBinary() {
@@ -125,7 +125,7 @@ async function evaluate(cdp, expression) {
 async function run() {
   spawnChild(
     "pnpm",
-    ["--filter", "@opencae/web", "exec", "vite", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"],
+    ["--filter", "@openfea/web", "exec", "vite", "--host", "127.0.0.1", "--port", String(PORT), "--strictPort"],
     { cwd: repoRoot }
   );
   await waitFor("Vite server", async () => (await fetch(`http://127.0.0.1:${PORT}/`)).ok);
@@ -161,7 +161,7 @@ async function run() {
     async () => {
       const value = await evaluate(
         cdp,
-        "window.__opencaeStepSelectionProof?.lastResult ? JSON.stringify(window.__opencaeStepSelectionProof.lastResult) : null"
+        "window.__openfeaStepSelectionProof?.lastResult ? JSON.stringify(window.__openfeaStepSelectionProof.lastResult) : null"
       );
       return value ? JSON.parse(value) : null;
     },
@@ -172,7 +172,7 @@ async function run() {
     cdp,
     `JSON.stringify({
       title: document.title,
-      proofVisible: Boolean(document.getElementById("opencae-step-selection-proof")),
+      proofVisible: Boolean(document.getElementById("openfea-step-selection-proof")),
       frameworkOverlay: Boolean(document.querySelector("vite-error-overlay, #vite-plugin-checker-error-overlay"))
     })`
   ).then(JSON.parse);

@@ -1,10 +1,10 @@
 import {
   extractBoundarySurfaceFacets,
   nodeSetFromSurfaceSet,
-  type OpenCAEModelJson,
+  type OpenFEAModelJson,
   type SurfaceFacetJson,
   type SurfaceSetJson
-} from "@opencae/core";
+} from "@openfea/core";
 
 export const HEX_TETS = [
   0, 1, 3, 4,
@@ -19,9 +19,9 @@ export function createHexBarModel(options: {
   youngModulus: number;
   density?: number;
   fixedLeftFace?: boolean;
-  loads: OpenCAEModelJson["loads"];
+  loads: OpenFEAModelJson["loads"];
   stepType: "staticLinear" | "dynamicLinear";
-}): OpenCAEModelJson {
+}): OpenFEAModelJson {
   const coordinates = [
     0, 0, 0,
     options.length, 0, 0,
@@ -32,7 +32,7 @@ export function createHexBarModel(options: {
     options.length, 1, 1,
     0, 1, 1
   ];
-  const base: OpenCAEModelJson = {
+  const base: OpenFEAModelJson = {
     schema: "opencae.model",
     schemaVersion: "0.2.0",
     nodes: { coordinates },
@@ -58,7 +58,7 @@ export function createHexBarModel(options: {
   const rightFace = surfaceSetByX("rightFace", surfaceFacets, coordinates, options.length);
   const leftNodes = nodeSetFromSurfaceSet(leftFace, surfaceFacets);
   const rightNodes = nodeSetFromSurfaceSet(rightFace, surfaceFacets);
-  const supportConditions: OpenCAEModelJson["boundaryConditions"] = options.fixedLeftFace
+  const supportConditions: OpenFEAModelJson["boundaryConditions"] = options.fixedLeftFace
     ? [{ name: "fixedLeft", type: "fixed", nodeSet: "leftNodes", components: ["x", "y", "z"] }]
     : [
         { name: "leftX", type: "fixed", nodeSet: "leftNodes", components: ["x"] },
@@ -96,7 +96,7 @@ export function createHexBarModel(options: {
   };
 }
 
-export function dynamicLoadedModel(loadProfile: "ramp" | "step" | "half_sine"): OpenCAEModelJson {
+export function dynamicLoadedModel(loadProfile: "ramp" | "step" | "half_sine"): OpenFEAModelJson {
   const model = createHexBarModel({
     length: 1,
     youngModulus: 1000,
@@ -117,7 +117,7 @@ export function createStructuredCantileverModel(options: {
   xDivisions: number;
   yDivisions: number;
   zDivisions: number;
-}): OpenCAEModelJson {
+}): OpenFEAModelJson {
   const coordinates: number[] = [];
   const nodeIndex = (i: number, j: number, k: number) =>
     i * (options.yDivisions + 1) * (options.zDivisions + 1) + j * (options.zDivisions + 1) + k;
@@ -158,7 +158,7 @@ export function createStructuredCantileverModel(options: {
     }
   }
 
-  const base: OpenCAEModelJson = {
+  const base: OpenFEAModelJson = {
     schema: "opencae.model",
     schemaVersion: "0.2.0",
     nodes: { coordinates },

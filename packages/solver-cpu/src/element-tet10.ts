@@ -4,7 +4,7 @@ import { elementVolumeTolerance } from "./geometry-policy";
 export const TET10_NODE_COUNT = 10;
 export const TET10_DOFS = TET10_NODE_COUNT * 3;
 
-// Midside node a (4..9) sits between these two vertices (VTK ordering, matching TET10_FACES in @opencae/core).
+// Midside node a (4..9) sits between these two vertices (VTK ordering, matching TET10_FACES in @openfea/core).
 export const TET10_EDGE_VERTICES: ReadonlyArray<readonly [number, number]> = [
   [0, 1],
   [1, 2],

@@ -4,8 +4,8 @@ import {
   type BoundaryConditionJson,
   type LoadAssemblyDiagnostics,
   type NormalizedElementBlock,
-  type NormalizedOpenCAEModel,
-} from "@opencae/core";
+  type NormalizedOpenFEAModel,
+} from "@openfea/core";
 import { collectTetCoordinates, recoverStress, recoverTet4Strain } from "./element";
 import { computeTet4ElementStiffness, computeTet4Geometry, computeVonMisesStress } from "./element";
 import { computeTet10ElementStiffness, computeTet10Volume, recoverTet10CentroidStrain, recoverTet10NodalStrains, TET10_NODE_COUNT } from "./element-tet10";
@@ -43,7 +43,7 @@ const COMPONENT_INDEX = {
 } as const;
 
 export type PreparedStaticLinearTetSystem = {
-  model: NormalizedOpenCAEModel;
+  model: NormalizedOpenFEAModel;
   stiffness: CsrMatrix;
   reducedStiffness: CsrMatrix;
   constraints: Map<number, number>;
@@ -138,7 +138,7 @@ export function solveStaticLinearTet4Cpu(
   return solveSparseSystem(model, assembly.stiffness, loads, constraints.values, free, options, reportedLoadAssembly, assembly.connections);
 }
 
-function hasAdvancedLoadPrimitives(model: NormalizedOpenCAEModel, loadNames: string[]): boolean {
+function hasAdvancedLoadPrimitives(model: NormalizedOpenFEAModel, loadNames: string[]): boolean {
   const selected = new Set(loadNames);
   return model.loads.some((load) => selected.has(load.name) && (
     load.type === "surfaceTraction"
@@ -345,7 +345,7 @@ function weightedArray(
 }
 
 export function getNormalizedModel(input: CpuSolverInput):
-  | { ok: true; model: NormalizedOpenCAEModel }
+  | { ok: true; model: NormalizedOpenFEAModel }
   | { ok: false; error: CpuSolverError } {
   if (isNormalizedModel(input)) {
     return { ok: true, model: input };
@@ -371,7 +371,7 @@ export function getNormalizedModel(input: CpuSolverInput):
           ? "Model is insufficiently constrained for modal analysis. Add or revise supports in the Supports step."
           : densityError
             ? hasModalStep ? "Modal solve requires material density." : "Dynamic solve requires material density."
-            : "Input model failed OpenCAE Core validation.",
+            : "Input model failed OpenFEA Core validation.",
         report: result.report
       }
     };
@@ -380,7 +380,7 @@ export function getNormalizedModel(input: CpuSolverInput):
   return { ok: true, model: result.model };
 }
 
-export function assembleDenseStiffness(model: NormalizedOpenCAEModel, hooks?: SolverHooks):
+export function assembleDenseStiffness(model: NormalizedOpenFEAModel, hooks?: SolverHooks):
   | { ok: true; stiffness: Float64Array }
   | { ok: false; error: CpuSolverError } {
   const dofs = model.counts.nodes * 3;
@@ -396,7 +396,7 @@ export function assembleDenseStiffness(model: NormalizedOpenCAEModel, hooks?: So
   return { ok: true, stiffness };
 }
 
-export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: SolverHooks):
+export function assembleSparseStiffness(model: NormalizedOpenFEAModel, hooks?: SolverHooks):
   | { ok: true; stiffness: CsrMatrix; connections?: ConnectionAssemblyDiagnostics }
   | { ok: false; error: CpuSolverError } {
   const dofs = model.counts.nodes * 3;
@@ -418,7 +418,7 @@ export function assembleSparseStiffness(model: NormalizedOpenCAEModel, hooks?: S
   return { ok: true, stiffness: toCsrMatrix(builder), connections: connections.diagnostics };
 }
 
-function sparseStiffnessTripletCapacity(model: NormalizedOpenCAEModel): number {
+function sparseStiffnessTripletCapacity(model: NormalizedOpenFEAModel): number {
   let capacity = 0;
   for (const block of model.elementBlocks) {
     const nodeCount = elementNodeCountForBlock(block);
@@ -453,7 +453,7 @@ function sparseStiffnessTripletCapacity(model: NormalizedOpenCAEModel): number {
   return capacity;
 }
 
-export function assembleNodalForces(model: NormalizedOpenCAEModel, loadNames: string[]): Float64Array {
+export function assembleNodalForces(model: NormalizedOpenFEAModel, loadNames: string[]): Float64Array {
   const result = assembleNodalForcesWithDiagnostics(model, loadNames);
   if (!result.ok) {
     throw new Error(result.error.message);
@@ -461,7 +461,7 @@ export function assembleNodalForces(model: NormalizedOpenCAEModel, loadNames: st
   return result.forces;
 }
 
-export function assembleNodalForcesWithDiagnostics(model: NormalizedOpenCAEModel, loadNames: string[]):
+export function assembleNodalForcesWithDiagnostics(model: NormalizedOpenFEAModel, loadNames: string[]):
   | { ok: true; forces: Float64Array; diagnostics: LoadAssemblyDiagnostics }
   | { ok: false; error: CpuSolverError } {
   const result = assembleNodalLoadVectorWithDiagnostics(model, loadNames);
@@ -478,7 +478,7 @@ export function assembleNodalForcesWithDiagnostics(model: NormalizedOpenCAEModel
   return { ok: true, forces: result.vector, diagnostics: result.diagnostics };
 }
 
-export function collectConstraints(model: NormalizedOpenCAEModel, boundaryConditionNames: string[]):
+export function collectConstraints(model: NormalizedOpenFEAModel, boundaryConditionNames: string[]):
   | { ok: true; values: Map<number, number> }
   | { ok: false; error: CpuSolverError } {
   const values = new Map<number, number>();
@@ -518,8 +518,8 @@ export function collectConstraints(model: NormalizedOpenCAEModel, boundaryCondit
 function nodesForBoundaryCondition(
   boundaryCondition: BoundaryConditionJson,
   nodeSets: Map<string, Uint32Array>,
-  surfaceSets: Map<string, NormalizedOpenCAEModel["surfaceSets"][number]>,
-  facetById: Map<number, NormalizedOpenCAEModel["surfaceFacets"][number]>
+  surfaceSets: Map<string, NormalizedOpenFEAModel["surfaceSets"][number]>,
+  facetById: Map<number, NormalizedOpenFEAModel["surfaceFacets"][number]>
 ): number[] {
   if (boundaryCondition.type === "fixed" && "surfaceSet" in boundaryCondition && boundaryCondition.surfaceSet) {
     return nodesFromSurfaceSet(surfaceSets.get(boundaryCondition.surfaceSet), facetById);
@@ -531,8 +531,8 @@ function nodesForBoundaryCondition(
 }
 
 function nodesFromSurfaceSet(
-  surfaceSet: NormalizedOpenCAEModel["surfaceSets"][number] | undefined,
-  facetById: Map<number, NormalizedOpenCAEModel["surfaceFacets"][number]>
+  surfaceSet: NormalizedOpenFEAModel["surfaceSets"][number] | undefined,
+  facetById: Map<number, NormalizedOpenFEAModel["surfaceFacets"][number]>
 ): number[] {
   const nodes = new Set<number>();
   if (!surfaceSet) return [];
@@ -557,7 +557,7 @@ export function enumerateFreeDofs(dofs: number, constraints: Map<number, number>
 }
 
 function solveDenseSystem(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   stiffness: Float64Array,
   loads: Float64Array,
   constraints: Map<number, number>,
@@ -603,7 +603,7 @@ function solveDenseSystem(
 }
 
 function solveSparseSystem(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   stiffness: CsrMatrix,
   loads: Float64Array,
   constraints: Map<number, number>,
@@ -653,7 +653,7 @@ function resolvePreconditioner(options: CpuSolverOptions): "none" | "jacobi" | "
 }
 
 function finishSolve(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   loads: Float64Array,
   constraints: Map<number, number>,
   free: Int32Array,
@@ -743,7 +743,7 @@ export function collectElementCoordinates(
 }
 
 function assembleElementStiffnesses(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   scatter: {
     add(block: NormalizedElementBlock, elementOffset: number, stiffness: Float64Array, nodeCount: number): void;
   },
@@ -873,7 +873,7 @@ function setConstraint(
   return undefined;
 }
 
-export function recoverElementResults(model: NormalizedOpenCAEModel, displacement: Float64Array):
+export function recoverElementResults(model: NormalizedOpenFEAModel, displacement: Float64Array):
   | { ok: true; strain: Float64Array; stress: Float64Array; vonMises: Float64Array; nodalVonMises: Float64Array; nodalStress: Float64Array; vonMisesPeak: Float64Array }
   | { ok: false; error: CpuSolverError } {
   const strain = new Float64Array(model.counts.elements * 6);
@@ -1057,7 +1057,7 @@ export function maxAbs(values: Float64Array): number {
 function selectSolverMode(
   dofs: number,
   options: CpuSolverOptions,
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   activeLoadNames: string[]
 ): "dense" | "sparse" {
   if (model.meshConnections.some((connection) => connection.type === "tie" || connection.type === "contact")) return "sparse";
@@ -1066,7 +1066,7 @@ function selectSolverMode(
   return dofs <= 300 ? "dense" : "sparse";
 }
 
-function activeLoadsRequireSparse(model: NormalizedOpenCAEModel, activeLoadNames: string[]): boolean {
+function activeLoadsRequireSparse(model: NormalizedOpenFEAModel, activeLoadNames: string[]): boolean {
   const active = new Set(activeLoadNames);
   return model.loads.some((load) => active.has(load.name) && load.type !== "nodalForce" && load.type !== "bodyGravity");
 }
@@ -1091,7 +1091,7 @@ function preparedFailure(
   return { ok: false, error: { code, message }, diagnostics };
 }
 
-function isNormalizedModel(input: CpuSolverInput): input is NormalizedOpenCAEModel {
+function isNormalizedModel(input: CpuSolverInput): input is NormalizedOpenFEAModel {
   return (
     typeof input === "object" &&
     input !== null &&

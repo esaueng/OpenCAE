@@ -1,4 +1,4 @@
-import { type NormalizedOpenCAEModel } from "@opencae/core";
+import { type NormalizedOpenFEAModel } from "@openfea/core";
 import { dynamicCoreResultFromSolve } from "./results";
 import { boundedStructuralMaxDofs, structuralDofCount, structuralDofLimitError } from "./limits";
 import {
@@ -113,7 +113,7 @@ export function solveDynamicLinearTetLoadCases(
   if (steps.some(({ step }) => step?.type !== "dynamicLinear")) {
     return { ok: false, error: { code: "invalid-step", message: "Every dynamic load case must reference a dynamicLinear step." } };
   }
-  const dynamicSteps = steps as Array<{ loadCase: DynamicLoadCaseInput; step: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }> }>;
+  const dynamicSteps = steps as Array<{ loadCase: DynamicLoadCaseInput; step: Extract<NormalizedOpenFEAModel["steps"][number], { type: "dynamicLinear" }> }>;
   const firstStep = dynamicSteps[0]!.step;
   if (dynamicSteps.some(({ step }) => !sameStrings(step.boundaryConditions, firstStep.boundaryConditions))) {
     return { ok: false, error: { code: "case-support-mismatch", message: "Dynamic load cases must share identical supports." } };
@@ -147,7 +147,7 @@ export function solveDynamicLinearTetLoadCases(
 }
 
 function solveDynamicPreparedSystem(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   system: PreparedStructuralSystem,
   settings: DynamicSettings,
   options: DynamicTet4CpuOptions,
@@ -307,8 +307,8 @@ function sameStrings(left: string[], right: string[]): boolean {
 }
 
 function sameDynamicStepSettings(
-  left: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }>,
-  right: Extract<NormalizedOpenCAEModel["steps"][number], { type: "dynamicLinear" }>
+  left: Extract<NormalizedOpenFEAModel["steps"][number], { type: "dynamicLinear" }>,
+  right: Extract<NormalizedOpenFEAModel["steps"][number], { type: "dynamicLinear" }>
 ): boolean {
   return optionalTimeValuesMatch(left.startTime, right.startTime)
     && optionalTimeValuesMatch(left.endTime, right.endTime)
@@ -343,7 +343,7 @@ export function minimumPositiveFinite(fields: Iterable<ArrayLike<number>>): numb
   return minimum;
 }
 
-function dynamicSettings(model: NormalizedOpenCAEModel, options: DynamicTet4CpuOptions): DynamicSettings {
+function dynamicSettings(model: NormalizedOpenFEAModel, options: DynamicTet4CpuOptions): DynamicSettings {
   const selectedStep = model.steps[options.stepIndex ?? 0];
   const dynamicStep = selectedStep?.type === "dynamicLinear" ? selectedStep : undefined;
   const timeStep = boundedTimeStepSeconds(finiteOr(options.timeStep, dynamicStep?.timeStep ?? DEFAULT_TIME_STEP_SECONDS));
@@ -547,7 +547,7 @@ function dampingProduct(system: ReducedSystem, vector: Float64Array, alpha: numb
 }
 
 function createFrame(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   system: ReducedSystem,
   free: Int32Array,
   reducedU: Float64Array,
@@ -596,7 +596,7 @@ function createFrame(
   };
 }
 
-function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Array): Float64Array {
+function computeSafetyFactor(model: NormalizedOpenFEAModel, vonMises: Float64Array): Float64Array {
   const values = new Float64Array(vonMises.length);
   let element = 0;
   for (const block of model.elementBlocks) {

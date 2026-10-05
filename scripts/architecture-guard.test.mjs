@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "vitest";
 
 const rootDir = resolve(import.meta.dirname, "..");
-const WEB_SRC = resolve(rootDir, "apps/opencae-web/src");
+const WEB_SRC = resolve(rootDir, "apps/openfea-web/src");
 
 // ---------------------------------------------------------------------------
 // Local-first architecture guard.
@@ -15,17 +15,17 @@ const WEB_SRC = resolve(rootDir, "apps/opencae-web/src");
 // calls, in the same allowlist style as cloud-retirement-guard.
 // ---------------------------------------------------------------------------
 
-/** Relative paths (from apps/opencae-web/src) allowed to touch fetch("/api/..."). */
+/** Relative paths (from apps/openfea-web/src) allowed to touch fetch("/api/..."). */
 const FETCH_API_ALLOWLIST = new Set([
   "cloudBackup.ts", // the only production server flow: consent-gated encrypted recovery backup
 ]);
 
 /** Module specifiers the web source must never import (reference engines). */
 const FORBIDDEN_IMPORTS = [
-  "@opencae/solver-service",
-  "@opencae/mesh-service",
-  "@opencae/post-service",
-  "@opencae/cad-service"
+  "@openfea/solver-service",
+  "@openfea/mesh-service",
+  "@openfea/post-service",
+  "@openfea/cad-service"
 ];
 
 function webSourceFiles() {
@@ -81,15 +81,15 @@ describe("local-first architecture guard", () => {
   });
 
   test("web source imports the adapter through one style (no relative deep-link mix)", () => {
-    // workers/opencaeCoreSolve.ts is the declared re-export shim; web modules
+    // workers/openfeaCoreSolve.ts is the declared re-export shim; web modules
     // must not also reach into the adapter package through other spellings.
     const offenders = [];
     for (const absolute of webSourceFiles()) {
       const relative = absolute.slice(WEB_SRC.length + 1);
-      if (relative === "workers/opencaeCoreSolve.ts") continue;
+      if (relative === "workers/openfeaCoreSolve.ts") continue;
       const source = readFileSync(absolute, "utf8");
-      if (/(["'])@opencae\/core-adapter\/dist\//.test(source)) {
-        offenders.push(`${relative}: deep-links @opencae/core-adapter/dist`);
+      if (/(["'])@openfea\/core-adapter\/dist\//.test(source)) {
+        offenders.push(`${relative}: deep-links @openfea/core-adapter/dist`);
       }
       if (/from ["']\.\.?\/.*core-adapter\/src\//.test(source)) {
         offenders.push(`${relative}: deep-links core-adapter/src`);

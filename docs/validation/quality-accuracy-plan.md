@@ -3,16 +3,16 @@
 Date: 2026-06-12
 
 > **Historical note (2026-07):** this review predates the cloud retirement.
-> `services/opencae-core-cloud` and the cloud solve path it analyzes were
+> `services/openfea-core-cloud` and the cloud solve path it analyzes were
 > removed in July 2026 — production solves now run locally in the browser and
 > the cloud contract survives as golden fixtures. See
 > [docs/cloud-retirement.md](../cloud-retirement.md). Path references below
 > are kept as written for the record.
 Scope: full-repo review of every code path that produces, transforms, or displays
-simulation numbers — `services/opencae-solver-service`, `services/opencae-post-service`,
-`services/opencae-core-cloud`, `services/opencae-mesh-service`, `libs/opencae-core-adapter`,
-`libs/opencae-units`, `libs/opencae-materials`, `libs/opencae-schema`, `apps/opencae-api`,
-`apps/opencae-web`, plus the pinned sibling `OpenCAE-Core` solver packages.
+simulation numbers — `services/openfea-solver-service`, `services/openfea-post-service`,
+`services/openfea-core-cloud`, `services/openfea-mesh-service`, `libs/openfea-core-adapter`,
+`libs/openfea-units`, `libs/openfea-materials`, `libs/openfea-schema`, `apps/openfea-api`,
+`apps/openfea-web`, plus the pinned sibling `OpenFEA-Core` solver packages.
 
 Baseline at review time: `pnpm test` passes (679 tests / 61 files) once
 `pnpm build:core` has run; CI gates typecheck, tests, runner-version, and
@@ -20,8 +20,8 @@ Cloudflare config.
 
 ## 1. Review summary
 
-The production FEA path (`@opencae/solver-cpu` Tet4 linear elasticity consumed via
-`services/opencae-core-cloud`) is a genuine finite-element implementation: the
+The production FEA path (`@openfea/solver-cpu` Tet4 linear elasticity consumed via
+`services/openfea-core-cloud`) is a genuine finite-element implementation: the
 B-matrix, isotropic D-matrix, Jacobian/volume checks (degenerate and inverted
 element rejection), and von Mises recovery are textbook-correct, and the
 core-cloud service fail-closes on preview provenance. The validation docs
@@ -46,7 +46,7 @@ front of a user making a design decision.
 ### Critical — fabricated or mislabeled numbers can be read as analysis output
 
 - **C1. Heuristic "solver" invents stress fields.**
-  `services/opencae-solver-service/src/index.ts:776-892` computes stress as
+  `services/openfea-solver-service/src/index.ts:776-892` computes stress as
   gaussian distance falloff with hand-tuned coefficients on top of hardcoded
   per-face `baselineStress` lookup tables (`knownFaces`, lines 997-1030).
   Face areas for pressure loads are guessed from label text
@@ -56,21 +56,21 @@ front of a user making a design decision.
   that honesty does not survive to the user.
 
 - **C2. UI fallback values are fabricated when no result exists.**
-  `apps/opencae-web/src/resultFields.ts:799-804`: with no solver fields, face
+  `apps/openfea-web/src/resultFields.ts:799-804`: with no solver fields, face
   coloring falls back to embedded demo `stressValue`s, displacement is
   `stressValue / 770`, safety factor is `276 / stressValue` — magic constants
   calibrated to one demo bracket and Aluminum 6061's yield. A fresh bracket
   demo load also seeds a hardcoded summary (max stress 142 MPa, SF 1.8) in
-  `apps/opencae-web/src/WorkspaceApp.tsx:70-89`.
+  `apps/openfea-web/src/WorkspaceApp.tsx:70-89`.
 
 - **C3. Provenance labels collapse "estimate" into "preview".**
-  `apps/opencae-web/src/unitDisplay.ts:103-114` renders `local_estimate`
-  (fabricated heuristic, C1/C2) with the same "OpenCAE Core Preview" label as
+  `apps/openfea-web/src/unitDisplay.ts:103-114` renders `local_estimate`
+  (fabricated heuristic, C1/C2) with the same "OpenFEA Core Preview" label as
   genuine coarse Tet4 preview solves. A user cannot distinguish a real (if
   coarse) FEM solve from an invented number.
 
 - **C4. Reports misrepresent their own content.**
-  `services/opencae-post-service/src/index.ts:97-98` and `201-273`: the report's
+  `services/openfea-post-service/src/index.ts:97-98` and `201-273`: the report's
   "Stress Field Preview" is a fixed, hardcoded beam drawing (same picture for
   every model and every result) captioned as showing "the expected high-gradient
   regions … from the solved result summary." The HTML/PDF report shows KPIs,
@@ -81,16 +81,16 @@ front of a user making a design decision.
 ### High — documented gates not enforced; silent unit assumptions
 
 - **H1. Runs are marked `complete` without provenance validation.**
-  `apps/opencae-api/src/server.ts:458-464` persists whatever
-  `trySolveOpenCaeCoreStudy` returns and marks the run complete.
-  `CoreCloudResultProvenanceSchema` (`libs/opencae-schema/src/index.ts:119-149`)
+  `apps/openfea-api/src/server.ts:458-464` persists whatever
+  `trySolveOpenFeaCoreStudy` returns and marks the run complete.
+  `CoreCloudResultProvenanceSchema` (`libs/openfea-schema/src/index.ts:119-149`)
   encodes the production rules but is referenced only by its own unit tests —
   it is never applied at persist, import, or display time. Imported project
   results (`server.ts` import flow) are likewise accepted without a provenance
   audit.
 
 - **H2. Local "Core" solves run on a tiny structured-block proxy of the
-  geometry.** `libs/opencae-core-adapter/src/index.ts`:
+  geometry.** `libs/openfea-core-adapter/src/index.ts`:
   `meshCellsForPreset` tops out at 6×5×4 cells even on "ultra", and
   `maxDofsForMeshPreset` caps the solve at a few hundred DOFs. The result is a
   real Tet4 solve, but of a block with the model's bounding dimensions — not the
@@ -98,20 +98,20 @@ front of a user making a design decision.
   numbers and a report (H1, C4).
 
 - **H3. Unit handling is assumption-based at every boundary.**
-  - STL import hardcodes `units: "mm"` (`libs/opencae-units/src/index.ts:30`);
+  - STL import hardcodes `units: "mm"` (`libs/openfea-units/src/index.ts:30`);
     a meters- or inches-authored STL silently mis-scales dimensions, volume,
     payload mass, and every downstream load.
-  - `loadForceNewtons` (`services/opencae-solver-service/src/studyInputs.ts:6-17`)
+  - `loadForceNewtons` (`services/openfea-solver-service/src/studyInputs.ts:6-17`)
     returns `parameters.value` raw for non-gravity loads with no unit field
     check; `primaryBeamLoad` (`beamDemoSolver.ts:453-455`) falls back to
     `study.loads[0]`, so a pressure load's Pa/kPa value can be consumed as
     newtons by the beam demo path.
-  - `normalizeCoreCloudResultForUi` (`services/opencae-core-cloud/src/index.ts:241-284`)
+  - `normalizeCoreCloudResultForUi` (`services/openfea-core-cloud/src/index.ts:241-284`)
     rewrites provenance units to `mm-N-s-MPa` unconditionally and recognizes
     only two unit strings, defaulting everything else to Pa/m silently.
 
 - **H4. Meshing is a stub with constant statistics.**
-  `services/opencae-mesh-service/src/index.ts` returns the same hardcoded
+  `services/openfea-mesh-service/src/index.ts` returns the same hardcoded
   node/element counts per preset for any geometry; no mesh is generated, and no
   quality metric (aspect ratio, skewness) exists anywhere. "Mesh: complete" is
   a UI state, not an artifact.
@@ -127,15 +127,15 @@ front of a user making a design decision.
   (displacement under-prediction, stress under-resolution at concentrations);
   with the DOF caps in H2 this is structural, but nothing measures or reports
   discretization error, and `assessResultFailure`
-  (`libs/opencae-schema/src/index.ts:381-413`) issues "pass / unlikely to
+  (`libs/openfea-schema/src/index.ts:381-413`) issues "pass / unlikely to
   yield" verdicts on any finite safety factor regardless of provenance or mesh
   adequacy.
 
 - **M3. Surface-field alignment checks count, not correspondence.**
-  `services/opencae-core-cloud/src/index.ts:327-348` validates node count and
+  `services/openfea-core-cloud/src/index.ts:327-348` validates node count and
   mesh id only; a permuted node ordering would render stress at wrong locations
   undetected. The web viewer's coordinate-space diagnostic
-  (`apps/opencae-web/src/resultFields.ts:714-729`) only warns at >25× extent
+  (`apps/openfea-web/src/resultFields.ts:714-729`) only warns at >25× extent
   ratio, so an mm/m (1000×→ but 10×-25× per-axis) mismatch can pass silently.
 
 - **M4. Beam-demo specifics.** The Euler-Bernoulli formulas in
@@ -147,7 +147,7 @@ front of a user making a design decision.
   to a stubby model that matches the face-id pattern.
 
 - **M5. Demo dynamic results carry a "complete run" shape.**
-  `apps/opencae-web/src/localProjectFactory.ts:171-186` seeds
+  `apps/openfea-web/src/localProjectFactory.ts:171-186` seeds
   `opencae-core-preview-sdof` runs; dynamic SDOF scaling of a static heuristic
   field (`solver-service/src/index.ts:293-373`) is dimensionally self-consistent
   but physically arbitrary (stiffness back-derived from heuristic displacement).
@@ -162,7 +162,7 @@ or the request, not a console warning.
 
 1. **Wire `CoreCloudResultProvenanceSchema` into the pipeline.** Apply it (or a
    tiered variant) wherever a result is persisted or marked complete:
-   `apps/opencae-api/src/server.ts` run completion, project import, and the
+   `apps/openfea-api/src/server.ts` run completion, project import, and the
    worker result path. A run whose provenance is not production-grade must be
    stored with an explicit non-production status (e.g. `complete_preview`,
    `complete_estimate`), never bare `complete`. Add API tests that a
@@ -172,9 +172,9 @@ or the request, not a console warning.
    imported legacy) as a first-class enum on runs and summaries, and make the
    web app and API treat it as load-bearing, not a display hint.
 3. **Fix the UI labels.** `unitDisplay.ts`: `local_estimate` must label as
-   "Estimate (not FEA)" or equivalent — never "OpenCAE Core Preview". Preview
+   "Estimate (not FEA)" or equivalent — never "OpenFEA Core Preview". Preview
    labels must state the proxy-mesh fact ("coarse block proxy of model bounds").
-4. **Make reports honest.** In `opencae-post-service`: include solver,
+4. **Make reports honest.** In `openfea-post-service`: include solver,
    provenance tier, mesh source, units, and run id in every report; replace the
    hardcoded "Stress Field Preview" drawing with either a real rendering of the
    result samples or a clearly-labeled schematic ("illustration — not model
@@ -189,7 +189,7 @@ or the request, not a console warning.
 ### Phase 2 — Unit integrity
 
 1. **Single source of truth for units.** Define a typed unit system on every
-   load, material, dimension, and result field in `@opencae/schema`; remove
+   load, material, dimension, and result field in `@openfea/schema`; remove
    bare `parameters.value` reads. `loadForceNewtons` must require an explicit
    unit and reject unknown ones; the beam-demo `primaryBeamLoad` fallback to
    `loads[0]` must filter to force/gravity types.
@@ -207,7 +207,7 @@ or the request, not a console warning.
 ### Phase 3 — Quantitative accuracy gates in CI
 
 1. **Analytical benchmark suite with tolerances.** Implement the documented
-   benchmark matrix as executable tests against `@opencae/solver-cpu` with
+   benchmark matrix as executable tests against `@openfea/solver-cpu` with
    numeric tolerances, not just finiteness:
    - Cantilever tip deflection `FL³/3EI` and fixed-end stress `FLc/I` at a mesh
      density where Tet4 should be within a stated band (document the band, e.g.
@@ -244,7 +244,7 @@ or the request, not a console warning.
    uploaded geometry through real volume meshing to Core Cloud and retire the
    heuristic surface solver (C1) entirely — demo visuals can be served by an
    explicit, non-result "appearance preview" mode.
-3. **Tet10 or stress-recovery improvement** in OpenCAE-Core (sibling repo) to
+3. **Tet10 or stress-recovery improvement** in OpenFEA-Core (sibling repo) to
    address Tet4 stiffness at stress concentrations; gate with the Phase 3
    convergence suite.
 

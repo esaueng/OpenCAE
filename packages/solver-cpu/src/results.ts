@@ -4,7 +4,7 @@ import {
   connectedComponents,
   createCoreResultField,
   finiteExtrema,
-  OPENCAE_CORE_VERSION,
+  OPENFEA_CORE_VERSION,
   nodesPerElement,
   solverSurfaceMeshFromModel,
   validateProductionSurfaceFieldInvariant,
@@ -15,9 +15,9 @@ import {
   type CoreSolveProvenance,
   type CoreStructuralSolveResult,
   type LoadJson,
-  type NormalizedOpenCAEModel,
+  type NormalizedOpenFEAModel,
   type SolverSurfaceMesh
-} from "@opencae/core";
+} from "@openfea/core";
 import { computePrincipalStressMeasures, smoothNodalScalarField } from "./element";
 import { recoverNodalStressTensorsFromElements, recoverNodalVonMisesFromElements } from "./recovery";
 import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, ModalCpuDiagnostics, ModalCpuResult, StaticLinearTet4CpuResult, CpuSolverDiagnostics } from "./types";
@@ -25,7 +25,7 @@ import type { DynamicTet4CpuResult, DynamicTet4CpuDiagnostics, ModalCpuDiagnosti
 export const SOLVER_CPU_VERSION = "0.1.5";
 
 export function staticCoreResultFromSolve(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   result: StaticLinearTet4CpuResult,
   diagnostics: CpuSolverDiagnostics
 ): CoreStructuralSolveResult {
@@ -174,7 +174,7 @@ export function staticCoreResultFromSolve(
 }
 
 export function dynamicCoreResultFromSolve(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   result: DynamicTet4CpuResult,
   diagnostics: DynamicTet4CpuDiagnostics
 ): CoreStructuralSolveResult {
@@ -396,7 +396,7 @@ export function dynamicCoreResultFromSolve(
 }
 
 function principalStressSurfaceFields(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   surfaceMesh: SolverSurfaceMesh,
   elementStress: ArrayLike<number>,
   stressScale: number,
@@ -431,7 +431,7 @@ function principalStressSurfaceFields(
 }
 
 export function modalCoreResultFromSolve(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   result: Pick<ModalCpuResult, "modes">,
   diagnostics: ModalCpuDiagnostics
 ): CoreModalSolveResult {
@@ -478,7 +478,7 @@ export function modalCoreResultFromSolve(
   };
 }
 
-function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Array): Float64Array {
+function computeSafetyFactor(model: NormalizedOpenFEAModel, vonMises: Float64Array): Float64Array {
   const values = new Float64Array(vonMises.length);
   let element = 0;
   for (const block of model.elementBlocks) {
@@ -493,11 +493,11 @@ function computeSafetyFactor(model: NormalizedOpenCAEModel, vonMises: Float64Arr
   return values;
 }
 
-function hasYieldStrength(model: NormalizedOpenCAEModel): boolean {
+function hasYieldStrength(model: NormalizedOpenFEAModel): boolean {
   return model.materials.some((material) => (material.yieldStrength ?? 0) > 0);
 }
 
-function elementYieldStrengths(model: NormalizedOpenCAEModel): Float64Array {
+function elementYieldStrengths(model: NormalizedOpenFEAModel): Float64Array {
   const values = new Float64Array(model.counts.elements);
   let element = 0;
   for (const block of model.elementBlocks) {
@@ -513,7 +513,7 @@ function elementYieldStrengths(model: NormalizedOpenCAEModel): Float64Array {
 }
 
 // Display clamp for the node-located safety-factor contour fields, matching the web
-// viewer's derived-field convention (clampSafetyFactor in the OpenCAE web app): the
+// viewer's derived-field convention (clampSafetyFactor in the OpenFEA web app): the
 // viewer's palette is linear and anchored at field.min, so an unstressed node must map
 // to the CAP (safest), never to 0 (which would render as the most critical color and
 // squash the real safety-factor range).
@@ -545,7 +545,7 @@ export function nodalSafetyFactorValues(nodalYield: Float64Array, nodalVonMises:
 }
 
 function coreProvenance(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   solver: CoreSolveProvenance["solver"]
 ): CoreSolveProvenance {
   const meshSource = model.meshProvenance?.meshSource;
@@ -558,7 +558,7 @@ function coreProvenance(
         ? "structured_block_core"
         : "actual_volume_mesh",
     units: "mm-N-s-MPa",
-    coreVersion: OPENCAE_CORE_VERSION,
+    coreVersion: OPENFEA_CORE_VERSION,
     solverCpuVersion: SOLVER_CPU_VERSION
   };
 }
@@ -584,11 +584,11 @@ function maxNodeVectorNorm(values: Float64Array): number {
   return max;
 }
 
-function stressToMpaScale(model: NormalizedOpenCAEModel): number {
+function stressToMpaScale(model: NormalizedOpenFEAModel): number {
   return model.coordinateSystem.solverUnits === "mm-N-s-MPa" ? 1 : 1 / 1_000_000;
 }
 
-function stressToPaScale(model: NormalizedOpenCAEModel): number {
+function stressToPaScale(model: NormalizedOpenFEAModel): number {
   return model.coordinateSystem.solverUnits === "mm-N-s-MPa" ? 1_000_000 : 1;
 }
 
@@ -597,7 +597,7 @@ function scaleValues(values: ArrayLike<number>, scale: number): number[] {
 }
 
 function visualizationStressValues(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   recoveredNodalVonMises: Float64Array,
   smoothing: CpuSolverDiagnostics["visualizationSmoothing"]
 ): { values: Float64Array; source: string } {
@@ -712,7 +712,7 @@ type StressBeamAxisBin = {
 };
 
 function stressVisualizationDiagnostic(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   surfaceMesh: SolverSurfaceMesh,
   stressField: CoreResultField,
   displacementField: CoreResultField,
@@ -790,7 +790,7 @@ function stressVisualizationDiagnostic(
 }
 
 function coreSolveDiagnostics(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   provenance: CoreSolveProvenance,
   surfaceMesh: SolverSurfaceMesh,
   stressDiagnostic: ReturnType<typeof stressVisualizationDiagnostic>,
@@ -844,11 +844,11 @@ function coreSolveDiagnostics(
   };
 }
 
-function firstStructuralStep(model: NormalizedOpenCAEModel): { boundaryConditions: string[]; loads: string[] } | undefined {
+function firstStructuralStep(model: NormalizedOpenFEAModel): { boundaryConditions: string[]; loads: string[] } | undefined {
   return model.steps.find((step) => step.type === "staticLinear" || step.type === "dynamicLinear");
 }
 
-function nodeSelectionForBoundaryConditions(model: NormalizedOpenCAEModel, boundaryConditionNames: string[]): NodeSelectionSummary {
+function nodeSelectionForBoundaryConditions(model: NormalizedOpenFEAModel, boundaryConditionNames: string[]): NodeSelectionSummary {
   const active = new Set(boundaryConditionNames);
   const nodeIds = new Set<number>();
   const facetById = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
@@ -868,7 +868,7 @@ function nodeSelectionForBoundaryConditions(model: NormalizedOpenCAEModel, bound
   return nodeSelectionSummary(model, nodeIds);
 }
 
-function nodeSelectionForLoads(model: NormalizedOpenCAEModel, loadNames: string[]): NodeSelectionSummary {
+function nodeSelectionForLoads(model: NormalizedOpenFEAModel, loadNames: string[]): NodeSelectionSummary {
   const active = new Set(loadNames);
   const nodeIds = new Set<number>();
   for (const load of model.loads) {
@@ -878,7 +878,7 @@ function nodeSelectionForLoads(model: NormalizedOpenCAEModel, loadNames: string[
   return nodeSelectionSummary(model, nodeIds);
 }
 
-function addLoadNodes(model: NormalizedOpenCAEModel, load: LoadJson, nodeIds: Set<number>): void {
+function addLoadNodes(model: NormalizedOpenFEAModel, load: LoadJson, nodeIds: Set<number>): void {
   if (load.type === "nodalForce") {
     addNodeSetNodes(model, load.nodeSet, nodeIds);
     return;
@@ -909,7 +909,7 @@ function addLoadNodes(model: NormalizedOpenCAEModel, load: LoadJson, nodeIds: Se
   }
 }
 
-function addSurfaceSetNodes(model: NormalizedOpenCAEModel, surfaceSetName: string, nodeIds: Set<number>): void {
+function addSurfaceSetNodes(model: NormalizedOpenFEAModel, surfaceSetName: string, nodeIds: Set<number>): void {
   const surfaceSet = model.surfaceSets.find((set) => set.name === surfaceSetName);
   if (!surfaceSet) return;
   const facetById = new Map(model.surfaceFacets.map((facet) => [facet.id, facet]));
@@ -920,13 +920,13 @@ function addSurfaceSetNodes(model: NormalizedOpenCAEModel, surfaceSetName: strin
   }
 }
 
-function addNodeSetNodes(model: NormalizedOpenCAEModel, nodeSetName: string, nodeIds: Set<number>): void {
+function addNodeSetNodes(model: NormalizedOpenFEAModel, nodeSetName: string, nodeIds: Set<number>): void {
   const nodeSet = model.nodeSets.find((candidate) => candidate.name === nodeSetName);
   if (!nodeSet) return;
   for (const node of nodeSet.nodes) nodeIds.add(node);
 }
 
-function nodeSelectionSummary(model: NormalizedOpenCAEModel, nodeIds: Set<number>): NodeSelectionSummary {
+function nodeSelectionSummary(model: NormalizedOpenFEAModel, nodeIds: Set<number>): NodeSelectionSummary {
   if (nodeIds.size === 0) {
     return { count: 0, centroid: [0, 0, 0] };
   }
@@ -945,12 +945,12 @@ function isFixedBoundaryCondition(boundaryCondition: BoundaryConditionJson): boo
   return boundaryCondition.type === "fixed";
 }
 
-function appliedLoadVectorForStep(model: NormalizedOpenCAEModel, loadNames: string[]): [number, number, number] {
+function appliedLoadVectorForStep(model: NormalizedOpenFEAModel, loadNames: string[]): [number, number, number] {
   return assembleNodalLoadVectorWithDiagnostics(model, loadNames).diagnostics.totalAppliedForce;
 }
 
 function stressBinsByBeamAxis(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   surfaceMesh: SolverSurfaceMesh,
   values: number[],
   binCount: number
@@ -991,7 +991,7 @@ function stressBinsByBeamAxis(
 }
 
 function stressVisualizationWarnings(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   bins: StressBeamAxisBin[],
   fixedSelection: NodeSelectionSummary,
   loadSelection: NodeSelectionSummary
@@ -1039,7 +1039,7 @@ export function hasAbruptStressDiscontinuity(bins: StressBeamAxisBin[]): boolean
 }
 
 function loadSupportMappingLooksSuspicious(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   fixedSelection: NodeSelectionSummary,
   loadSelection: NodeSelectionSummary
 ): boolean {
@@ -1058,7 +1058,7 @@ function loadSupportMappingLooksSuspicious(
   return fixedEndDistance > span * 0.25 || loadEndDistance > span * 0.25;
 }
 
-function modelBounds(model: NormalizedOpenCAEModel): { min: [number, number, number]; max: [number, number, number] } {
+function modelBounds(model: NormalizedOpenFEAModel): { min: [number, number, number]; max: [number, number, number] } {
   const min: [number, number, number] = [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY];
   const max: [number, number, number] = [Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NEGATIVE_INFINITY];
   for (let node = 0; node < model.counts.nodes; node += 1) {
@@ -1080,7 +1080,7 @@ function dominantBoundsAxis(bounds: { min: [number, number, number]; max: [numbe
   return spans[0] >= spans[1] && spans[0] >= spans[2] ? 0 : spans[1] >= spans[2] ? 1 : 2;
 }
 
-function modelCoordinateAt(model: NormalizedOpenCAEModel, node: number, axis: 0 | 1 | 2): number {
+function modelCoordinateAt(model: NormalizedOpenFEAModel, node: number, axis: 0 | 1 | 2): number {
   const value = model.nodes.coordinates[node * 3 + axis];
   if (!Number.isFinite(value)) {
     throw new Error(`Model node ${node} has non-finite coordinate ${axis}.`);
@@ -1092,11 +1092,11 @@ function distance(a: [number, number, number], b: [number, number, number]): num
   return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 }
 
-function lengthToMmScale(model: NormalizedOpenCAEModel): number {
+function lengthToMmScale(model: NormalizedOpenFEAModel): number {
   return model.coordinateSystem.solverUnits === "mm-N-s-MPa" ? 1 : 1000;
 }
 
-function lengthToMScale(model: NormalizedOpenCAEModel): number {
+function lengthToMScale(model: NormalizedOpenFEAModel): number {
   return model.coordinateSystem.solverUnits === "mm-N-s-MPa" ? 1 / 1000 : 1;
 }
 

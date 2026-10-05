@@ -1,0 +1,2407 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, test, vi } from "vitest";
+import { bracketDisplayModel } from "@openfea/samples";
+import type { DisplayModel, Project, ResultField, ResultSummary, Study } from "@openfea/schema";
+import { dynamicSettingConstraintMessage, editableNumberCommitValue, playbackPeakMarkerPercent, resultModeExplanation, RightPanel, rangeProgressPercent } from "./RightPanel";
+import type { StepId } from "./StepBar";
+import { resultExportMenuItems } from "./panels/ResultsPanels";
+import { readinessForStudy } from "../runReadiness";
+import { StudySchema } from "@openfea/schema";
+import { SUPPORTED_GEOMETRY_FORMAT_LABEL } from "../geometryFormats";
+import type { StepGeometryMetadata } from "../lib/api";
+
+const rightPanelSource = [
+  "RightPanel.tsx",
+  "panels/ModelPanel.tsx",
+  "panels/MaterialPanel.tsx",
+  "panels/SupportsLoadsPanels.tsx",
+  "panels/MeshPanel.tsx",
+  "panels/RunPanel.tsx",
+  "panels/ResultsPanels.tsx",
+  "panels/PanelChrome.tsx",
+  "panels/RightPanelProps.tsx"
+].map((relative) => readFileSync(resolve(__dirname, relative), "utf8")).join("\n");
+
+const project: Project = {
+  id: "project-1",
+  name: "Payload project",
+  schemaVersion: "0.1.0",
+  unitSystem: "SI",
+  geometryFiles: [],
+  studies: [],
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z"
+};
+
+const displayModel: DisplayModel = {
+  id: "display-uploaded",
+  name: "Fixture imported body",
+  bodyCount: 1,
+  faces: [{ id: "face-top", label: "Top face", color: "#4da3ff", center: [0, 0, 0], normal: [0, 0, 1], stressValue: 0 }]
+};
+
+const study: Study = {
+  id: "study-1",
+  projectId: "project-1",
+  name: "Static Stress",
+  type: "static_stress",
+  geometryScope: [{ bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "Fixture body" }],
+  materialAssignments: [],
+  namedSelections: [{
+    id: "selection-top",
+    name: "Top face",
+    entityType: "face",
+    geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "face-top", label: "Top face" }],
+    fingerprint: "face-top"
+  }],
+  contacts: [],
+  constraints: [],
+  loads: [],
+  meshSettings: { preset: "medium", status: "not_started" },
+  solverSettings: {},
+  validation: [],
+  runs: []
+};
+
+const resultSummary: ResultSummary = {
+  maxStress: 0,
+  maxStressUnits: "MPa",
+  maxDisplacement: 0,
+  maxDisplacementUnits: "mm",
+  safetyFactor: 0,
+  reactionForce: 0,
+  reactionForceUnits: "N"
+};
+
+function renderPanel(activeStep: StepId, overrides: Partial<Parameters<typeof RightPanel>[0]> = {}) {
+  return renderToStaticMarkup(
+    <RightPanel
+      activeStep={activeStep}
+      project={project}
+      displayModel={displayModel}
+      study={study}
+      selectedFace={null}
+      viewMode="model"
+      resultMode="stress"
+      showDeformed={false}
+      showDimensions={false}
+      stressExaggeration={1}
+      resultSummary={resultSummary}
+      runProgress={0}
+      runTiming={null}
+      sampleModel="bracket"
+      sampleAnalysisType="static_stress"
+      draftLoadType="force"
+      draftLoadValue={500}
+      draftLoadDirection="-Z"
+      selectedLoadPoint={null}
+      selectedPayloadObject={null}
+      onFitView={vi.fn()}
+      onRotateModel={vi.fn()}
+      onResetModelOrientation={vi.fn()}
+      onLoadSample={vi.fn()}
+      onUploadModel={vi.fn()}
+      onSampleModelChange={vi.fn()}
+      onSampleAnalysisTypeChange={vi.fn()}
+      onViewModeChange={vi.fn()}
+      onResultModeChange={vi.fn()}
+      onToggleDeformed={vi.fn()}
+      onToggleDimensions={vi.fn()}
+      onStressExaggerationChange={vi.fn()}
+      onAssignMaterial={vi.fn()}
+      onAddSupport={vi.fn()}
+      onUpdateSupport={vi.fn()}
+      onRemoveSupport={vi.fn()}
+      onDraftLoadTypeChange={vi.fn()}
+      onDraftLoadValueChange={vi.fn()}
+      onDraftLoadDirectionChange={vi.fn()}
+      onAddLoad={vi.fn()}
+      onUpdateLoad={vi.fn()}
+      onPreviewLoadEdit={vi.fn()}
+      onRemoveLoad={vi.fn()}
+      onGenerateMesh={vi.fn()}
+      onCancelMesh={vi.fn()}
+      onRunSimulation={vi.fn()}
+      onCancelSimulation={vi.fn()}
+      canRunSimulation={false}
+      missingRunItems={[]}
+      resultPlaybackPlaying={false}
+      resultPlaybackFps={12}
+      resultPlaybackReverseLoop={false}
+      onResultPlaybackToggle={vi.fn()}
+      onResultPlaybackFpsChange={vi.fn()}
+      onResultPlaybackReverseLoopChange={vi.fn()}
+      onStepSelect={vi.fn()}
+      runReadiness={readinessForStudy(overrides.study ?? study)}
+      {...overrides}
+    />
+  );
+}
+
+test.each(["static_stress", "dynamic_structural", "steady_state_thermal"] as const)("labels the new-load type selector for %s", (type) => {
+  const html = renderPanel("loads", { study: StudySchema.parse({ ...study, type }) });
+  const loadTypeField = html.match(/<label class="field"><span class="field-label-with-help">Load type[\s\S]*?<\/label>/)?.[0];
+
+  expect(loadTypeField).toBeDefined();
+  expect(loadTypeField).toContain("<select");
+  expect(loadTypeField).toContain(type === "steady_state_thermal" ? "Surface heat flux" : "Face force (total)");
+});
+
+test("explains the solver peak separately from the plotted stress range without changing either", () => {
+  const overrides = {
+    resultSummary: { ...resultSummary, maxStress: 45.2 },
+    resultColorScaleControl: {
+      setting: { rangeMode: "auto" as const, bands: "continuous" as const },
+      automaticMin: 0.729822,
+      automaticMax: 39.7469,
+      displayMin: 0.729822,
+      displayMax: 39.7469,
+      units: "MPa"
+    }
+  };
+  const html = renderPanel("results", overrides);
+
+  expect(html).toContain("45.2 MPa");
+  expect(html).toContain("Automatic run range: 0.73–39.75 MPa");
+  expect(html).toContain("peak von Mises stress");
+  expect(html).toContain("Surface averaging or smoothing can lower the legend maximum");
+  expect(renderPanel("results", { ...overrides, resultMode: "displacement" })).not.toContain("Surface averaging or smoothing");
+});
+
+test("renders per-field range and band controls from the shared color-scale contract", () => {
+  const html = renderPanel("results", {
+    viewMode: "results",
+    resultColorScale: { type: "stress", component: "von_mises", min: 12, max: 48, bands: "bands8" },
+    resultColorScaleControl: {
+      setting: { rangeMode: "manual", bands: "bands8", manualMin: 12, manualMax: 48 },
+      automaticMin: 0,
+      automaticMax: 60,
+      displayMin: 12,
+      displayMax: 48,
+      units: "MPa"
+    },
+    onResultColorScaleSettingChange: vi.fn()
+  });
+
+  expect(html).toContain("Color scale");
+  expect(html).toContain('aria-pressed="true">Manual');
+  expect(html).toContain('aria-label="Color scale minimum"');
+  expect(html).toContain('value="12"');
+  expect(html).toContain('aria-pressed="true">8 bands');
+  expect(html).toContain("Automatic run range: 0–60 MPa");
+  expect(html).toContain("linear-gradient(90deg");
+});
+
+test("keeps sample model and analysis choices as drafts until confirmation", () => {
+  expect(rightPanelSource).toContain("const [pendingAnalysisType, setPendingAnalysisType]");
+  expect(rightPanelSource).toContain("onLoadSample(pendingSampleModel, pendingAnalysisType)");
+  expect(rightPanelSource).toContain("onClick={() => handleAnalysisSelect(option.id)}");
+  expect(rightPanelSource).toContain("setConfirmSampleLoad(true);");
+  expect(rightPanelSource).not.toContain("onLoadSample(sample, sampleAnalysisType)");
+});
+
+test("shows tensor-backed stress measures and hides them for legacy fields", () => {
+  const tensorField: ResultField = {
+    id: "stress", runId: "run", type: "stress", component: "von_mises", location: "node",
+    values: [100], tensorValues: [100, 0, 0, 0, 0, 0], min: 100, max: 100, units: "MPa"
+  };
+  const tensorHtml = renderPanel("results", { resultFields: [tensorField] });
+  expect(tensorHtml).toContain("Stress measure");
+  expect(tensorHtml).toContain("σ₁");
+  expect(tensorHtml).toContain("σ₃");
+  expect(tensorHtml).toContain("Max shear");
+
+  const legacyHtml = renderPanel("results", { resultFields: [{ ...tensorField, tensorValues: undefined }] });
+  expect(legacyHtml).toContain("Von Mises");
+  expect(legacyHtml).not.toContain("σ₁");
+});
+
+function uploadedStepProject(status: StepGeometryMetadata["status"], message?: string): Project {
+  return {
+    ...project,
+    geometryFiles: [{
+      id: "geom-upload",
+      projectId: project.id,
+      filename: "fixture.step",
+      localPath: "uploads/fixture.step",
+      artifactKey: "project-1/geometry/uploaded-display.json",
+      status: "ready",
+      metadata: {
+        source: "local-upload",
+        stepGeometry: { status, message }
+      }
+    }]
+  };
+}
+
+describe("RightPanel advanced loads", () => {
+  const advancedStudy: Study = {
+    ...study,
+    namedSelections: [
+      ...study.namedSelections,
+      {
+        id: "selection-bottom",
+        name: "Bottom face",
+        entityType: "face",
+        geometryRefs: [{ bodyId: "body-uploaded", entityType: "face", entityId: "face-bottom", label: "Bottom face" }],
+        fingerprint: "face-bottom"
+      },
+      {
+        id: "selection-body",
+        name: "Fixture body",
+        entityType: "body",
+        geometryRefs: [{ bodyId: "body-uploaded", entityType: "body", entityId: "body-uploaded", label: "Fixture body" }],
+        fingerprint: "body-uploaded"
+      }
+    ]
+  };
+
+  test("shows an explicit remote point and distributed-wrench disclaimer", () => {
+    const html = renderPanel("loads", {
+      study: advancedStudy,
+      selectedFace: displayModel.faces[0]!,
+      selectedLoadPoint: [1, 2, 3],
+      draftLoadType: "remote_force"
+    });
+
+    expect(html).toContain("Remote point coordinates");
+    expect(html).toContain("not a rigid MPC coupling");
+    expect(html).toContain("Surface traction");
+    expect(html).toContain("Volume force");
+  });
+
+  test("shows the opposing-face selector and bonded-linear warning for preload", () => {
+    const html = renderPanel("loads", {
+      study: advancedStudy,
+      selectedFace: displayModel.faces[0]!,
+      selectedLoadPoint: [0, 0, 0],
+      draftLoadType: "bolt_preload"
+    });
+
+    expect(html).toContain("Opposing face");
+    expect(html).toContain("Bottom face");
+    expect(html).toContain("Bonded-linear approximation only");
+  });
+});
+describe("RightPanel result probes", () => {
+  test("lists raw engineering readings with removal, clear, and cap feedback", () => {
+    const html = renderPanel("results", {
+      resultProbes: [{
+        id: "probe-1",
+        anchor: { kind: "sample", point: [1, 2, 3] },
+        point: [1, 2, 3],
+        value: 0.000456789,
+        units: "MPa",
+        governingVariantName: "Service"
+      }],
+      resultProbeLimitReached: true,
+      onRemoveResultProbe: vi.fn(),
+      onClearResultProbes: vi.fn()
+    });
+
+    expect(html).toContain("Pinned probes");
+    expect(html).toContain("0.0004568 MPa");
+    expect(html).toContain("Governed near probe by Service");
+    expect(html).toContain("Clear all");
+    expect(html).toContain('aria-label="Remove probe 1"');
+    expect(html).toContain("Probe limit reached. Remove a pin to place another.");
+  });
+});
+
+describe("RightPanel open section", () => {
+  test("shows axis, normalized offset, and flip controls when the plane is active", () => {
+    const html = renderPanel("model", {
+      sectionPlane: { enabled: true, axis: "y", offset: 0.37, flipped: false },
+      onSectionPlaneChange: vi.fn()
+    });
+
+    expect(html).toContain("Open section");
+    expect(html).toContain("Close section");
+    expect(html).toContain("Normalized offset · 37%");
+    expect(html).toContain("Flip cut side");
+    expect(html).toContain("Section plane axis");
+    expect(html).toContain('aria-pressed="false"');
+  });
+});
+
+describe("RightPanel run variants and load cases", () => {
+  test("renders case assignment, static combinations, and enabled controls", () => {
+    const caseStudy: Study = {
+      ...study,
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+      loadCases: [
+        { id: "case-service", name: "Service", enabled: true, loadIds: ["load-1"] },
+        { id: "case-reverse", name: "Reverse", enabled: true, loadIds: [] }
+      ],
+      loadCombinations: [{
+        id: "combination-net",
+        name: "Net signed",
+        enabled: true,
+        factors: [{ caseId: "case-service", factor: 1 }, { caseId: "case-reverse", factor: -1 }]
+      }]
+    };
+
+    const html = renderPanel("loads", { study: caseStudy, onLoadCasesChange: vi.fn() });
+
+    expect(html).toContain("Load cases");
+    // The section explains itself like every other configuration option.
+    expect(html).toContain("Load cases help");
+    expect(html).toContain("Service");
+    expect(html).toContain("Reverse");
+    expect(html).toContain("Net signed");
+    expect(html).toContain("Add load case");
+    expect(html).toContain("Add combination");
+    expect(html).toContain("Case</span><select");
+  });
+
+  test("shows the active case, combination, and envelope in the results selector", () => {
+    const variants = [
+      { id: "case:service", name: "Service", kind: "case" as const, caseId: "case-service" },
+      { id: "combination:net", name: "Net signed", kind: "combination" as const, combinationId: "combination-net" },
+      { id: "envelope", name: "Envelope", kind: "envelope" as const }
+    ];
+
+    const html = renderPanel("results", {
+      resultVariants: variants,
+      activeResultVariantId: "combination:net",
+      onResultVariantChange: vi.fn()
+    });
+
+    expect(html).toContain("Run variant");
+    expect(html).toContain("Service");
+    expect(html).toContain("Net signed");
+    // The kind suffix is only added when the name does not already say it.
+    expect(html).toContain(">Envelope<");
+    expect(html).not.toContain("Envelope · envelope");
+    expect(html).toContain('value="combination:net" selected=""');
+  });
+});
+describe("RightPanel payload mass controls", () => {
+  test("offers the opposite face normal as a load direction", () => {
+    const markup = renderPanel("loads");
+
+    expect(markup).toContain('<option value="Opposite normal">Opposite face normal</option>');
+  });
+
+  test("maps range slider values to a full visual fill at the maximum", () => {
+    expect(rangeProgressPercent(1, 1, 4)).toBe(0);
+    expect(rangeProgressPercent(2.5, 1, 4)).toBe(50);
+    expect(rangeProgressPercent(4, 1, 4)).toBe(100);
+    expect(rangeProgressPercent(5, 1, 4)).toBe(100);
+  });
+
+  test("sets the result exaggeration slider fill to the current value", () => {
+    const markup = renderPanel("results", { stressExaggeration: 4 });
+
+    expect(markup).toContain("--range-progress:100%");
+  });
+
+  test("shows result provenance labels in result metadata", () => {
+    const coreHtml = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: { kind: "opencae_core_fea", solver: "opencae-core-cloud", solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" }
+      }
+    });
+
+    expect(coreHtml).toContain("OpenCAE Core Cloud");
+    expect(coreHtml).not.toContain("Core solver version");
+    expect(coreHtml).not.toContain("Core model schema version");
+    expect(coreHtml).toContain("Mesh source");
+    expect(coreHtml).toContain("Actual volume mesh");
+    expect(coreHtml).toContain("Solver method");
+    expect(coreHtml).toContain("sparse_static");
+    expect(coreHtml).toContain("Runner");
+    expect(coreHtml).toContain("cloud container");
+    expect(coreHtml).not.toContain("Local fallback");
+  });
+
+  test("uses the concise local result label and places legend labels at their matching ends", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-sparse-tet",
+          runnerVersion: "browser-0.2.0",
+          meshSource: "actual_volume_mesh",
+          resultSource: "computed",
+          units: "mm-N-s-MPa"
+        }
+      }
+    });
+
+    expect(html).toContain("Local (in-browser)");
+    expect(html).not.toContain("OpenFEA Core Local (in-browser)");
+    expect(html).toContain('<div class="legend"><small>Low</small><span></span><small>High</small></div>');
+  });
+
+  test("shows the maximum force at a factor of safety of one in the reverse check", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        maxStress: 142,
+        maxStressUnits: "MPa",
+        maxDisplacement: 0.184,
+        maxDisplacementUnits: "mm",
+        safetyFactor: 1.8,
+        reactionForce: 500,
+        reactionForceUnits: "N",
+        provenance: {
+          kind: "opencae_core_fea",
+          solver: "opencae-core-sparse-tet",
+          meshSource: "actual_volume_mesh",
+          resultSource: "computed",
+          units: "mm-N-s-MPa"
+        }
+      }
+    });
+
+    expect(html).toContain("Max total load");
+    expect(html).toContain("600 N");
+    expect(html).toContain("Max force at 1.0 FoS · 900 N");
+  });
+
+  test("renders a missing-unit diagnostic instead of undefined result units", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        maxStress: 39,
+        maxStressUnits: undefined,
+        maxDisplacement: 0.5,
+        maxDisplacementUnits: undefined,
+        reactionForce: 500,
+        reactionForceUnits: undefined
+      } as unknown as ResultSummary,
+      resultFields: [{
+        id: "field-stress",
+        runId: "run-missing-units",
+        type: "stress",
+        location: "element",
+        values: [39],
+        min: 39,
+        max: 39,
+        units: undefined
+      } as unknown as ResultField]
+    });
+
+    expect(html).toContain("Unit missing");
+    expect(html).not.toContain("undefined");
+    expect(html).not.toContain("Max total load");
+  });
+
+  test("shows legacy cloud results as read-only historical provenance", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        provenance: { kind: "opencae_core_fea", solver: ["cloudflare-fea", "calculix"].join("-"), solverVersion: "0.1.0", meshSource: "actual_volume_mesh", resultSource: "computed", units: "mm-N-s-MPa" }
+      }
+    });
+
+    expect(html).toContain("Legacy backend result");
+    expect(html).toContain("This result is historical and read-only. Re-run locally in this browser for current production results.");
+  });
+
+  test("blocks preview deformation and reverse-check capacity for complex geometry", () => {
+    const html = renderPanel("results", {
+      displayModel: bracketDisplayModel,
+      showDeformed: true,
+      study: {
+        ...study,
+        loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }]
+      },
+      resultSummary: {
+        ...resultSummary,
+        reactionForce: 0,
+        provenance: { kind: "local_estimate", solver: "opencae-core-preview-sdof", solverVersion: "0.1.0", meshSource: "structured_block_proxy", resultSource: "computed_preview", units: "mm-N-s-MPa" }
+      },
+      resultFields: [{
+        id: "field-displacement",
+        runId: "run-preview",
+        type: "displacement",
+        location: "node",
+        values: [0, 0.1],
+        min: 0,
+        max: 0.1,
+        units: "mm",
+        provenance: { kind: "local_estimate", solver: "opencae-core-preview-sdof", solverVersion: "0.1.0", meshSource: "structured_block_proxy", resultSource: "computed_preview", units: "mm-N-s-MPa" }
+      }]
+    });
+
+    expect(html).toContain("OpenFEA Core Preview");
+    expect(html).toContain("OpenFEA Core Preview mesh does not match this geometry; deformed shape disabled.");
+    expect(html).toContain("Reaction force unavailable or invalid for this result.");
+    expect(html).toContain('type="checkbox" aria-label="Deformed shape" disabled=""');
+    expect(html).not.toContain("Max total load");
+  });
+
+  test("shows the run progress percentage inside the progress bar", () => {
+    const markup = renderPanel("run", { runProgress: 88 });
+
+    expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('aria-valuenow="88"');
+    expect(markup).toContain('<strong class="progress-label">88%</strong>');
+    expect(markup).not.toContain('<div class="info-row"><span>Progress</span><strong>88%</strong></div>');
+  });
+
+  test("hides the progress bar when no run is in flight", () => {
+    // An idle panel used to carry a permanent empty 0% trough, and a finished one a
+    // stale 100%. The bar belongs to a run, so it renders only while one is running.
+    expect(renderPanel("run", { runProgress: 0 })).not.toContain('role="progressbar"');
+    expect(renderPanel("run", { runProgress: 100 })).not.toContain('role="progressbar"');
+    expect(renderPanel("run", { runProgress: 42 })).toContain('role="progressbar"');
+  });
+
+  test("reports the completed solve time once it is no longer an estimate", () => {
+    const finished = renderPanel("run", { runProgress: 0, solveElapsedMs: 4200 });
+
+    expect(finished).toContain("Solved in");
+    expect(finished).toContain("4s");
+    // While the run is still in flight the live Elapsed row owns that number instead.
+    expect(renderPanel("run", { runProgress: 42, solveElapsedMs: 4200 })).not.toContain("Solved in");
+    expect(renderPanel("run", { runProgress: 0 })).not.toContain("Solved in");
+  });
+
+  test("does not show an assigned material before one is applied", () => {
+    const html = renderPanel("material", { study: { ...study, materialAssignments: [] } });
+
+    // The card states the gap and the only way to close it is the apply action.
+    expect(html).toContain("Not applied yet · no material assigned");
+    expect(html).toContain('class="base-material-status pending"');
+    expect(html).toContain("Apply material &amp; process");
+    expect(html).not.toContain("bracket · all bodies");
+  });
+
+  test("turns the run simulation button into the only stop action while running", () => {
+    const markup = renderPanel("run", { runProgress: 42 });
+
+    expect(markup).toContain('aria-label="Stop simulation"');
+    expect(markup).toContain("Stop simulation");
+    expect(markup).not.toContain("Run simulation");
+    expect(markup).not.toContain("Stop processing");
+  });
+
+  test("shows the estimated simulation calculation time while running", () => {
+    const markup = renderPanel("run", {
+      runProgress: 42,
+      runTiming: { elapsedMs: 1800, estimatedDurationMs: 6200, estimatedRemainingMs: 4400 }
+    });
+
+    expect(markup).toContain("Time remaining");
+    expect(markup).toContain("About 4s remaining");
+    expect(markup).toContain("Elapsed");
+    expect(markup).toContain("2s");
+  });
+
+  test("skips loads for modal readiness and shows mode-count settings", () => {
+    const modalStudy: Study = { ...study, name: "Modal Analysis", type: "modal_analysis", solverSettings: { modeCount: 6 } };
+    const markup = renderPanel("run", { study: modalStudy });
+    expect(markup).toContain("Requested modes");
+    expect(markup).toContain("Modal settings");
+    expect(markup).not.toContain("Load added");
+    expect(markup).toContain("block_shift_invert_modal");
+  });
+
+  test("renders a selectable modal table and phase playback", () => {
+    const modalStudy: Study = { ...study, name: "Modal Analysis", type: "modal_analysis", solverSettings: { modeCount: 2 } };
+    const modalSummary: ResultSummary = {
+      analysisType: "modal_analysis",
+      requestedModeCount: 2,
+      convergedModeCount: 2,
+      modes: [
+        { modeIndex: 1, frequencyHz: 81.5, eigenvalue: 262_188, scaledResidual: 1e-8, fieldId: "mode-1" },
+        { modeIndex: 2, frequencyHz: 220, eigenvalue: 1_910_751, scaledResidual: 2e-8, fieldId: "mode-2" }
+      ]
+    };
+    const modalFields: ResultField[] = [0, 1].map((frameIndex) => ({
+      id: `mode-1-phase-${frameIndex}`,
+      runId: "run-modal",
+      type: "mode_shape",
+      location: "node",
+      values: [1],
+      vectors: [[1, 0, 0]],
+      min: 0,
+      max: 1,
+      units: "normalized",
+      modeIndex: 1,
+      frequencyHz: 81.5,
+      eigenvalue: 262_188,
+      scaledResidual: 1e-8,
+      frameIndex,
+      timeSeconds: frameIndex / 2
+    }));
+    const markup = renderPanel("results", { study: modalStudy, resultSummary: modalSummary, resultFields: modalFields, resultMode: "mode_shape", selectedModeIndex: 1, onExportResultData: vi.fn() });
+    expect(markup).toContain("Mode 1");
+    expect(markup).toContain("81.5 Hz");
+    expect(markup).toContain("Phase");
+    expect(markup).toContain("visualization-only");
+    expect(markup).toContain('role="group" aria-label="Converged modes"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).not.toContain('role="listitem"');
+    expect(markup).toContain("Block shift-invert");
+    // Modal exports share the Results panel's Export menu; its items render only
+    // while open, so the labels are checked on the builder that feeds it.
+    expect(markup).toContain("export-menu-trigger");
+    expect(resultExportMenuItems({ onExportResultData: vi.fn() }, "mode").map((item) => item.label)).toEqual(["Selected-mode CSV", "Selected-mode VTU"]);
+  });
+
+  test("renders thermal results as the final workflow step with readable metrics", () => {
+    const thermalStudy: Study = { ...study, name: "Steady Thermal", type: "steady_state_thermal" };
+    const html = renderPanel("results", {
+      study: thermalStudy,
+      resultMode: "temperature",
+      resultSummary: {
+        analysisType: "steady_state_thermal",
+        minTemperature: 20,
+        maxTemperature: 24.830578943767595,
+        temperatureUnits: "°C",
+        maxHeatFlux: 19207.968569501394,
+        heatFluxUnits: "W/m²",
+        appliedHeat: 6.120000000000002,
+        generatedHeat: 0,
+        reactionHeat: -6.120000000364483,
+        heatRateUnits: "W",
+        energyBalanceRelativeError: 5.955570096632689e-11
+      }
+    });
+
+    expect(html).toContain("Thermal results");
+    expect(html).toContain("Step 7 of 7");
+    expect(html).toContain('class="active" aria-pressed="true">Temperature</button>');
+    expect(html).toContain('aria-pressed="false">Heat flux</button>');
+    expect(html).toContain("24.83 °C");
+    expect(html).toContain("19,208 W/m²");
+    expect(html).toContain("5.956e-9 %");
+  });
+
+  test("states a mesh failure beside the control that produced it", () => {
+    // The reason used to survive only as a status-bar string and one line in a collapsed
+    // drawer: the progress card vanished and the Mesh panel returned to its idle state.
+    const failed = renderPanel("mesh", { meshError: "Element quality gate failed: min Jacobian 0.01." });
+
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("Element quality gate failed: min Jacobian 0.01.");
+    expect(failed).toContain("Try meshing again");
+    // Not shown while a mesh is actually running, and not shown when nothing failed.
+    expect(renderPanel("mesh")).not.toContain("Try meshing again");
+    expect(renderPanel("mesh", {
+      meshError: "Element quality gate failed.",
+      meshPhaseProgress: { phase: "mesh", phaseIndex: 3, phaseCount: 8, message: "Meshing volume..." }
+    })).not.toContain("Try meshing again");
+  });
+
+  test("shows the canonical thermal solver method on the run step", () => {
+    const thermalStudy: Study = { ...study, name: "Steady Thermal", type: "steady_state_thermal" };
+    expect(renderPanel("run", { study: thermalStudy })).toContain("sparse_steady_thermal");
+  });
+
+  test("describes the currently displayed result quantity", () => {
+    expect(resultModeExplanation("stress")).toBe("Red areas have higher stress. Blue areas have lower stress.");
+    expect(resultModeExplanation("displacement")).toBe("Red areas have higher displacement magnitude. Blue areas have lower displacement magnitude.");
+    expect(resultModeExplanation("velocity")).toBe("Red areas have higher velocity magnitude. Blue areas have lower velocity magnitude.");
+    // SAFETY_RAMP puts red at low factors of safety; the sentence must agree with the ramp.
+    expect(resultModeExplanation("safety_factor")).toBe("Red areas are closest to yield (low safety factor). Green areas have the most margin.");
+  });
+
+  test("does not show the selected face as a persistent right-panel banner", () => {
+    const markup = renderPanel("results", { selectedFace: displayModel.faces[0] ?? null });
+
+    expect(markup).not.toContain("Face selected:");
+    expect(markup).not.toContain("selection-readout");
+  });
+
+  test("counts modal steps against the rail the user can actually see", () => {
+    // A modal study has no loads step: StepBar and the Back/Next pair both filter it out,
+    // but the eyebrow counted the unfiltered list against a hardcoded 7, so the Mesh
+    // panel read "Step 5 of 7" beside a six-item rail.
+    const modalStudy: Study = { ...study, name: "Modal", type: "modal_analysis", solverSettings: { modeCount: 6 } };
+
+    expect(renderPanel("mesh", { study: modalStudy })).toContain(">Step 4 of 6<");
+    expect(renderPanel("run", { study: modalStudy })).toContain(">Step 5 of 6<");
+    expect(renderPanel("supports", { study: modalStudy })).toContain(">Step 3 of 6<");
+    // Everything that keeps its loads step still counts to seven.
+    expect(renderPanel("mesh")).toContain(">Step 5 of 7<");
+  });
+
+  test("places every step title and step number on the same header row", () => {
+    const steps: Array<{ id: StepId; title: string; step: number }> = [
+      { id: "model", title: "Model", step: 1 },
+      { id: "material", title: "Material", step: 2 },
+      { id: "supports", title: "Supports", step: 3 },
+      { id: "loads", title: "Loads", step: 4 },
+      { id: "mesh", title: "Mesh", step: 5 },
+      { id: "run", title: "Run", step: 6 },
+      { id: "results", title: "Results", step: 7 }
+    ];
+
+    for (const item of steps) {
+      const html = renderPanel(item.id);
+      expect(html).toContain(`<div class="panel-title-row"><h2>${item.title}</h2><div class="panel-eyebrow">Step ${item.step} of 7</div></div>`);
+    }
+  });
+
+  test("does not expose report generation from the results panel", () => {
+    const html = renderPanel("results");
+
+    expect(html).not.toContain("Generate report");
+    expect(html).not.toContain("Report");
+  });
+
+  test("hides large contextual tips until the help trigger is opened", () => {
+    const modelHtml = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-sample",
+          projectId: project.id,
+          filename: "bracket-demo.step",
+          localPath: "examples/bracket-demo/bracket-demo.step",
+          artifactKey: "project-1/geometry/bracket-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "bracket" }
+        }]
+      }
+    });
+    const supportsHtml = renderPanel("supports");
+    const loadsHtml = renderPanel("loads");
+
+    expect(modelHtml).not.toContain("<strong>Overall dimensions</strong>");
+    expect(modelHtml).not.toContain("Shows the model bounding size");
+    expect(supportsHtml).not.toContain("<strong>Support placement</strong>");
+    expect(supportsHtml).not.toContain("Select the actual model face");
+    expect(loadsHtml).not.toContain("<strong>Load placement</strong>");
+    expect(loadsHtml).not.toContain("Click the exact point for force");
+    // Dimensions, section, fit and mesh share one View section whose help covers all four;
+    // the dimensions-specific help sits on the panel the Show dimensions button opens.
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="View tools help"');
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Support placement help"');
+    expect(`${modelHtml}${supportsHtml}${loadsHtml}`).toContain('aria-label="Load placement help"');
+  });
+
+  test("renders sample analysis selection for sample projects", () => {
+    const html = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-sample",
+          projectId: project.id,
+          filename: "bracket-demo.step",
+          localPath: "examples/bracket-demo/bracket-demo.step",
+          artifactKey: "project-1/geometry/bracket-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "bracket", sampleAnalysisType: "dynamic_structural" }
+        }]
+      },
+      sampleAnalysisType: "dynamic_structural"
+    });
+
+    expect(html).toContain("Analysis type");
+    expect(html).toContain("Bracket Demo");
+    expect(html).toContain("Beam Demo");
+    expect(html).toContain("Cantilever Demo");
+    expect(html).toContain("Static");
+    expect(html).toContain("Dynamic");
+    expect(html).toContain("Modal");
+    expect(html).toContain("Thermal");
+    expect(html).toContain("sample-analysis-type-grid");
+    expect(html).toContain("Load dynamic sample");
+    expect(html).toContain("Dynamic Structural");
+  });
+
+  test("renders dynamic run settings only for dynamic structural studies", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    const dynamicHtml = renderPanel("run", { study: dynamicStudy });
+    expect(dynamicHtml).toContain("Start time");
+    expect(dynamicHtml).toContain("End time");
+    expect(dynamicHtml).toContain("Output interval");
+    expect(dynamicHtml).toContain("Load profile");
+    expect(dynamicHtml).toContain("Ramp to full load");
+    expect(dynamicHtml).toContain("Step load");
+    expect(dynamicHtml).toContain("Quasi-static ramp");
+    expect(dynamicHtml).toContain("Half-sine pulse");
+    expect(dynamicHtml).toContain("Ramp: load starts at 0 and reaches full value at end time.");
+    expect(dynamicHtml).toContain("Estimated frames");
+    expect(renderPanel("run")).not.toContain("Start time");
+  });
+
+  test("warns on the analysis-type button before a switch that clears the setup", () => {
+    const support = (id: string): Study["constraints"][number] => ({ id, type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" });
+    const load: Study["loads"][number] = { id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" };
+    const html = renderPanel("run", { study: { ...study, constraints: [support("support-1"), support("support-2")], loads: [load] } });
+    // Crossing into thermal clears the structural setup; the button says so before the click.
+    expect(html).toMatch(/title="Switching to Thermal clears 2 supports and 1 load\. Click twice to confirm\."[^>]*>Thermal</);
+    // Staying structural loses nothing, so those buttons carry no warning.
+    expect(html).not.toMatch(/title="Switching to Dynamic/);
+    expect(html).not.toMatch(/title="Switching to Modal/);
+    // Nothing set up yet: nothing to warn about.
+    expect(renderPanel("run")).not.toContain("Switching to Thermal");
+  });
+
+  test("offers an analysis-type switch on the run panel reflecting the study type", () => {
+    const staticHtml = renderPanel("run");
+    expect(staticHtml).toContain('aria-label="Analysis type"');
+    expect(staticHtml).toContain('class="segmented analysis-type run-analysis-type"');
+    expect(staticHtml).toMatch(/aria-pressed="true"[^>]*>Static</);
+    expect(staticHtml).toMatch(/aria-pressed="false"[^>]*>Dynamic</);
+
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic Structural",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const dynamicHtml = renderPanel("run", { study: dynamicStudy });
+    expect(dynamicHtml).toMatch(/aria-pressed="true"[^>]*>Dynamic</);
+    expect(dynamicHtml).toMatch(/aria-pressed="false"[^>]*>Static</);
+  });
+
+  test("renders selected dynamic load profile helper text", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "quasi_static"
+      }
+    };
+
+    const dynamicHtml = renderPanel("run", { study: dynamicStudy });
+
+    expect(dynamicHtml).toContain("Quasi-static: smooth eased ramp (3s²−2s³) that reduces inertial effects; not a step load.");
+  });
+
+  test("keeps partial dynamic number edits from committing a coerced zero", () => {
+    expect(editableNumberCommitValue("0.00", 0.0001)).toBeNull();
+    expect(editableNumberCommitValue("", 0.0001)).toBeNull();
+    expect(editableNumberCommitValue("0.001", 0.0001)).toBe(0.001);
+    expect(editableNumberCommitValue("0.0", 0)).toBe(0);
+  });
+
+  test("renders OpenFEA Core backend and fidelity controls for simulation runs", () => {
+    const detailedStudy: Study = {
+      ...study,
+      solverSettings: { backend: "opencae_core_local", fidelity: "ultra" }
+    };
+
+    const runHtml = renderPanel("run", { study: detailedStudy });
+    const meshHtml = renderPanel("mesh", { study: { ...detailedStudy, meshSettings: { preset: "ultra", status: "complete", summary: { nodes: 182400, elements: 119808, warnings: [], analysisSampleCount: 45000, quality: "ultra" } } } });
+
+    expect(runHtml).toContain("Simulation settings");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("Fidelity");
+    expect(meshHtml).toContain("Ultra");
+    // The heuristic sample count meant nothing to a user; the element size does (2026-09 review F5).
+    expect(meshHtml).not.toContain("Analysis samples");
+    expect(meshHtml).toContain("Target element size");
+    expect(meshHtml).toContain("6 mm");
+  });
+
+  test("does not present preset fallback counts as geometry-specific mesh estimates", () => {
+    const meshHtml = renderPanel("mesh", {
+      study: {
+        ...study,
+        meshSettings: {
+          preset: "medium",
+          status: "complete",
+          summary: {
+            nodes: 42381,
+            elements: 26944,
+            warnings: ["Preset fallback"],
+            analysisSampleCount: 4800,
+            quality: "medium",
+            source: "preset_estimate"
+          }
+        }
+      }
+    });
+
+    // "--" is the app-wide honest placeholder; the panel copy says real counts arrive with results.
+    expect(meshHtml).toContain("<span>Nodes</span><strong>--</strong>");
+    expect(meshHtml).toContain("<span>Elements</span><strong>--</strong>");
+    expect(meshHtml).not.toContain("Reported after solve");
+    // A warning count is not a warning: the strings themselves render, in view.
+    expect(meshHtml).toContain('aria-label="Mesh warnings"');
+    expect(meshHtml).toContain("Preset fallback");
+    expect(meshHtml).toContain("Target element size");
+    expect(meshHtml).not.toContain("4,800");
+    expect(meshHtml).not.toContain("42,381");
+    expect(meshHtml).not.toContain("26,944");
+    expect(meshHtml).not.toContain("Nodes (est.)");
+  });
+
+  test("offers no backend picker: the solver is local, informationally stated (B5)", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: { backend: "opencae_core_local", fidelity: "standard" }
+      }
+    });
+
+    // The cloud path is retired and every run executes in the browser, so a
+    // backend select would be routing theater; the lower diagnostics state it once.
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).not.toContain("Auto — runs locally in your browser");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml.match(/Local \(in-browser\)/g)).toHaveLength(1);
+    expect(runHtml).not.toContain("Local fallback");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
+  });
+
+  test("shows the local solver row for an omitted solver backend", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: {}
+      }
+    });
+
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml.match(/Local \(in-browser\)/g)).toHaveLength(1);
+    expect(runHtml).toContain("local core worker");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
+    expect(runHtml).not.toContain("legacy backend");
+  });
+
+  test("states the local browser solver for eligible studies", () => {
+    const eligibleDisplayModel: DisplayModel = {
+      id: "display-cantilever",
+      name: "cantilever demo body",
+      bodyCount: 1,
+      dimensions: { x: 180, y: 24, z: 24, units: "mm" },
+      faces: [
+        { id: "face-fixed", label: "Fixed end face", color: "#4da3ff", center: [-1.9, 0.18, 0], normal: [-1, 0, 0], stressValue: 0 },
+        { id: "face-load", label: "Free end load face", color: "#f59e0b", center: [1.9, 0.18, 0], normal: [1, 0, 0], stressValue: 0 }
+      ]
+    };
+    const eligibleStudy: Study = {
+      ...study,
+      materialAssignments: [{ id: "assign-1", materialId: "mat-aluminum-6061", selectionRef: "selection-top", status: "complete" }],
+      constraints: [{ id: "constraint-1", type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" }],
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, -1, 0] }, status: "complete" }],
+      meshSettings: { preset: "medium", status: "complete" },
+      solverSettings: {}
+    } as Study;
+
+    const runHtml = renderPanel("run", { study: eligibleStudy, displayModel: eligibleDisplayModel });
+
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml.match(/Local \(in-browser\)/g)).toHaveLength(1);
+    expect(runHtml).toContain("local core worker");
+    expect(runHtml).not.toContain("solver-backend");
+  });
+
+  test("keeps OpenFEA Core runs browser-local without container endpoint copy", () => {
+    const detailedStudy: Study = {
+      ...study,
+      solverSettings: { backend: "opencae_core_local", fidelity: "ultra" }
+    };
+
+    const runHtml = renderPanel("run", {
+      study: detailedStudy,
+      canRunSimulation: true
+    });
+
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).not.toContain("opencae-core-preview");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Browser OpenFEA Core CPU");
+    expect(runHtml).not.toContain("FEA_CONTAINER");
+    expect(runHtml).not.toContain("CalculiX");
+    expect(runHtml).not.toContain("Local estimate");
+    expect(runHtml).not.toContain("cloud solver endpoint");
+    expect(runHtml).not.toContain('<button class="primary wide" disabled=""');
+  });
+
+  test("labels retired cloud backend selections from old saves as the local solver", () => {
+    const cloudStudy = {
+      ...study,
+      solverSettings: { backend: "opencae_core_cloud", fidelity: "ultra" }
+    } as unknown as Study;
+
+    const runHtml = renderPanel("run", {
+      study: cloudStudy,
+      canRunSimulation: true
+    });
+
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).not.toContain("OpenCAE Core Cloud");
+    expect(runHtml).not.toContain("CalculiX FEA");
+    expect(runHtml).not.toContain("Detailed local");
+    expect(runHtml).not.toContain("Local estimate");
+  });
+
+  test("warns when an invalid Core mesh blocks a run without legacy labels", () => {
+    const runHtml = renderPanel("run", {
+      study: {
+        ...study,
+        solverSettings: { backend: "opencae_core_local" },
+        meshSettings: { preset: "medium", status: "warning", summary: { nodes: 8, elements: 2, warnings: ["Disconnected mesh"], quality: "medium" } } as Study["meshSettings"]
+      },
+      canRunSimulation: false,
+      missingRunItems: ["Valid Core volume mesh"]
+    });
+
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("Complete before running: Valid Core volume mesh.");
+    expect(runHtml).not.toContain("Local estimate");
+    expect(runHtml).not.toContain("CalculiX");
+  });
+
+  test("treats legacy backend selections as Auto with truthful resolution labels", () => {
+    const detailedStudy = {
+      ...study,
+      solverSettings: { backend: "cloudflare_fea", fidelity: "ultra" }
+    } as unknown as Study;
+
+    const runHtml = renderPanel("run", {
+      study: detailedStudy
+    });
+
+    // Legacy tokens are not an explicit choice; every run executes locally
+    // (the only execution path since B4a) and the panel says so plainly.
+    expect(runHtml).not.toContain("solver-backend");
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain("sparse_static");
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Browser OpenFEA Core CPU");
+    expect(runHtml).not.toContain("cloud solver endpoint");
+    expect(runHtml).not.toContain("http://localhost:4317");
+  });
+
+  test("shows dynamic OpenFEA Core solver details", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "opencae_core_local",
+        fidelity: "ultra",
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    } as Study;
+
+    const runHtml = renderPanel("run", { study: dynamicStudy });
+
+    expect(runHtml).toContain("Local (in-browser)");
+    expect(runHtml).toContain('aria-label="Start time help"');
+    expect(runHtml).toContain('aria-label="End time help"');
+    expect(runHtml).toContain('aria-label="Time step help"');
+    expect(runHtml).toContain('aria-label="Output interval help"');
+    expect(runHtml).toContain('aria-label="Load profile help"');
+    expect(runHtml).toContain('aria-label="Damping ratio help"');
+    expect(runHtml).not.toContain("Expected detail");
+    expect(runHtml).not.toContain("Browser OpenFEA Core CPU");
+    expect(runHtml).toContain("mdof_dynamic");
+    expect(runHtml).not.toContain("opencae-core-preview");
+    expect(runHtml).not.toContain("external transient container");
+    expect(runHtml).not.toContain("cloudflare-fea-calculix");
+    expect(runHtml).not.toContain("cloudflare-queue-container");
+  });
+
+  test("warns when dynamic settings generate a very large playback frame set", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 10,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    expect(renderPanel("run", { study: dynamicStudy })).toContain("Large frame counts may slow result loading and playback.");
+  });
+
+  test("estimates dynamic frames from output interval rather than integration time step", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.001,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    expect(renderPanel("run", { study: dynamicStudy })).toContain('<strong>101</strong>');
+  });
+
+  test("normalizes legacy dense dynamic output cadence to avoid huge local frame writes", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.5,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const html = renderPanel("run", { study: dynamicStudy });
+
+    expect(html).toContain('<strong>101</strong>');
+    expect(html).toContain('<strong>Every 0.005 s</strong>');
+  });
+
+  test("normalizes fine OpenFEA Core dynamic output cadence", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.001,
+        outputInterval: 0.001,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    const html = renderPanel("run", { study: dynamicStudy });
+
+    expect(html).toContain("Output interval");
+    expect(html).toContain('<strong>21</strong>');
+    expect(html).toContain('<strong>Every 0.005 s</strong>');
+  });
+
+  test("normalizes dense OpenFEA Core dynamic output before estimating frame budget", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "opencae_core_local",
+        startTime: 0,
+        endTime: 0.2,
+        timeStep: 0.0005,
+        outputInterval: 0.0005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+
+    const html = renderPanel("run", { study: dynamicStudy });
+
+    expect(html).toContain('<strong>41</strong>');
+    expect(html).toContain('<strong>Every 0.005 s</strong>');
+    expect(html).not.toContain("dynamic output would exceed frame budget");
+  });
+
+  test("renders playback controls for dynamic result frames", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const html = renderPanel("results", {
+      study: dynamicStudy,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 },
+        { id: "field-velocity-1", runId: "run-1", type: "velocity", location: "face", values: [3], min: 3, max: 3, units: "mm/s", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("Frame");
+    expect(html).toContain("Play");
+    expect(html).toContain("Animation speed");
+    expect(html).toContain("12 fps");
+    expect(html).toContain("Reverse loop");
+    expect(html.indexOf("Animation speed")).toBeLessThan(html.indexOf(">Play</button>"));
+    expect(html).toContain("Peak displacement");
+    expect(html).toContain("Result mode");
+    expect(html).not.toContain("Switches the color plot");
+    // The legend title must not leak into the panel (it is a viewer overlay label).
+    expect(html).not.toContain("Von Mises stress");
+  });
+
+  test("shows interpolated playback time instead of jumping between integer frames", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const html = renderPanel("results", {
+      study: dynamicStudy,
+      resultFrameIndex: 0,
+      resultFramePosition: 0.5,
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("0.0025 s");
+  });
+
+  test("marks peak displacement on the playback time slider", () => {
+    const html = renderPanel("results", {
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 0, max: 3, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 0, max: 3, units: "MPa", frameIndex: 1, timeSeconds: 0.005 },
+        { id: "field-stress-2", runId: "run-1", type: "stress", location: "face", values: [3], min: 0, max: 3, units: "MPa", frameIndex: 2, timeSeconds: 0.01 },
+        { id: "field-displacement-1", runId: "run-1", type: "displacement", location: "face", values: [4.25], min: 0, max: 4.25, units: "mm", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain('class="playback-time-track"');
+    expect(html).toContain('class="playback-peak-marker"');
+    expect(html).toContain("--playback-peak-position:50%");
+    expect(html).toContain('aria-label="Peak displacement at 0.0050 s"');
+  });
+
+  test("maps peak displacement time to the playback slider position", () => {
+    expect(playbackPeakMarkerPercent([
+      { frameIndex: 0, timeSeconds: 0 },
+      { frameIndex: 7, timeSeconds: 0.005 },
+      { frameIndex: 12, timeSeconds: 0.015 }
+    ], 0.01)).toBeCloseTo(75);
+  });
+
+  test("shows the current playback frame count next to the dynamic time", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.01,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const html = renderPanel("results", {
+      study: dynamicStudy,
+      resultFrameIndex: 1,
+      resultFramePosition: 1,
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 0, max: 2, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 0, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("Frame 2 / 2");
+  });
+
+  test("shows sparse solver frame indexes as sequential playback frame numbers", () => {
+    const dynamicStudy: Study = {
+      ...study,
+      name: "Dynamic",
+      type: "dynamic_structural",
+      solverSettings: {
+        startTime: 0,
+        endTime: 0.02,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      }
+    };
+    const html = renderPanel("results", {
+      study: dynamicStudy,
+      resultFrameIndex: 7,
+      resultFramePosition: 7,
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 0, max: 3, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-7", runId: "run-1", type: "stress", location: "face", values: [2], min: 0, max: 3, units: "MPa", frameIndex: 7, timeSeconds: 0.005 },
+        { id: "field-stress-12", runId: "run-1", type: "stress", location: "face", values: [3], min: 0, max: 3, units: "MPa", frameIndex: 12, timeSeconds: 0.01 }
+      ]
+    });
+
+    expect(html).toContain("Frame 2 / 3");
+    expect(html).not.toContain("Frame 3 / 3");
+  });
+
+  test("uses transient summary time for peak displacement when displacement frames are not visible", () => {
+    const html = renderPanel("results", {
+      resultSummary: {
+        ...resultSummary,
+        maxDisplacement: 4.25,
+        maxDisplacementUnits: "mm",
+        transient: {
+          analysisType: "dynamic_structural",
+          integrationMethod: "newmark_average_acceleration",
+          startTime: 0,
+          endTime: 0.1,
+          timeStep: 0.005,
+          outputInterval: 0.005,
+          dampingRatio: 0.02,
+          frameCount: 21,
+          peakDisplacementTimeSeconds: 0.045,
+          peakDisplacement: 4.25
+        }
+      },
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("4.25 mm at 0.0450 s");
+  });
+
+  test("uses active displacement frame values rather than global dynamic ranges for peak displacement time", () => {
+    const html = renderPanel("results", {
+      resultFields: [
+        { id: "field-displacement-0", runId: "run-1", type: "displacement", location: "face", values: [0], min: 0, max: 4.25, units: "mm", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-displacement-1", runId: "run-1", type: "displacement", location: "face", values: [4.25], min: 0, max: 4.25, units: "mm", frameIndex: 1, timeSeconds: 0.045 }
+      ]
+    });
+
+    expect(html).toContain("4.25 mm at 0.0450 s");
+  });
+
+  test("shows pause when dynamic result playback is active", () => {
+    const html = renderPanel("results", {
+      resultPlaybackPlaying: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain("Pause");
+  });
+
+  test("shows reverse loop as checked when ping-pong playback is enabled", () => {
+    const html = renderPanel("results", {
+      resultPlaybackReverseLoop: true,
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain('class="toggle playback-loop-toggle"');
+    expect(html).toContain('<input type="checkbox" aria-label="Reverse loop" checked=""/>');
+    expect(html).toContain("Reverse loop");
+  });
+
+  test("marks the current time control as a playback playhead instead of a normal slider", () => {
+    const html = renderPanel("results", {
+      resultFields: [
+        { id: "field-stress-0", runId: "run-1", type: "stress", location: "face", values: [1], min: 1, max: 1, units: "MPa", frameIndex: 0, timeSeconds: 0 },
+        { id: "field-stress-1", runId: "run-1", type: "stress", location: "face", values: [2], min: 2, max: 2, units: "MPa", frameIndex: 1, timeSeconds: 0.005 }
+      ]
+    });
+
+    expect(html).toContain('class="playback-time-range"');
+    expect(html).toContain('aria-label="Playback time position"');
+  });
+
+  test("shows X as the bracket's weakest FDM build direction for an out-of-plane force", () => {
+    const bracketStudy = {
+      ...study,
+      materialAssignments: [{
+        id: "assign",
+        materialId: "mat-abs",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "x" },
+        status: "complete"
+      }],
+      namedSelections: [
+        {
+          id: "selection-fixed-face",
+          name: "Fixed base mounting holes",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-base-left", label: "Base mounting holes" }],
+          fingerprint: "fixed"
+        },
+        {
+          id: "selection-load-face",
+          name: "Top load face",
+          entityType: "face",
+          geometryRefs: [{ bodyId: "body", entityType: "face", entityId: "face-load-top", label: "Top load face" }],
+          fingerprint: "load"
+        }
+      ],
+      constraints: [{ id: "fixed", type: "fixed", selectionRef: "selection-fixed-face", parameters: {}, status: "complete" }],
+      // Built-in samples store model-space -Y, which renders/solves as global -Z.
+      loads: [{ id: "load", type: "force", selectionRef: "selection-load-face", parameters: { value: 500, direction: [0, -1, 0] }, status: "complete" }]
+    } satisfies Study;
+    const xHtml = renderPanel("material", { displayModel: bracketDisplayModel, study: bracketStudy });
+    const yHtml = renderPanel("material", {
+      displayModel: bracketDisplayModel,
+      study: {
+        ...bracketStudy,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "y" },
+          status: "complete"
+        }]
+      }
+    });
+    const rotatedYHtml = renderPanel("material", {
+      displayModel: { ...bracketDisplayModel, orientation: { x: 0, y: 0, z: 90 } },
+      study: {
+        ...bracketStudy,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "y" },
+          status: "complete"
+        }]
+      }
+    });
+
+    expect(xHtml).toContain('<span>Governing load path</span><strong>X axis</strong>');
+    expect(xHtml).toContain('<span>Layer response</span><strong>Across layers · weakest</strong>');
+    expect(xHtml).toContain('<span>Effective modulus</span><strong>743.4 MPa</strong>');
+    expect(xHtml).toContain('<span>Effective yield</span><strong>8.316 MPa</strong>');
+    expect(yHtml).toContain('<span>Layer response</span><strong>Within layers</strong>');
+    expect(yHtml).toContain('<span>Effective modulus</span><strong>1,029.3 MPa</strong>');
+    expect(yHtml).toContain('<span>Effective yield</span><strong>16.63 MPa</strong>');
+    expect(rotatedYHtml).toContain('<span>Governing load path</span><strong>Y axis</strong>');
+    expect(rotatedYHtml).toContain('<span>Layer response</span><strong>Across layers · weakest</strong>');
+  });
+
+  test("separates the base material from its compatible manufacturing processes", () => {
+    const html = renderPanel("material", {
+      study: {
+        ...study,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "fdm", infillDensity: 35, wallCount: 3, layerOrientation: "z" },
+          status: "complete"
+        }]
+      }
+    });
+
+    expect(html).toContain("Base Material");
+    expect(html).toContain("ABS Plastic");
+    expect(html).toContain("Thermoplastic");
+    expect(html).toContain("Manufacturing Process");
+    expect(html).toContain("Compatible with ABS Plastic. Only validated options are shown.");
+    expect(html).toContain('role="radiogroup" aria-label="Manufacturing process"');
+    expect(html).toContain("CNC machining");
+    expect(html).toContain("Injection molding");
+    expect(html).toContain("FDM printing");
+    expect(html).not.toContain("SLA printing");
+    expect(html).toContain("FDM Settings");
+    expect(html).toContain("Infill density");
+    expect(html).toContain("Wall count");
+    expect(html).toContain("Build direction");
+    expect(html).toContain("Simulation Properties");
+    expect(html).toContain("Effective modulus");
+    expect(html).toContain("Effective density");
+    expect(html).toContain("Effective yield");
+    expect(html).toContain("Poisson ratio");
+    // The selection matches the stored assignment, so there is nothing to apply;
+    // the card says so instead of offering a no-op action.
+    expect(html).toContain("Assigned to");
+    expect(html).toContain('class="base-material-status"');
+    expect(html).not.toContain("Apply material &amp; process");
+    expect(html).not.toContain("3D printed part");
+  });
+
+  test("only shows FDM settings when FDM is the selected manufacturing process", () => {
+    const cncHtml = renderPanel("material", {
+      study: {
+        ...study,
+        materialAssignments: [{
+          id: "assign",
+          materialId: "mat-abs",
+          selectionRef: "selection-body",
+          parameters: { manufacturingProcessId: "cnc_machining" },
+          status: "complete"
+        }]
+      }
+    });
+
+    expect(cncHtml).toContain('role="radio" aria-checked="true"');
+    expect(cncHtml).toContain("CNC machining");
+    expect(cncHtml).toContain("FDM printing");
+    expect(cncHtml).not.toContain("FDM Settings");
+    expect(cncHtml).not.toContain("Infill density");
+    expect(cncHtml).not.toContain("Wall count");
+    expect(cncHtml).not.toContain("Build direction");
+  });
+
+  test("enables adding payload mass when a payload object is selected without a named face selection", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const html = renderToStaticMarkup(
+        <RightPanel
+          activeStep="loads"
+          project={project}
+          displayModel={displayModel}
+          study={study}
+          runReadiness={readinessForStudy(study)}
+          selectedFace={displayModel.faces[0] ?? null}
+          viewMode="model"
+          resultMode="stress"
+          showDeformed={false}
+          showDimensions={false}
+          stressExaggeration={1}
+          resultSummary={resultSummary}
+          runProgress={0}
+          sampleModel="bracket"
+          draftLoadType="gravity"
+          draftLoadValue={5}
+          draftLoadDirection="-Z"
+          selectedLoadPoint={[1, 2, 3]}
+          selectedPayloadObject={{ id: "rod-1", label: "Rod 1", center: [1, 2, 3], volumeM3: 0.001, volumeSource: "mesh", volumeStatus: "available" }}
+          onFitView={vi.fn()}
+          onRotateModel={vi.fn()}
+          onResetModelOrientation={vi.fn()}
+          onLoadSample={vi.fn()}
+          onUploadModel={vi.fn()}
+          onSampleModelChange={vi.fn()}
+          onViewModeChange={vi.fn()}
+          onResultModeChange={vi.fn()}
+          onToggleDeformed={vi.fn()}
+          onToggleDimensions={vi.fn()}
+          onStressExaggerationChange={vi.fn()}
+          onAssignMaterial={vi.fn()}
+          onAddSupport={vi.fn()}
+          onUpdateSupport={vi.fn()}
+          onRemoveSupport={vi.fn()}
+          onDraftLoadTypeChange={vi.fn()}
+          onDraftLoadValueChange={vi.fn()}
+          onDraftLoadDirectionChange={vi.fn()}
+          onAddLoad={vi.fn()}
+          onUpdateLoad={vi.fn()}
+          onPreviewLoadEdit={vi.fn()}
+          onRemoveLoad={vi.fn()}
+          onGenerateMesh={vi.fn()}
+          onRunSimulation={vi.fn()}
+          canRunSimulation={false}
+          missingRunItems={[]}
+          onStepSelect={vi.fn()}
+        />
+      );
+
+      expect(html).toContain("Selected Rod 1");
+      expect(html).not.toContain("Selected Top face");
+      expect(html).toContain("Payload material");
+      expect(html).not.toContain("Search materials");
+      expect(html).toContain("<datalist");
+      expect(html).toContain('value="Carbon steel"');
+      expect(html).not.toContain('label="Plastics"');
+      expect(html).toContain("Calculated mass");
+      expect(html).toContain("Manual mass override");
+      expect(html).toContain("Add each rod or carried part separately");
+      expect(html).toContain("Add payload mass");
+      expect(html).not.toMatch(/<button class="outline-action wide" disabled="">[\s\S]*Add payload mass/);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  test("opens load editing from the applied load card without an edit button", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="loads"
+        project={project}
+        displayModel={displayModel}
+        runReadiness={readinessForStudy(study)}
+        study={{
+          ...study,
+          loads: [{
+            id: "load-1",
+            type: "force",
+            selectionRef: "selection-top",
+            parameters: { value: 500, units: "N", direction: [0, 0, -1] },
+            status: "complete"
+          }]
+        }}
+        selectedFace={displayModel.faces[0] ?? null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="force"
+        draftLoadValue={500}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={[]}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).not.toContain("Edit load");
+    // The summary is a real button and Remove is its sibling: a div[role=button]
+    // wrapping the native Remove button nests interactive content in a control.
+    expect(html).toContain('<button class="editable-summary-trigger" type="button" aria-label="Edit L1 force load"');
+    expect(html).not.toContain('role="button" tabindex="0" aria-label="Edit L1 force load"');
+    expect(html).toContain('</button><button class="remove-glyph" type="button" aria-label="Remove Face force (total) load"');
+  });
+
+  test("shows the selected payload material in applied payload mass loads", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="loads"
+        project={project}
+        displayModel={displayModel}
+        runReadiness={readinessForStudy(study)}
+        study={{
+          ...study,
+          loads: [{
+            id: "load-1",
+            type: "gravity",
+            selectionRef: "selection-top",
+            parameters: {
+              value: 0.159,
+              units: "kg",
+              direction: [0, 0, -1],
+              payloadMaterialId: "payload-silicon",
+              payloadObject: { id: "part-8", label: "Part 8", center: [1, 2, 3] }
+            },
+            status: "complete"
+          }]
+        }}
+        selectedFace={displayModel.faces[0] ?? null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="gravity"
+        draftLoadValue={0.159}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={[]}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("Payload mass");
+    expect(html).toContain("Part 8 · Silicon");
+  });
+
+  test("disables next run navigation until mesh generation is complete", () => {
+    const html = renderToStaticMarkup(
+      <RightPanel
+        activeStep="mesh"
+        project={project}
+        displayModel={displayModel}
+        study={{ ...study, meshSettings: { preset: "medium", status: "not_started" } }}
+        runReadiness={readinessForStudy(study)}
+        selectedFace={displayModel.faces[0] ?? null}
+        viewMode="model"
+        resultMode="stress"
+        showDeformed={false}
+        showDimensions={false}
+        stressExaggeration={1}
+        resultSummary={resultSummary}
+        runProgress={0}
+        sampleModel="bracket"
+        draftLoadType="force"
+        draftLoadValue={500}
+        draftLoadDirection="-Z"
+        selectedLoadPoint={null}
+        selectedPayloadObject={null}
+        onFitView={vi.fn()}
+        onRotateModel={vi.fn()}
+        onResetModelOrientation={vi.fn()}
+        onLoadSample={vi.fn()}
+        onUploadModel={vi.fn()}
+        onSampleModelChange={vi.fn()}
+        onViewModeChange={vi.fn()}
+        onResultModeChange={vi.fn()}
+        onToggleDeformed={vi.fn()}
+        onToggleDimensions={vi.fn()}
+        onStressExaggerationChange={vi.fn()}
+        onAssignMaterial={vi.fn()}
+        onAddSupport={vi.fn()}
+        onUpdateSupport={vi.fn()}
+        onRemoveSupport={vi.fn()}
+        onDraftLoadTypeChange={vi.fn()}
+        onDraftLoadValueChange={vi.fn()}
+        onDraftLoadDirectionChange={vi.fn()}
+        onAddLoad={vi.fn()}
+        onUpdateLoad={vi.fn()}
+        onPreviewLoadEdit={vi.fn()}
+        onRemoveLoad={vi.fn()}
+        onGenerateMesh={vi.fn()}
+        onRunSimulation={vi.fn()}
+        canRunSimulation={false}
+        missingRunItems={["Mesh generated"]}
+        onStepSelect={vi.fn()}
+      />
+    );
+
+    expect(html).toContain('title="Next workflow step (N)"');
+    expect(html).toContain('aria-label="Next workflow step: Run. Shortcut N"');
+    expect(html).toContain('<span class="workflow-nav-label">Next: Run</span><kbd>N</kbd>');
+  });
+
+  test("turns the active meshing button into an enabled stop action", () => {
+    const html = renderPanel("mesh", {
+      meshPhaseProgress: {
+        phase: "mesh3d",
+        phaseIndex: 4,
+        phaseCount: 8,
+        message: "Meshing volume..."
+      }
+    });
+
+    expect(html).toContain('aria-label="Stop mesh generation"');
+    expect(html).toContain("Stop meshing");
+    expect(html).not.toContain('aria-label="Stop mesh generation" disabled');
+  });
+
+  test("shows static convergence controls, persisted metrics, and capped SVG markers", () => {
+    const convergenceStudy = {
+      ...study,
+      loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 10, units: "N", direction: [0, 0, -1], applicationPoint: [0, 0, 0] }, status: "complete" }],
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["load-1"] }],
+      loadCombinations: []
+    } satisfies Study;
+    const completeRung = {
+      status: "complete" as const,
+      actualNodeCount: 100,
+      actualElementCount: 300,
+      totalDofs: 300,
+      freeDofs: 270,
+      actualMeshSizeMm: 12,
+      rawElementPeakVonMises: 42,
+      stressUnits: "MPa",
+      probeDisplacement: 0.15,
+      displacementUnits: "mm"
+    };
+    const convergenceProject: Project = {
+      ...project,
+      convergenceRecords: [{
+        id: "convergence-1",
+        studyId: study.id,
+        caseId: "case-default",
+        createdAt: "2026-07-14T12:00:00.000Z",
+        completedAt: "2026-07-14T12:01:00.000Z",
+        probe: { point: [0, 0, 0], source: "primary_load" },
+        classification: "inconclusive",
+        rungs: [
+          { ...completeRung, requestedPreset: "coarse" },
+          { ...completeRung, requestedPreset: "medium", totalDofs: 600 },
+          { requestedPreset: "fine", status: "skipped", actualNodeCount: 55_000, actualElementCount: 165_000, totalDofs: 165_000, freeDofs: 164_970, actualMeshSizeMm: 8, skipReason: "Generated mesh exceeds the 150,000 DOF cap." }
+        ]
+      }]
+    };
+
+    const html = renderPanel("mesh", { project: convergenceProject, study: convergenceStudy, onRunMeshConvergence: vi.fn() });
+
+    expect(html).toContain("Run coarse → medium → fine");
+    expect(html).toContain("Displacement probe");
+    expect(html).toContain("Inconclusive");
+    expect(html).toContain("165,000 total · 164,970 free DOF");
+    expect(html).toContain("55,000 nodes · 165,000 elements · 8.000 mm");
+    expect(html).toContain("chart-skipped");
+    expect(html).toContain("Probe displacement and raw element peak stress versus actual degrees of freedom");
+  });
+
+  test("shows Back and Next hotkey hints on workflow navigation buttons", () => {
+    const html = renderPanel("loads", { study: { ...study, meshSettings: { preset: "medium", status: "complete" } } });
+
+    expect(html).toContain('title="Previous workflow step (B)"');
+    expect(html).toContain('aria-label="Previous workflow step: Supports. Shortcut B"');
+    expect(html).toContain('<span class="workflow-nav-label">Back: Supports</span><kbd>B</kbd>');
+    expect(html).toContain('title="Next workflow step (N)"');
+    expect(html).toContain('aria-label="Next workflow step: Mesh. Shortcut N"');
+    expect(html).toContain('<span class="workflow-nav-label">Next: Mesh</span><kbd>N</kbd>');
+  });
+
+  test("requires a selected face before adding a face force", () => {
+    const markup = renderPanel("loads");
+
+    expect(markup).toContain(">Add load<");
+    expect(markup).toContain('<button class="outline-action wide" disabled="">');
+    expect(markup).toContain("Select a face on the model, then add the load.");
+  });
+
+  test("allows a face force without a picked visual point", () => {
+    const markup = renderPanel("loads", {
+      selectedFace: displayModel.faces[0],
+      selectedLoadPoint: null
+    });
+
+    expect(markup).toContain("Its visual point does not affect the solve.");
+    expect(markup).toContain(">Add load<");
+    expect(markup).not.toContain('<button class="outline-action wide" disabled="">');
+  });
+
+  test("shows an empty results state instead of fabricated numbers when no run has completed", () => {
+    const html = renderPanel("results", { resultSummary: null });
+
+    expect(html).toContain("Run a simulation to see results.");
+    expect(html).not.toContain("Max stress");
+    expect(html).not.toContain("Safety factor");
+    expect(html).not.toContain("Result mode");
+  });
+
+  test("leads the results panel with the answer, not with the exports", () => {
+    const markup = renderPanel("results", {
+      onGenerateReport: vi.fn(),
+      onExportResultPng: vi.fn(),
+      onExportResultHtml: vi.fn(),
+      onExportResultData: vi.fn()
+    });
+
+    const verdict = markup.indexOf("failure-assessment");
+    const maxStress = markup.indexOf("Max stress");
+    const provenance = markup.indexOf("Result source");
+    const exports = markup.indexOf("Generate report");
+
+    // Five stacked export buttons used to be the first thing in the panel, pushing the
+    // number the user ran the solve for to row five of a nine-row table below them.
+    expect(verdict).toBeGreaterThan(-1);
+    expect(verdict).toBeLessThan(maxStress);
+    expect(maxStress).toBeLessThan(provenance);
+    expect(provenance).toBeLessThan(exports);
+
+    // The secondary exports collapse into one reachable "Export" menu next to the
+    // primary action, rather than a column of five equally weighted buttons.
+    expect(markup).toContain("export-menu-trigger");
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup.indexOf("Generate report")).toBeLessThan(markup.indexOf("export-menu-trigger"));
+    // The verdict card already states the assessment title, so the row that repeated it
+    // is gone. Matched as the row's own label, since the card's title can itself read
+    // "Failure check unavailable".
+    expect(markup).not.toContain("<span>Failure check</span>");
+  });
+
+  test("offers one-click report generation with busy and error states", () => {
+    const idle = renderPanel("results", { onGenerateReport: vi.fn() });
+    const busy = renderPanel("results", { onGenerateReport: vi.fn(), reportBusy: true });
+    const failed = renderPanel("results", { onGenerateReport: vi.fn(), reportError: "Capture failed." });
+
+    expect(idle).toContain("Generate report");
+    expect(busy).toContain("Generating…");
+    expect(busy).toContain('disabled=""');
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("Capture failed.");
+  });
+
+  test("collapses the downloads into one closed export menu trigger", () => {
+    const idle = renderPanel("results", {
+      onExportResultPng: vi.fn(),
+      onExportResultHtml: vi.fn(),
+      onExportResultData: vi.fn(),
+      onSaveProject: vi.fn()
+    });
+
+    expect(idle).toContain('aria-haspopup="menu"');
+    expect(idle).toContain('aria-expanded="false"');
+    expect(idle).toContain(">Export<");
+    // The formats live in the popover, so nothing but the trigger renders closed.
+    expect(idle).not.toContain("PNG image");
+    expect(idle).not.toContain("Selected-state CSV");
+    expect(idle).not.toContain("Full project file");
+  });
+
+  test("ports the open export menu to viewport coordinates so panel overflow cannot clip mobile actions", () => {
+    expect(rightPanelSource).toContain('className="export-menu-popover export-menu-popover--floating"');
+    expect(rightPanelSource).toContain("getViewportTooltipPosition({");
+    expect(rightPanelSource).toContain("setMenuStyle({ top: position.top, left: position.left, width: menuWidth });");
+    expect(rightPanelSource).toContain("!menuRef.current?.contains(target)");
+  });
+
+  test("surfaces each export's busy state on the collapsed trigger", () => {
+    const pngBusy = renderPanel("results", { onExportResultPng: vi.fn(), pngExportBusy: true });
+    const htmlBusy = renderPanel("results", { onExportResultHtml: vi.fn(), htmlExportBusy: true });
+    const csvBusy = renderPanel("results", { onExportResultData: vi.fn(), dataExportBusy: "csv" });
+    const vtuBusy = renderPanel("results", { onExportResultData: vi.fn(), dataExportBusy: "vtu" });
+
+    expect(pngBusy).toContain("Exporting PNG…");
+    expect(htmlBusy).toContain("Packaging HTML…");
+    expect(csvBusy).toContain("Exporting CSV…");
+    expect(vtuBusy).toContain("Exporting VTU…");
+  });
+
+  test("keeps export error alerts outside the menu so failures stay visible when it closes", () => {
+    const pngFailed = renderPanel("results", { onExportResultPng: vi.fn(), pngExportError: "PNG capture failed." });
+    const dataFailed = renderPanel("results", { onExportResultData: vi.fn(), dataExportError: "Canonical mesh mismatch." });
+
+    expect(pngFailed).toContain('role="alert"');
+    expect(pngFailed).toContain("PNG capture failed.");
+    expect(dataFailed).toContain('role="alert"');
+    expect(dataFailed).toContain("Canonical mesh mismatch.");
+  });
+
+  test("disables the export trigger only when every format is unavailable", () => {
+    const running = renderPanel("results", {
+      onExportResultPng: vi.fn(),
+      onExportResultData: vi.fn(),
+      reportDisabled: true
+    });
+    const runningWithProject = renderPanel("results", {
+      onExportResultPng: vi.fn(),
+      onExportResultData: vi.fn(),
+      onSaveProject: vi.fn(),
+      reportDisabled: true
+    });
+
+    expect(running).toContain('aria-haspopup="menu" aria-expanded="false" disabled=""');
+    expect(runningWithProject).toContain('aria-haspopup="menu" aria-expanded="false"');
+    expect(runningWithProject).not.toContain('aria-haspopup="menu" aria-expanded="false" disabled=""');
+  });
+
+  test("hides the sample Volume and Mass rows for blank and uploaded projects", () => {
+    const blankHtml = renderPanel("model");
+    const uploadedHtml = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-upload",
+          projectId: project.id,
+          filename: "fixture.step",
+          localPath: "uploads/fixture.step",
+          artifactKey: "project-1/geometry/uploaded-display.json",
+          status: "ready",
+          metadata: { source: "local-upload" }
+        }]
+      }
+    });
+    const sampleHtml = renderPanel("model", {
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-sample",
+          projectId: project.id,
+          filename: "bracket-demo.step",
+          localPath: "examples/bracket-demo/bracket-demo.step",
+          artifactKey: "project-1/geometry/bracket-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "bracket" }
+        }]
+      }
+    });
+
+    expect(blankHtml).not.toContain("<span>Volume</span>");
+    expect(blankHtml).not.toContain("<span>Mass</span>");
+    expect(uploadedHtml).not.toContain("<span>Volume</span>");
+    expect(uploadedHtml).not.toContain("<span>Mass</span>");
+    expect(sampleHtml).toContain("<span>Volume</span>");
+    expect(sampleHtml).toContain("<span>Mass</span>");
+  });
+
+  test("reports beam structural mass separately from the payload mass", () => {
+    const beamHtml = renderPanel("model", {
+      sampleModel: "plate",
+      project: {
+        ...project,
+        geometryFiles: [{
+          id: "geom-beam",
+          projectId: project.id,
+          filename: "end-loaded-beam.step",
+          localPath: "examples/beam/end-loaded-beam.step",
+          artifactKey: "project-1/geometry/beam-display.json",
+          status: "ready",
+          metadata: { source: "sample", sampleModel: "plate" }
+        }]
+      }
+    });
+
+    expect(beamHtml).toContain("28,590 mm");
+    expect(beamHtml).toContain("77 g");
+    expect(beamHtml).toContain("Payload mass · 0.498 kg");
+  });
+
+  test("renders an accessible repair action when uploaded STEP surfaces are open", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repairable", "Open boundary loops were detected in this STEP model."),
+      onRepairModel: vi.fn()
+    });
+
+    expect(html).toContain('<div class="step-repair-card" role="alert" aria-label="Open STEP surfaces detected">');
+    expect(html).toContain("Open boundary loops were detected in this STEP model.");
+    expect(html).toContain("Fix open surfaces");
+    expect(html).not.toContain('<button class="outline-action wide" type="button" disabled="">');
+  });
+
+  test("disables the repair action and shows progress while fixing STEP surfaces", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repairable"),
+      onRepairModel: vi.fn(),
+      isRepairingModel: true
+    });
+
+    expect(html).toMatch(/<button class="outline-action wide" type="button" disabled="">[\s\S]*Fixing model\.\.\.<\/button>/);
+    expect(html).not.toContain("Fix open surfaces");
+  });
+
+  test("confirms when uploaded STEP geometry was repaired", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("repaired")
+    });
+
+    expect(html).toContain("Geometry repair complete.");
+    expect(html).toContain("Open boundaries were converted into a closed solid");
+    expect(html).not.toContain("Fix open surfaces");
+  });
+
+  test("shows an unrepairable STEP warning without offering an automatic fix", () => {
+    const html = renderPanel("model", {
+      project: uploadedStepProject("unrepairable", "Automatic repair could not close every surface.")
+    });
+
+    expect(html).toContain('<p class="panel-warning" role="alert">');
+    expect(html).toContain("Automatic repair could not close every surface.");
+    expect(html).not.toContain("Fix open surfaces");
+    expect(html).not.toContain('aria-label="Open STEP surfaces detected"');
+  });
+
+  test("surfaces a post-failure repair action on both the Model and Mesh steps", () => {
+    const repairableProject = uploadedStepProject(
+      "repairable",
+      "Automatic repair can re-close this model's faces."
+    );
+
+    for (const activeStep of ["model", "mesh"] as const) {
+      const html = renderPanel(activeStep, {
+        project: repairableProject,
+        onRepairModel: vi.fn()
+      });
+      expect(html).toContain("Automatic repair can re-close this model&#x27;s faces.");
+      expect(html).toContain("Fix open surfaces");
+    }
+  });
+
+  test("surfaces the honest re-export warning on both the Model and Mesh steps", () => {
+    const unrepairableProject = uploadedStepProject(
+      "unrepairable",
+      "Automatic repair cannot close this model. Re-export it from CAD as a solid body."
+    );
+
+    for (const activeStep of ["model", "mesh"] as const) {
+      const html = renderPanel(activeStep, { project: unrepairableProject });
+      expect(html).toContain("Automatic repair cannot close this model. Re-export it from CAD as a solid body.");
+      expect(html).not.toContain("Fix open surfaces");
+    }
+  });
+
+  test("offers the parametric part builder in the model panel", () => {
+    const html = renderPanel("model");
+    expect(html).toContain("Create parametric part");
+    expect(html).toContain("Add to project");
+    expect(html).toContain("Download .step");
+  });
+  test("names every importable geometry format from one source", () => {
+    // The file input accepted .obj while the help text listed only STEP, STP,
+    // and STL — three copies of the list, one stale since OBJ landed.
+    const html = renderPanel("model", { study: { ...study, geometryScope: [] } as Study });
+    expect(html).toContain('accept=".step,.stp,.stl,.obj"');
+    expect(SUPPORTED_GEOMETRY_FORMAT_LABEL).toBe("STEP, STP, STL, or OBJ");
+  });
+
+  test("refuses a non-positive load magnitude at the point of entry", () => {
+    // A -1 N load used to save cleanly, read as ready, and only be refused once
+    // the solver had started. The editor now applies the validator's own rule.
+    const negative = renderPanel("loads", { draftLoadValue: -1, selectedFace: displayModel.faces[0] ?? null });
+    expect(negative).toContain("Magnitude must be greater than zero.");
+
+    const zero = renderPanel("loads", { draftLoadValue: 0, selectedFace: displayModel.faces[0] ?? null });
+    expect(zero).toContain("Magnitude cannot be zero.");
+
+    const positive = renderPanel("loads", { draftLoadValue: 500, selectedFace: displayModel.faces[0] ?? null });
+    expect(positive).not.toContain("Magnitude must be greater than zero.");
+    expect(positive).not.toContain("Magnitude cannot be zero.");
+  });
+
+  test("states the constraint for a dynamic setting draft that will not commit", () => {
+    // A "-1" End time stayed visible while Estimated frames kept using the
+    // previous value and Run stayed enabled — the field and the computation
+    // disagreed with nothing on screen saying which one Run would use.
+    expect(dynamicSettingConstraintMessage(0.005, "s")).toBe("Enter a number of at least 0.005 s.");
+    expect(editableNumberCommitValue("-1", 0.005)).toBeNull();
+    expect(editableNumberCommitValue("0.05", 0.005)).toBe(0.05);
+  });
+
+  test("shows why the run gate is closed in the readiness checklist", () => {
+    const markup = renderPanel("run", {
+      study: {
+        ...study,
+        loads: [{
+          id: "load-1",
+          type: "force",
+          selectionRef: "selection-top",
+          parameters: { value: -1, units: "N", direction: [0, 0, -1] },
+          status: "complete"
+        }]
+      } as Study
+    });
+    expect(markup).toContain("positive finite magnitude");
+  });
+});
+
+test("hides the add-load workflow while editing and restores load-row focus", () => {
+  expect(rightPanelSource).toContain('<div hidden={editingLoadId !== null}>');
+  expect(rightPanelSource).toContain('role="group" aria-label={accessibleName}');
+  expect(rightPanelSource).toContain("window.requestAnimationFrame(() => loadItemRefs.current.get(loadId)?.focus())");
+  // Cancelling the support form used to unmount it with nothing to focus, so
+  // focus fell to <body> instead of returning to Edit support.
+  expect(rightPanelSource).toContain("window.requestAnimationFrame(() => editButtonRefs.current.get(supportId)?.focus())");
+  expect(rightPanelSource).toContain('aria-pressed={viewMode === "mesh"}');
+  expect(rightPanelSource).toContain('aria-pressed={resultMode === "stress"}');
+});
+
+describe("2026-09 interaction review stage 0 guards", () => {
+  const loadedStudy: Study = {
+    ...study,
+    loads: [{ id: "load-1", type: "force", selectionRef: "selection-top", parameters: { value: 500, units: "N", direction: [0, 0, -1], directionMode: "-Z" }, status: "complete" }]
+  };
+
+  test("refuses an identical load on the same face instead of stacking it (D2)", () => {
+    const html = renderPanel("loads", { study: loadedStudy, selectedFace: displayModel.faces[0]! });
+
+    expect(html).toContain("A face force (total) of 500 N is already applied to Top face. Edit it to change the magnitude.");
+    expect(html).toMatch(/<button class="outline-action wide" disabled=""[^>]*>[^<]*<svg[\s\S]*?Add load<\/button>/);
+    // A different magnitude on the same face is a legitimate second load.
+    expect(renderPanel("loads", { study: loadedStudy, selectedFace: displayModel.faces[0]!, draftLoadValue: 600 })).not.toContain("is already applied to");
+  });
+
+  test("refuses a second support on a face that already has one (D2)", () => {
+    const supported: Study = { ...study, constraints: [{ id: "fs-1", type: "fixed", selectionRef: "selection-top", parameters: {}, status: "complete" }] };
+    const html = renderPanel("supports", { study: supported, selectedFace: displayModel.faces[0]! });
+
+    expect(html).toContain("A support already exists on Top face. Edit or remove it below.");
+    expect(renderPanel("supports", { study, selectedFace: displayModel.faces[0]! })).not.toContain("already exists on");
+  });
+
+  test("offers prescribed displacement with value and component fields (Decision 1)", () => {
+    expect(rightPanelSource).toContain('<option value="prescribed_displacement">Prescribed displacement</option>');
+    expect(rightPanelSource).not.toContain("Prescribed displacement (not supported yet)");
+    expect(rightPanelSource).toContain("Displacement");
+    expect(rightPanelSource).toContain("Component");
+  });
+
+  test("announces preview-only STL/OBJ geometry on the Mesh step and disables meshing (D6)", () => {
+    const stlModel: DisplayModel = { ...displayModel, visualMesh: { format: "stl", filename: "cube.stl", contentBase64: "" } };
+    const html = renderPanel("mesh", { displayModel: stlModel });
+
+    expect(html).toContain("OpenFEA cannot build a volume mesh from a triangle mesh");
+    expect(html).toMatch(/<button class="primary wide" type="button" disabled="" aria-label="Generate mesh"/);
+    expect(renderPanel("mesh")).not.toContain("triangle mesh");
+  });
+
+  test("shows the shared draft temperature so a viewer pick uses the typed value (D12)", () => {
+    const thermal = StudySchema.parse({ ...study, type: "steady_state_thermal" });
+    const html = renderPanel("supports", { study: thermal, draftSupportTemperature: 100 });
+
+    expect(html).toContain('type="number" value="100"');
+  });
+
+  test("names load-case and combination toggles for assistive technology (D22)", () => {
+    const caseStudy: Study = {
+      ...loadedStudy,
+      loadCases: [{ id: "case-default", name: "Default", enabled: true, loadIds: ["load-1"] }],
+      loadCombinations: [{ id: "combo-1", name: "Service", enabled: true, factors: [{ caseId: "case-default", factor: 1 }] }]
+    };
+    const html = renderPanel("loads", { study: caseStudy, onLoadCasesChange: vi.fn() });
+
+    expect(html).toContain('aria-label="Enable load case Default"');
+    expect(html).toContain('aria-label="Enable combination Service"');
+  });
+
+  test("drops the direction phrase for thermal loads, which have none (D21)", () => {
+    const thermal = StudySchema.parse({
+      ...study,
+      type: "steady_state_thermal",
+      loads: [{ id: "flux-1", type: "heat_flux", selectionRef: "selection-top", parameters: { value: 10000, units: "W/m²" }, status: "complete" }]
+    });
+    const html = renderPanel("loads", { study: thermal });
+
+    expect(html).toContain("Surface heat flux");
+    expect(html).not.toContain("direction");
+  });
+});
+
+describe("workspace notice and readiness text (2026-09 review D7, F7)", () => {
+  test("renders the workspace notice on any step with a link to the step that can fix it", () => {
+    const notice = { key: "outdated:Load updated.", tone: "warning" as const, title: "Results outdated", message: "Load updated. Re-run to update them.", step: "run" as const, stepLabel: "Run" };
+    const html = renderPanel("material", { notice, onDismissNotice: vi.fn(), onNoticeStep: vi.fn() });
+
+    expect(html).toContain('class="workspace-notice warning"');
+    expect(html).toContain("Results outdated");
+    expect(html).toContain("Go to Run");
+    expect(html).toContain('aria-label="Dismiss notice"');
+    // On the step itself the link is redundant.
+    expect(renderPanel("run", { notice })).not.toContain("Go to Run");
+    expect(renderPanel("run", { notice: { ...notice, tone: "error" } })).toContain('role="alert"');
+  });
+
+  test("prints readiness blockers as text instead of a tooltip", () => {
+    const html = renderPanel("run");
+
+    expect(html).toContain('class="check-blockers"');
+    expect(html).toContain("Choose what the part is made of.");
+  });
+});
+
+describe("select-then-act and re-targeting (2026-09 review F1, D3, F3)", () => {
+  test("edit forms offer to move an entry to the face picked in the viewer", () => {
+    expect(rightPanelSource).toContain("Move to {pickedElsewhere.label} (picked in the viewer)");
+    expect(rightPanelSource).toContain("onSave(previewLoad, targetFace)");
+    expect(rightPanelSource).toContain("support.parameters }, targetFace)");
+  });
+
+  test("the in-panel Next commits a previewed material selection", () => {
+    expect(rightPanelSource).toContain("registerBeforeNext?.(selectionMatchesAssignment ? null : () => onAssignMaterial(selectedMaterialId, pendingParameters))");
+    expect(rightPanelSource).toContain("beforeNextRef.current?.();");
+  });
+
+  test("dynamic playback has frame step controls", () => {
+    expect(rightPanelSource).toContain('aria-label="Previous frame"');
+    expect(rightPanelSource).toContain('aria-label="Next frame"');
+  });
+});
+
+describe("mesh step shows the size it asks for and the mesh it made (2026-09 review D13, F5)", () => {
+  test("states the target element size for the preset", () => {
+    const html = renderPanel("mesh");
+    expect(html).toContain("target element size 12 mm");
+  });
+
+  test("offers to show the generated mesh only when a real volume mesh exists", () => {
+    const meshed: Study = {
+      ...study,
+      meshSettings: { preset: "medium", status: "complete", summary: { nodes: 1030, elements: 489, warnings: [], source: "wasm_gmsh", artifacts: { actualCoreModel: { model: {} } } } as Study["meshSettings"]["summary"] }
+    };
+    expect(renderPanel("mesh", { study: meshed, onViewModeChange: vi.fn() })).toContain("Show mesh in viewer");
+    expect(renderPanel("mesh", { study: meshed, viewMode: "mesh", onViewModeChange: vi.fn() })).toContain("Hide mesh");
+    const estimated: Study = { ...study, meshSettings: { preset: "medium", status: "complete", summary: { nodes: 10, elements: 4, warnings: [] } } };
+    expect(renderPanel("mesh", { study: estimated })).not.toContain("Show mesh in viewer");
+  });
+});

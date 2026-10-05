@@ -1,15 +1,15 @@
 # Validation
 
-OpenCAE runs production structural solves locally in the browser with OpenCAE Core (wasm meshing + local solve pipeline). The former OpenCAE Core Cloud backend was retired in July 2026 — see [docs/cloud-retirement.md](../cloud-retirement.md) — and its historical solve contract is frozen as a numeric regression oracle. Replays preserve current local solver provenance rather than impersonating the retired runner.
+OpenFEA runs production structural solves locally in the browser with OpenFEA Core (wasm meshing + local solve pipeline). The former OpenCAE Core Cloud backend was retired in July 2026 — see [docs/cloud-retirement.md](../cloud-retirement.md) — and its historical solve contract is frozen as a numeric regression oracle. Replays preserve current local solver provenance rather than impersonating the retired runner.
 
-- **OpenCAE Core (local, in-browser)** is the production backend. Results must carry `opencae_core_fea`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance.
-- **OpenCAE Core Preview** is allowed only for explicit local development/demo flows. It uses structured display-bounds proxy meshes and must never be presented as production FEA.
+- **OpenFEA Core (local, in-browser)** is the production backend. Results must carry `opencae_core_fea`, `computed` result provenance, and `actual_volume_mesh` or `structured_block_core` mesh provenance.
+- **OpenFEA Core Preview** is allowed only for explicit local development/demo flows. It uses structured display-bounds proxy meshes and must never be presented as production FEA.
 
 Bracket and other complex geometry must fail Core Preview eligibility unless an actual Core volume mesh artifact is present; the production path meshes them in-browser before solving.
 
 ## Legacy Backend Results
 
-Older project files can contain historical result provenance from retired backends: the removed CalculiX-backed container and the OpenCAE Core Cloud service retired in July 2026. OpenCAE may display those results as read-only history with their original labels, but it must not dispatch new work to those backends or reuse those artifacts as new production output. Re-run the study to solve locally in the browser before treating the result as current production FEA.
+Older project files can contain historical result provenance from retired backends: the removed CalculiX-backed container and the OpenCAE Core Cloud service retired in July 2026. OpenFEA may display those results as read-only history with their original labels, but it must not dispatch new work to those backends or reuse those artifacts as new production output. Re-run the study to solve locally in the browser before treating the result as current production FEA.
 
 ## Validate Locally
 
@@ -22,10 +22,10 @@ pnpm test
 Run only the frozen cloud-contract and Worker validation:
 
 ```sh
-pnpm vitest run libs/opencae-solve-pipeline/src/goldenParity.test.ts apps/opencae-web/src/lib/coreCloudGolden.test.ts apps/opencae-web/worker/index.test.ts scripts/core-cloud-validation-docs.test.mjs
+pnpm vitest run libs/openfea-solve-pipeline/src/goldenParity.test.ts apps/openfea-web/src/lib/coreCloudGolden.test.ts apps/openfea-web/worker/index.test.ts scripts/core-cloud-validation-docs.test.mjs
 ```
 
-The golden parity suite replays every recorded OpenCAE Core Cloud solve fixture (`apps/opencae-web/src/testdata/core-cloud-golden`) through the browser pipeline and compares the retired production response numerically while requiring local solver and runner provenance. No local estimate fallback is allowed in these tests.
+The golden parity suite replays every recorded OpenCAE Core Cloud solve fixture (`apps/openfea-web/src/testdata/core-cloud-golden`) through the browser pipeline and compares the retired production response numerically while requiring local solver and runner provenance. No local estimate fallback is allowed in these tests.
 
 ## Historical: Validate Deployed Cloud (retired 2026-07)
 
@@ -36,7 +36,7 @@ pnpm verify:cloudflare-config
 pnpm deploy:cloudflare:dry-run
 ```
 
-## OpenCAE Core Structural Load Support
+## OpenFEA Core Structural Load Support
 
 The Core adapter preserves the study load's physical meaning and converts only at the model boundary:
 
@@ -51,9 +51,9 @@ Surface traction, volume force, and remote force are supported in static and dyn
 
 Unsupported or incomplete studies must fail with clear Core diagnostics instead of publishing generated fallback results.
 
-## OpenCAE Core Dynamic Support
+## OpenFEA Core Dynamic Support
 
-Dynamic structural studies generate timed frames with Newmark average-acceleration integration in the local OpenCAE Core solve pipeline (and, historically, the retired Core Cloud flow). OpenCAE Core Preview dynamic results cannot be presented as validated FEA for complex geometry.
+Dynamic structural studies generate timed frames with Newmark average-acceleration integration in the local OpenFEA Core solve pipeline (and, historically, the retired Core Cloud flow). OpenFEA Core Preview dynamic results cannot be presented as validated FEA for complex geometry.
 
 Supported dynamic load profiles:
 
@@ -85,7 +85,7 @@ The approximately 100,000-DOF Chromium/WebKit benchmark is the existing cross-br
 
 "Apparent convergence" requires all three rungs to complete with strictly increasing actual DOF. The symmetric last-step change from medium to fine must be at most 5% for probe displacement and 10% for raw peak stress. Three successful increasing rungs outside either threshold are `unconverged`; missing, skipped, failed, or non-increasing rungs are `inconclusive`. This is a mesh-ladder indicator, not a proof of asymptotic convergence.
 
-## OpenCAE Core Modal Support
+## OpenFEA Core Modal Support
 
 Modal studies require positive density for every solved material, a generated mesh, and enough supports to make the constrained stiffness matrix nonsingular. They do not require or apply loads. The solver requests 1–10 modes (default 6) and uses deterministic block shift-invert subspace iteration with a block size of `min(modeCount + 2, freeDOFs)`.
 
@@ -111,7 +111,7 @@ is at most `1e-6`. The solver returns only converged modes and reports requested
 | Bracket actual mesh static | Connected bracket Tet4 Core mesh artifact | Steel fixture material | Fixed base-mount surface and load on upright surface | Static result uses `actual_volume_mesh`, has connected surface output, finite stress/displacement/safety/reaction values, and non-empty fields. |
 | Bracket actual mesh dynamic | Same connected bracket Tet4 Core mesh artifact | Steel fixture material with density | Dynamic ramp load on upright surface | MDOF dynamic result uses `actual_volume_mesh`, contains multiple unique frames, connected surface output, and production provenance. |
 | Disconnected mesh rejection | Two disconnected Tet4 bodies without contact/tie metadata | Linear elastic validation material | Any nonzero load | The solve fails with disconnected-body diagnostics before solving. |
-| Bracket without actual volume mesh | Bracket sample display model | Aluminum 6061 | Fixed mounting holes and top face load | OpenCAE Core Preview solving is rejected with an actual-volume-mesh diagnostic; the production path meshes the bracket in-browser first. |
+| Bracket without actual volume mesh | Bracket sample display model | Aluminum 6061 | Fixed mounting holes and top face load | OpenFEA Core Preview solving is rejected with an actual-volume-mesh diagnostic; the production path meshes the bracket in-browser first. |
 | Bracket with actual volume mesh | Connected Tet4 Core mesh artifact | Aluminum 6061 | Mesh-bound supports and loads | Result may be labeled production FEA only with `actual_volume_mesh`, `computed`, and one connected component. |
 | Material swap | Same cantilever block | Aluminum 6061 vs PETG or titanium | Same load/support | Dynamic response changes with density and damping. |
 | Load scaling | Same block | Aluminum 6061 | Compare 1 N vs 2 N | Linear static response scales with load. |
@@ -142,9 +142,9 @@ The validation mesh is intentionally coarse Tet4 geometry, so displacement and s
 
 Validation fails if any of these conditions are found:
 
-- Complex geometry receives OpenCAE Core Preview, `structured_block_proxy`, or `computed_preview` provenance and is displayed as valid FEA.
+- Complex geometry receives OpenFEA Core Preview, `structured_block_proxy`, or `computed_preview` provenance and is displayed as valid FEA.
 - Complex geometry receives production FEA labels without `actual_volume_mesh`, `computed`, and a single connected component.
-- An OpenCAE Core Preview dynamic result reports `reactionForce: 0` while nonzero loads exist without a reaction-force diagnostic.
+- An OpenFEA Core Preview dynamic result reports `reactionForce: 0` while nonzero loads exist without a reaction-force diagnostic.
 - Static results omit stress, displacement, or safety-factor fields.
 - Dynamic results omit velocity or acceleration frames.
 - Modal results contain unconverged modes, displacement units, non-vector shapes, or omit requested/converged counts.

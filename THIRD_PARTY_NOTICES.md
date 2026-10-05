@@ -1,12 +1,12 @@
 # Third-Party Notices
 
-This file summarizes third-party license notices for OpenCAE runtime tools,
+This file summarizes third-party license notices for OpenFEA runtime tools,
 CAD import components, and generated or transitive dependency notices. It does
-not change the license of OpenCAE source code.
+not change the license of OpenFEA source code.
 
-## OpenCAE
+## OpenFEA
 
-- OpenCAE source code: Apache License 2.0
+- OpenFEA source code: Apache License 2.0
 - Copyright 2026 Esau Engineering
 
 ## CAD Import Libraries
@@ -33,7 +33,7 @@ not change the license of OpenCAE source code.
 ### @loumalouomega/gmsh-wasm
 
 - Purpose: WebAssembly packaging of the Gmsh C API (geometry + meshing, no
-  GUI) used by OpenCAE's in-browser mesh worker.
+  GUI) used by OpenFEA's in-browser mesh worker.
 - Copyright (C) 2026 Vicente Mataix Ferrándiz and gmsh-wasm contributors.
 - Source: https://github.com/loumalouomega/GMSH-JS
 - License: GPL-2.0-or-later (inherited from Gmsh, which is statically linked
@@ -46,8 +46,8 @@ not change the license of OpenCAE source code.
 - License: LGPL-2.1 with the OCCT exception.
 
 Because the default web build distributes these components to browsers, the
-combined OpenCAE web-application bundle is distributed under GPLv3-compatible
-terms. OpenCAE's own source code remains Apache-2.0. See
+combined OpenFEA web-application bundle is distributed under GPLv3-compatible
+terms. OpenFEA's own source code remains Apache-2.0. See
 [`docs/licensing-gmsh-wasm.md`](docs/licensing-gmsh-wasm.md) for the full
 rationale, the 2026-07-06 stay-open decision, source-availability pointers,
 and the GPL-free opt-out build (`VITE_WASM_MESHING=0`).
@@ -56,23 +56,23 @@ and the GPL-free opt-out build (`VITE_WASM_MESHING=0`).
 
 ### jsPDF / jspdf-autotable
 
-- Purpose: Client-side generation and tabular layout of OpenCAE simulation reports.
+- Purpose: Client-side generation and tabular layout of OpenFEA simulation reports.
 - License: MIT.
 - Source: https://github.com/parallax/jsPDF and https://github.com/simonbengtsson/jsPDF-AutoTable
 
 ### IBM Plex Sans
 
 - Purpose: App UI typeface (WOFF2 Latin and Greek subsets for weights 400, 500
-  and 600 in `apps/opencae-web/src/assets/fonts/`, packaged by
+  and 600 in `apps/openfea-web/src/assets/fonts/`, packaged by
   `@fontsource/ibm-plex-sans` 5.3.0) and embedded report typography (Regular
-  and SemiBold TTF in `apps/opencae-web/src/report/fonts/`).
+  and SemiBold TTF in `apps/openfea-web/src/report/fonts/`).
 - Copyright: Copyright 2017 IBM Corp.
 - License: SIL Open Font License 1.1
-  (`apps/opencae-web/src/assets/fonts/LICENSE-IBM-Plex-Sans.txt`).
+  (`apps/openfea-web/src/assets/fonts/LICENSE-IBM-Plex-Sans.txt`).
 - Source: https://github.com/IBM/plex; subsets from
   https://github.com/fontsource/fontsource
 
-OpenCAE workspace packages declare their own source code as Apache-2.0, but
+OpenFEA workspace packages declare their own source code as Apache-2.0, but
 package dependencies and transitive dependencies are licensed separately by
 their respective authors. Generated dependency notice reports should be
 regenerated from the lockfile when dependencies change.

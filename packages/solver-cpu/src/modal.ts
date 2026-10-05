@@ -1,4 +1,4 @@
-import type { NormalizedOpenCAEModel } from "@opencae/core";
+import type { NormalizedOpenFEAModel } from "@openfea/core";
 import { modalCoreResultFromSolve } from "./results";
 import { boundedStructuralMaxDofs, structuralDofCount, structuralDofLimitError } from "./limits";
 import { getNormalizedModel } from "./solver";
@@ -134,9 +134,9 @@ export function solveModalLinearTet(input: CpuSolverInput, options: ModalCpuOpti
  * mistaken for a full quadratic solve.
  */
 export function linearizeTet10ModelForModal(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   dofThreshold = DEFAULT_TET10_PROJECTION_DOF_THRESHOLD
-): { model: NormalizedOpenCAEModel; projection?: ModalMeshProjection } {
+): { model: NormalizedOpenFEAModel; projection?: ModalMeshProjection } {
   const sourceDofs = model.counts.nodes * 3;
   if (sourceDofs <= dofThreshold || !model.elementBlocks.some((block) => block.type === "Tet10")) {
     return { model };
@@ -182,7 +182,7 @@ export function linearizeTet10ModelForModal(
     ...facet,
     nodes: Uint32Array.from(Array.from(facet.nodes).slice(0, 3).map((node) => mappedNode(oldToNew, node)))
   }));
-  const projectedModel: NormalizedOpenCAEModel = {
+  const projectedModel: NormalizedOpenFEAModel = {
     ...model,
     nodes: { coordinates },
     elementBlocks,
@@ -585,7 +585,7 @@ function symmetricEigenDecomposition(matrix: Float64Array, size: number): { valu
 }
 
 function normalizedModeShape(
-  model: NormalizedOpenCAEModel,
+  model: NormalizedOpenFEAModel,
   system: PreparedStructuralSystem,
   reduced: Float64Array
 ): Float64Array {

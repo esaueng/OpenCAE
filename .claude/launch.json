@@ -2,16 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "opencae-web",
+      "name": "openfea-web",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "pnpm --filter @opencae/web dev --port ${PORT:-5173}"],
+      "runtimeArgs": ["-c", "pnpm --filter @openfea/web dev --port ${PORT:-5173}"],
       "port": 5173,
       "autoPort": true
     },
     {
-      "name": "opencae-web-cloud",
+      "name": "openfea-web-cloud",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "OPENCAE_CLOUD_PROXY_TARGET=https://cae.esau.app pnpm --filter @opencae/web dev"],
+      "runtimeArgs": ["-c", "OPENFEA_CLOUD_PROXY_TARGET=https://fea.esau.app pnpm --filter @openfea/web dev"],
       "port": 5173
     }
   ]

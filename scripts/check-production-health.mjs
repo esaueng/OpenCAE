@@ -1,12 +1,12 @@
 import { fileURLToPath } from "node:url";
 
-export const PRODUCTION_HEALTH_URL = "https://cae.esau.app/health";
+export const PRODUCTION_HEALTH_URL = "https://fea.esau.app/health";
 
 const EXPECTED_HEALTH = {
   ok: true,
   mode: "cloudflare-worker",
-  service: "opencae-web",
-  solverRuntime: "browser-opencae-core"
+  service: "openfea-web",
+  solverRuntime: "browser-openfea-core"
 };
 
 export function validateProductionHealthResponse(status, health) {

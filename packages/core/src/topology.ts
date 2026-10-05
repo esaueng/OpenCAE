@@ -7,7 +7,7 @@ import type {
 } from "./model-json";
 
 export const COMPLEX_GEOMETRY_REQUIRES_VOLUME_MESH =
-  "OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA or generate a Core mesh.";
+  "OpenFEA Core requires an actual volume mesh for complex geometry. Use Cloud FEA or generate a Core mesh.";
 
 export type MeshLike = {
   nodes?: { coordinates?: number[] | Float64Array };

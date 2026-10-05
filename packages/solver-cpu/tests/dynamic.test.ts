@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { singleTetStaticFixture } from "@opencae/examples";
-import { validateCoreResult, type OpenCAEModelJson } from "@opencae/core";
+import { singleTetStaticFixture } from "@openfea/examples";
+import { validateCoreResult, type OpenFEAModelJson } from "@openfea/core";
 import {
   boundedTimeStepSeconds,
   solveDynamicLinearTetLoadCases,
@@ -25,7 +25,7 @@ const densityModel = {
       yieldStrength: 250e6
     }
   ]
-} satisfies OpenCAEModelJson;
+} satisfies OpenFEAModelJson;
 
 describe("time integration tolerance policy", () => {
   test("keeps the absolute minimum time step explicit", () => {
@@ -72,7 +72,7 @@ describe("solveDynamicLinearTetMDOF", () => {
   });
 
   test("assembles volume-force density for dynamic steps and exposes conservation diagnostics", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...densityModel,
       schemaVersion: "0.3.0",
       loads: [{ name: "body", type: "bodyForceDensity", elementSet: "allElements", forceDensity: [0, 0, -600] }],
@@ -113,7 +113,7 @@ describe("solveDynamicLinearTetMDOF", () => {
       outputInterval: 0.01,
       loadProfile: "ramp" as const
     };
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...densityModel,
       loads: [
         { name: "down", type: "nodalForce", nodeSet: "loadNodes", vector: [0, 0, -100] },
@@ -154,7 +154,7 @@ describe("solveDynamicLinearTetMDOF", () => {
       outputInterval: 0.01,
       loadProfile: "ramp" as const
     };
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...densityModel,
       steps: [
         { ...firstStep, name: "case-a" },
@@ -305,7 +305,7 @@ describe("solveDynamicLinearTetMDOF", () => {
   });
 
   test("zero load produces zero displacement, velocity, and acceleration", () => {
-    const model: OpenCAEModelJson = {
+    const model: OpenFEAModelJson = {
       ...densityModel,
       loads: [],
       steps: [
@@ -367,7 +367,7 @@ describe("solveDynamicLinearTetMDOF", () => {
   });
 
   test("responds to density and damping inputs", () => {
-    const heavyModel: OpenCAEModelJson = {
+    const heavyModel: OpenFEAModelJson = {
       ...densityModel,
       materials: [{ ...densityModel.materials[0], density: 7800 }]
     };

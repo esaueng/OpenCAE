@@ -55,7 +55,7 @@ function collectDirectory(relativeDir) {
 
 describe("CalculiX production quarantine", () => {
   test("old FEA container service is absent or quarantined under legacy-calculix-container", () => {
-    const oldPath = resolve(rootDir, "services/opencae-fea-container");
+    const oldPath = resolve(rootDir, "services/openfea-fea-container");
     const legacyPath = resolve(rootDir, "services/legacy-calculix-container");
 
     expect(() => statSync(oldPath)).toThrow();

@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     // Agent/tooling worktrees under .claude/ carry full repo copies whose suites
     // can't resolve workspace deps from this root — never sweep them into runs.
-    // packages/*/tests/** already run in the earlier "Test OpenCAE Core
+    // packages/*/tests/** already run in the earlier "Test OpenFEA Core
     // packages" CI step; excluding them here keeps the root `pnpm test` from
     // executing the heaviest suites (golden parity, 100k-DOF) twice.
     exclude: [...configDefaults.exclude, "**/.claude/**", "packages/*/tests/**"],

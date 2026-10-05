@@ -1,15 +1,15 @@
 {
-  "name": "opencae",
+  "name": "openfea",
   "version": "0.1.0",
   "private": true,
   "description": "Local-first browser CAD/CAE workspace for structural and thermal simulation.",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @opencae/api dev\" \"pnpm --filter @opencae/web dev\"",
-    "build": "pnpm build:core && pnpm --filter @opencae/api build && pnpm --filter @opencae/web build",
-    "build:core": "pnpm --filter @opencae/core build && pnpm --filter @opencae/examples build && pnpm --filter @opencae/solver-cpu build && pnpm --filter @opencae/solver-webgpu build && pnpm --filter @opencae/viewer build",
-    "build:cloudflare": "pnpm build:core && pnpm --filter @opencae/web build",
-    "verify:perf": "pnpm build:core && pnpm --filter @opencae/web build && node scripts/verify-web-performance.mjs",
+    "dev": "concurrently -n api,web -c cyan,blue \"pnpm --filter @openfea/api dev\" \"pnpm --filter @openfea/web dev\"",
+    "build": "pnpm build:core && pnpm --filter @openfea/api build && pnpm --filter @openfea/web build",
+    "build:core": "pnpm --filter @openfea/core build && pnpm --filter @openfea/examples build && pnpm --filter @openfea/solver-cpu build && pnpm --filter @openfea/solver-webgpu build && pnpm --filter @openfea/viewer build",
+    "build:cloudflare": "pnpm build:core && pnpm --filter @openfea/web build",
+    "verify:perf": "pnpm build:core && pnpm --filter @openfea/web build && node scripts/verify-web-performance.mjs",
     "verify:step-selection-browser": "node scripts/verify-step-selection-browser.mjs",
     "verify:project-results-browser": "node scripts/verify-project-results-browser.mjs",
     "verify:cloudflare-config": "node scripts/verify-cloudflare-config.mjs",
@@ -19,10 +19,10 @@
     "deploy:cloudflare:static": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc",
     "deploy:cloudflare:static:dry-run": "pnpm build:cloudflare && wrangler deploy --config wrangler.static.jsonc --dry-run",
     "test": "vitest run",
-    "typecheck": "pnpm --filter \"./packages/*\" --if-present typecheck && pnpm --filter @opencae/api exec tsc --noEmit && pnpm --filter @opencae/web exec tsc --noEmit",
-    "db:migrate": "pnpm --filter @opencae/db migrate",
-    "db:seed": "pnpm --filter @opencae/db seed",
-    "reset:local": "pnpm --filter @opencae/db reset && pnpm db:migrate && pnpm db:seed"
+    "typecheck": "pnpm --filter \"./packages/*\" --if-present typecheck && pnpm --filter @openfea/api exec tsc --noEmit && pnpm --filter @openfea/web exec tsc --noEmit",
+    "db:migrate": "pnpm --filter @openfea/db migrate",
+    "db:seed": "pnpm --filter @openfea/db seed",
+    "reset:local": "pnpm --filter @openfea/db reset && pnpm db:migrate && pnpm db:seed"
   },
   "devDependencies": {
     "concurrently": "^10.0.4",

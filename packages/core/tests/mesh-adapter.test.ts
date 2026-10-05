@@ -108,7 +108,7 @@ describe("actual volume mesh adapter", () => {
 
   test("rejects low-confidence complex selection mapping instead of nearest-node fallback", () => {
     expect(() => mapSelectionToSurfaceSet("missing-face", { surfaceFacets: [] })).toThrow(
-      "OpenCAE Core requires an actual volume mesh for complex geometry. Use Cloud FEA or generate a Core mesh."
+      "OpenFEA Core requires an actual volume mesh for complex geometry. Use Cloud FEA or generate a Core mesh."
     );
   });
 

@@ -1,4 +1,4 @@
-import { DEFAULT_STRUCTURAL_MAX_DOFS } from "@opencae/solver-cpu";
+import { DEFAULT_STRUCTURAL_MAX_DOFS } from "@openfea/solver-cpu";
 
 export const MAX_WEBGPU_TET4_DOFS = 500_000;
 export const CPU_TET_DOF_THRESHOLD = DEFAULT_STRUCTURAL_MAX_DOFS;

@@ -1,0 +1,13 @@
+{
+  "name": "@openfea/materials",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@openfea/schema": "workspace:*"
+  },
+  "license": "Apache-2.0"
+}

@@ -2,7 +2,7 @@ import { solvePreviewSdofTet4Cpu } from "./dynamic-preview-sdof";
 import { solveDynamicLinearTetMDOF } from "./dynamic-mdof";
 import { solveModalLinearTet } from "./modal";
 import { solveStaticLinearTet } from "./solver";
-import { validateCoreResult } from "@opencae/core";
+import { validateCoreResult } from "@openfea/core";
 import type {
   CoreDynamicSolveResult,
   CoreModalSolveResult,
@@ -171,7 +171,7 @@ function actualMeshError(
       ok: false,
       error: {
         code: "actual-volume-mesh-required",
-        message: "OpenCAE Core requires an actual volume mesh for this solve. No estimate fallback was used."
+        message: "OpenFEA Core requires an actual volume mesh for this solve. No estimate fallback was used."
       }
     };
   }
@@ -184,7 +184,7 @@ function actualMeshError(
       ok: false,
       error: {
         code: "preview-provenance-not-allowed",
-        message: "Production OpenCAE Core solves reject preview and local-estimate provenance. No preview fallback was used."
+        message: "Production OpenFEA Core solves reject preview and local-estimate provenance. No preview fallback was used."
       }
     };
   }

@@ -1,0 +1,3414 @@
+import { lazy, startTransition, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
+import { DynamicSolverSettingsSchema, isModalResultSummary, isRunResultReadyStatus, isStructuralResultSummary, isThermalResultSummary, ModalSolverSettingsSchema } from "@openfea/schema";
+import type { Constraint, CustomMaterial, DisplayFace, DisplayModel, DynamicSolverSettings, Load, MeshQuality, ModalSolverSettings, NamedSelection, Project, ResultField, ResultRenderBounds, ResultSummary, RunEvent, RunTimingEstimate, RunVariantRef, RunVariantResult, SimulationFidelity, Study } from "@openfea/schema";
+import { CloudUpload, FlaskConical, HardDrive, Keyboard, RotateCcw, X } from "lucide-react";
+import { addLoad, addSupport, assignMaterial, cancelRun, createProject, generateMesh, getResults, getRunVariant, importLocalProject, loadSampleProject, renameProject, repairUploadedStepModel, runMeshConvergence, runSimulation, saveRunReportCaptures, subscribeToRun, updateStudy as saveStudyPatch, uploadModel, type SampleAnalysisType, type SampleModelId } from "./lib/api";
+import { cancelWasmMeshing, type WasmMeshPhaseProgress } from "./lib/wasmMeshing";
+import { buildOpenFeaCoreModelForStudy, resolveSolverBackend } from "./workers/openfeaCoreSolve";
+import { manufacturingProcessForId, normalizeManufacturingParameters, resolveMaterial } from "@openfea/materials";
+import { BottomPanel, KeyboardShortcutGuide, type WorkspaceLogEntry } from "./components/BottomPanel";
+import { OpenFeaLogoMark } from "./components/OpenFeaLogoMark";
+import { ProjectStorageNotice } from "./components/ProjectStorageNotice";
+import { RightPanel } from "./components/RightPanel";
+import { StartScreen } from "./components/StartScreen";
+import { StepBar, type StepId } from "./components/StepBar";
+import { readinessForStudy } from "./runReadiness";
+import { BoundaryConditionMenu, CreateSimulationScreen } from "./components/SimulationWorkflow";
+import {
+  createViewerLoadMarkers,
+  directionVectorForLabel,
+  unitsForLoadType,
+  type DraftLoadPreview,
+  type LoadDirectionLabel,
+  type PayloadLoadMetadata,
+  type LoadType
+} from "./loadPreview";
+import { resetDisplayModelOrientation, type RotationAxis } from "./modelOrientation";
+import { buildLocalProjectFile, portableResultBundle, suggestedProjectFilename, type LocalResultBundle, type SolverSurfaceMesh } from "./projectFile";
+import type { ConvergenceProbe } from "./meshConvergence";
+import { prepareBlobSaveToDisk, type SaveFilePickerHandle } from "./lib/fileSave";
+import { BOUNDARY_CAPTURE_REVISION, captureResultViews, createCaptureQueue, type CaptureQueue, type ResultViewCaptures } from "./report/captureResultViews";
+import { isPreviewOnlyGeometry } from "./geometryFormats";
+import { workspaceNoticeFor, type WorkspaceNoticeTone } from "./workspaceNotice";
+import { geometryReplacementLosses } from "./geometryReplacement";
+import { GeometryReplaceDialog } from "./components/GeometryReplaceDialog";
+import { sampleOptionFor } from "./components/sampleOptions";
+import { solverSurfaceMeshFromModel } from "@openfea/core";
+import type { ViewerFaceTint } from "./components/CadViewer";
+import { buildReportData, suggestedReportFilename } from "./report/reportData";
+import { pngDataUrlToBlob, suggestedResultPngFilename } from "./report/resultPngExport";
+import { buildSelectedResultExport, selectedResultExportFilename, type SelectedResultExportFormat, type SelectedResultExportInput, type SelectedResultState } from "./report/selectedResultExport";
+import { buildResultViewerHtml, suggestedResultHtmlFilename } from "./resultViewerHtml";
+import { buildAutosavedWorkspace, buildAutosavedWorkspaceUiSnapshot, flushAutosavedWorkspace, installAutosavePageHideFlush, localRunIdForResultsRestore, parseAutosavedWorkspacePayload, readAutosavedWorkspace, scheduleAutosavedUiSnapshotWrite, scheduleAutosavedWorkspaceWrite, WORKSPACE_LOG_LIMIT } from "./appPersistence";
+import type { AutosavedWorkspace, WorkspaceUiSnapshot } from "./appPersistence";
+import { readCloudBackupPreference, requestPersistentBrowserStorage, restoreEncryptedCloudBackup, saveEncryptedCloudBackup, writeCloudBackupPreference, type CloudBackupPreference } from "./cloudBackup";
+import { isAnalyticsEnabled, setAnalyticsEnabled } from "./analytics";
+import {
+  canNavigateToStep,
+  isEditableShortcutTarget,
+  printLayerOrientationForViewer,
+  shouldAutoAdvanceAfterMaterialAssignment,
+  shouldAutoAdvanceAfterMeshGeneration,
+  shouldShowStartScreen,
+  workflowStepForShortcut
+} from "./appShellState";
+import { displayModelForUnits, formatResultMetric, loadValueForUnits, resultFieldForUnits, resultSummaryForUnits, resultValueForUnits, resultValueFromDisplayUnits, type UnitSystem } from "./unitDisplay";
+import { nextLoadLabel, nextSupportLabel, supportDisplayLabel } from "./supportLabels";
+import { nextSelectedPayloadObject, shouldClearPayloadSelectionOnViewerMiss } from "./payloadSelection";
+import { hasLegacyStepUploadFaces, hasUnresolvedStepFaceSelections, healStepFaceSelections, healStepHoleSupportSelections, legacyStepFaceHealMessage } from "./stepFaceHealing";
+import { stepGeometryNeedsRepair } from "./stepGeometryState";
+import { createLocalDynamicStructuralStudy, createLocalModalStudy, createLocalStaticStressStudy, createLocalThermalStudy } from "./localProjectFactory";
+import { compatibleResultModeForSummary, createPackedResultPlaybackCache, createResultFrameCache, hasDynamicPlaybackFrames, solverMeshSummaryFromResults, synthesizeModalPhaseFields, withDerivedSurfaceSafetyFactorFields, type SolverMeshSummary } from "./resultFields";
+import { appendResultProbe, availableStressComponents, derivedStressFieldsForComponent, governingVariantIdForProbe, MAX_RESULT_PROBES, resolveResultProbe, resultProbeTopologySignature, selectActiveResultField, semanticResultFieldKey, type ResultProbeAnchor, type ResultProbePin } from "./resultSelection";
+import { isResultDisplayEligible } from "./resultDisplayState";
+import { automaticResultFieldRange, DEFAULT_RESULT_COLOR_SCALE_SETTING, resolveResultColorScale, type ResultColorScaleSetting, type ResultColorScaleSettings } from "./resultColorScale";
+import { packResultFieldsForPlayback, packedPreparedPlaybackFrameOrdinal, playbackFieldsForResultMode, playbackMemoryBudgetBytes, type PackedPreparedPlaybackCache, type PreparedPlaybackFrameCache } from "./resultPlaybackCache";
+import {
+  advancePlaybackTimeline,
+  frameIndexForPlaybackOrdinal,
+  playbackOrdinalForSolverFramePosition,
+  PLAYBACK_ENDPOINT_HOLD_MS,
+  type PlaybackDirection,
+  solverFramePositionForPlaybackOrdinal
+} from "./resultPlaybackTimeline";
+import { preparePlaybackFramesInWorker } from "./workers/performanceClient";
+import type { WorkspaceInitialAction } from "./App";
+import { resolvedDeformation } from "./resultDeformation";
+import { DEFAULT_SECTION_PLANE, type PayloadObjectSelection, type PrintLayerOrientation, type ProjectionMode, type ResultMode, type ResultPlaybackFrameController, type SectionPlaneState, type StressComponent, type ThemeMode, type ViewerLoadMarker, type ViewerSupportMarker, type ViewMode } from "./workspaceViewTypes";
+import { defaultRecentProjectService, isRecentProjectsSupported } from "./recentProjects";
+import { useFocusTrap } from "./hooks/useFocusTrap";
+
+const lazyCadViewerImport = () => import("./components/CadViewer").then((module) => ({ default: module.CadViewer }));
+const CadViewer = lazy(lazyCadViewerImport);
+const ValidationGallery = lazy(() => import("./components/ValidationGallery").then((module) => ({ default: module.ValidationGallery })));
+const DEBUG_RESULT_PARAMS = typeof window === "undefined" ? new URLSearchParams() : new URLSearchParams(window.location.search);
+const DEBUG_RESULTS = import.meta.env.DEV && DEBUG_RESULT_PARAMS.get("debugResults") === "1";
+const DEBUG_RESULT_FRAME_CACHE_ONLY = DEBUG_RESULTS && DEBUG_RESULT_PARAMS.get("bypassPacked") === "1";
+
+// Reference numbers shown for the pre-seeded bracket demo before any solve runs.
+// The provenance marks them as generated sample values so the Results panel
+// never presents them as computed solver output.
+const seededSummary: ResultSummary = {
+  maxStress: 142,
+  maxStressUnits: "MPa",
+  maxDisplacement: 0.184,
+  maxDisplacementUnits: "mm",
+  safetyFactor: 1.8,
+  reactionForce: 500,
+  reactionForceUnits: "N",
+  provenance: {
+    kind: "local_estimate",
+    solver: "sample-bracket-reference",
+    solverVersion: "0.1.0",
+    meshSource: "mock",
+    resultSource: "generated",
+    units: "mm-N-s-MPa"
+  }
+};
+const DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.005;
+const MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS = 0.001;
+const PLAYBACK_UI_COMMIT_INTERVAL_MS = 250;
+const PLAYBACK_CACHE_PREP_FPS = 30;
+const PLAYBACK_ENDPOINT_EPSILON = 0.0001;
+const AUTOSAVE_UI_WRITE_DELAY_MS = 650;
+/** Outdated results stay viewable but never leave the app as a report or export (2026-09 review D4). */
+const STALE_RESULTS_EXPORT_MESSAGE = "These results are outdated: the study changed since the last run. Re-run the simulation before generating a report or export.";
+const AUTOSAVE_HEAVY_WRITE_DELAY_MS = 5000;
+const MODEL_IMPORT_INDICATOR_MIN_MS = 500;
+
+type ResultPlaybackCacheState =
+  | { status: "idle" }
+  | { status: "preparing"; cacheKey: string }
+  | { status: "ready"; cacheKey: string; cache: PreparedPlaybackFrameCache }
+  | { status: "fallback"; cacheKey: string; message: string }
+  | { status: "error"; cacheKey: string; message: string };
+
+type MutableResultPlaybackFrameController = ResultPlaybackFrameController & {
+  setPackedFrame: (cache: PackedPreparedPlaybackCache, framePosition: number) => void;
+  clear: () => void;
+};
+
+type ProjectActionHandle = {
+  clientId: string;
+  generation: number;
+  signal: AbortSignal;
+  isCurrent: () => boolean;
+};
+
+interface WorkspaceAppProps {
+  initialAction?: WorkspaceInitialAction | null;
+  restoredWorkspace?: AutosavedWorkspace | null;
+}
+
+export function WorkspaceApp({ initialAction = null, restoredWorkspace: providedRestoredWorkspace }: WorkspaceAppProps) {
+  const restoredWorkspace = useMemo(() => providedRestoredWorkspace ?? readAutosavedWorkspace(), [providedRestoredWorkspace]);
+  const restoredProjectFile = restoredWorkspace?.projectFile;
+  const restoredUi = restoredWorkspace?.ui;
+  const restoredResults = restoredProjectFile?.results;
+  const reloadResultsRunId = localRunIdForResultsRestore(restoredWorkspace);
+  const [project, setProject] = useState<Project | null>(restoredProjectFile?.project ?? null);
+  const [displayModel, setDisplayModel] = useState<DisplayModel | null>(restoredProjectFile?.displayModel ?? null);
+  const [homeRequested, setHomeRequested] = useState(restoredUi?.homeRequested ?? !restoredProjectFile);
+  const [activeStep, setActiveStep] = useState<StepId>(restoredUi?.activeStep ?? "model");
+  const [undoStack, setUndoStack] = useState<Project[]>(restoredUi?.undoStack ?? []);
+  const [redoStack, setRedoStack] = useState<Project[]>(restoredUi?.redoStack ?? []);
+  const [selectedFaceId, setSelectedFaceId] = useState<string | null>(restoredUi?.selectedFaceId ?? null);
+  const [selectedLoadPoint, setSelectedLoadPoint] = useState<[number, number, number] | null>(restoredUi?.selectedLoadPoint ?? null);
+  const [selectedPayloadObject, setSelectedPayloadObject] = useState<PayloadObjectSelection | null>(restoredUi?.selectedPayloadObject ?? null);
+  const [viewMode, setViewMode] = useState<ViewMode>(restoredUi?.viewMode ?? (restoredResults?.fields.length ? "results" : "model"));
+  const [themeMode, setThemeMode] = useState<ThemeMode>(restoredUi?.themeMode ?? "dark");
+  const [projectionMode, setProjectionMode] = useState<ProjectionMode>(restoredUi?.projectionMode ?? "perspective");
+  const [resultMode, setResultMode] = useState<ResultMode>(() => compatibleResultModeForSummary(
+    restoredResults?.summary,
+    restoredUi?.resultMode ?? "stress"
+  ));
+  const [selectedModeIndex, setSelectedModeIndex] = useState(restoredUi?.selectedModeIndex ?? 1);
+  const [stressComponent, setStressComponent] = useState<StressComponent>(restoredUi?.stressComponent ?? "von_mises");
+  const [resultColorScaleSettings, setResultColorScaleSettings] = useState<ResultColorScaleSettings>(restoredUi?.resultColorScaleSettings ?? {});
+  const [resultProbes, setResultProbes] = useState<ResultProbePin[]>([]);
+  const [resultProbeLimitReached, setResultProbeLimitReached] = useState(false);
+  const [resultRenderBounds, setResultRenderBounds] = useState<ResultRenderBounds | null>(null);
+  const [showDeformed, setShowDeformed] = useState(restoredUi?.showDeformed ?? false);
+  const [showDimensions, setShowDimensions] = useState(restoredUi?.showDimensions ?? false);
+  const [sectionPlane, setSectionPlane] = useState<SectionPlaneState>(restoredUi?.sectionPlane ?? { ...DEFAULT_SECTION_PLANE });
+  const [stressExaggeration, setStressExaggeration] = useState(restoredUi?.stressExaggeration ?? 1.8);
+  const [fitSignal, setFitSignal] = useState(0);
+  const [viewAxis, setViewAxis] = useState<RotationAxis | null>(null);
+  const [viewAxisSignal, setViewAxisSignal] = useState(0);
+  const [status, setStatus] = useState(restoredUi?.status ?? (restoredProjectFile ? "Workspace restored after reload." : "Ready"));
+  const [logs, setLogs] = useState<WorkspaceLogEntry[]>(() => restoredUi?.logs.length
+    ? restoredUi.logs
+    : (restoredProjectFile ? ["Workspace restored after reload.", "Ready | Local Mode"] : ["Ready | Local Mode"]).map((message) => ({ message, at: Date.now() })));
+  const [runProgress, setRunProgress] = useState(restoredUi?.runProgress ?? (restoredResults?.fields.length ? 100 : 0));
+  const [meshPhaseProgress, setMeshPhaseProgress] = useState<WasmMeshPhaseProgress | null>(null);
+  // Meshing is the most likely first failure, and until now the reason survived only as a
+  // status-bar string and one line in a collapsed drawer: the progress card vanished and
+  // the Mesh panel returned to its idle state, showing nothing at all. Mirrors runError.
+  const [meshError, setMeshError] = useState<string | null>(null);
+  const [convergenceBusy, setConvergenceBusy] = useState(false);
+  const [convergenceProgress, setConvergenceProgress] = useState("");
+  const [runTiming, setRunTiming] = useState<RunTimingEstimate | null>(null);
+  // runTiming carries live estimates and is cleared the moment a run completes, which is
+  // exactly when the elapsed time stops being an estimate and becomes a fact. Keep that
+  // fact separately so the Run panel and the report can state it; it is cleared alongside
+  // the results it describes, never outliving them.
+  const [solveElapsedMs, setSolveElapsedMs] = useState<number | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  // Set when a study edit clears the last results (with the edit named), so
+  // the loss is announced on every step instead of one line in the collapsed
+  // log drawer (2026-09 review D4).
+  const [resultsOutdatedBy, setResultsOutdatedBy] = useState<string | null>(restoredUi?.resultsOutdatedBy ?? null);
+  // Sequence counter for staleness edits: repeating the same edit after a
+  // dismissal must re-raise the banner (the notice key includes it).
+  const [resultsOutdatedSequence, setResultsOutdatedSequence] = useState(0);
+  const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
+  // Geometry replacement waits for confirmation when it would clear the study
+  // setup (2026-09 review D5).
+  const [pendingGeometryReplacement, setPendingGeometryReplacement] = useState<{ actionLabel: string; losses: string[]; proceed: () => void } | null>(null);
+  // A consequence of opening a file (mesh not restored) that needs an action (2026-09 review F13).
+  const [openNote, setOpenNote] = useState<string | null>(null);
+  // Report figures are captured through the live viewer, which flips modes
+  // for a moment after every solve; say so and hold the mode controls while
+  // it happens (2026-09 review D15).
+  const [reportCaptureBusy, setReportCaptureBusy] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [pngExportBusy, setPngExportBusy] = useState(false);
+  const [pngExportError, setPngExportError] = useState<string | null>(null);
+  const [htmlExportBusy, setHtmlExportBusy] = useState(false);
+  const [htmlExportError, setHtmlExportError] = useState<string | null>(null);
+  const [dataExportBusy, setDataExportBusy] = useState<SelectedResultExportFormat | null>(null);
+  const [dataExportError, setDataExportError] = useState<string | null>(null);
+  const [overflowRecoveryRequest, setOverflowRecoveryRequest] = useState(0);
+  const [cloudBackupPreference, setCloudBackupPreference] = useState<CloudBackupPreference | null>(() => readCloudBackupPreference());
+  const [analyticsEnabled, setAnalyticsEnabledState] = useState(() => isAnalyticsEnabled());
+  const [overflowRecoveryNeeded, setOverflowRecoveryNeeded] = useState(false);
+  const [storageRecoveryNoticeOpen, setStorageRecoveryNoticeOpen] = useState(false);
+  const [cloudBackupBusy, setCloudBackupBusy] = useState(false);
+  const [activeRunId, setActiveRunId] = useState(restoredUi?.activeRunId || restoredResults?.activeRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
+  const [completedRunId, setCompletedRunId] = useState(restoredUi?.completedRunId || restoredResults?.completedRunId || "run-bracket-demo-seeded");
+  const [processingRunId, setProcessingRunId] = useState<string | null>(null);
+  const [resultSummary, setResultSummary] = useState<ResultSummary | null>(() =>
+    restoredResults?.summary ?? (hasSeededBracketDemoRun(restoredProjectFile?.project) ? seededSummary : null));
+  const [resultFields, setResultFields] = useState<ResultField[]>(() => restoredResults
+    ? withDerivedSurfaceSafetyFactorFields(restoredResults)
+    : []);
+  const [resultVariants, setResultVariants] = useState<RunVariantResult[]>(restoredResults?.variants ?? []);
+  const resultVariantLoadGenerationRef = useRef(0);
+  const [resultVariantRefs, setResultVariantRefs] = useState<RunVariantRef[]>(() => restoredResults?.variantRefs
+    ?? restoredResults?.variants?.map(({ id, name, kind, caseId, combinationId }) => ({ id, name, kind, caseId, combinationId }))
+    ?? []);
+  const [activeResultVariantId, setActiveResultVariantId] = useState(restoredResults?.activeVariantId ?? restoredResults?.variants?.[0]?.id ?? "");
+  const [resultSurfaceMesh, setResultSurfaceMesh] = useState<SolverSurfaceMesh | undefined>(restoredResults?.surfaceMesh);
+  const [solverMeshSummary, setSolverMeshSummary] = useState<SolverMeshSummary | null>(restoredResults?.solverMeshSummary ?? null);
+  const [reportCaptures, setReportCaptures] = useState<{ runId: string; captures: ResultViewCaptures } | null>(() => {
+    const restoredRunId = restoredResults?.completedRunId ?? restoredResults?.activeRunId;
+    return restoredRunId && restoredResults?.reportCaptures ? { runId: restoredRunId, captures: restoredResults.reportCaptures } : null;
+  });
+  const [viewerCaptureRevision, setViewerCaptureRevision] = useState(0);
+  const [resultFrameIndex, setResultFrameIndex] = useState(restoredUi?.resultFrameIndex ?? 0);
+  const [resultPlaybackFramePosition, setResultPlaybackFramePosition] = useState(0);
+  const [resultPlaybackOrdinalPosition, setResultPlaybackOrdinalPosition] = useState(0);
+  const [resultPlaybackPlaying, setResultPlaybackPlaying] = useState(false);
+  const [resultPlaybackFps, setResultPlaybackFps] = useState(restoredUi?.resultPlaybackFps ?? 12);
+  const [resultPlaybackReverseLoop, setResultPlaybackReverseLoop] = useState(restoredUi?.resultPlaybackReverseLoop ?? false);
+  const [resultPlaybackCacheState, setResultPlaybackCacheState] = useState<ResultPlaybackCacheState>({ status: "idle" });
+  const [draftLoadType, setDraftLoadType] = useState<LoadType>(restoredUi?.draftLoadType ?? "force");
+  const [draftLoadValue, setDraftLoadValue] = useState(restoredUi?.draftLoadValue ?? 500);
+  const [draftSupportTemperature, setDraftSupportTemperature] = useState(20);
+  const [draftLoadDirection, setDraftLoadDirection] = useState<LoadDirectionLabel>(restoredUi?.draftLoadDirection ?? "-Z");
+  const [draftPayloadPreview, setDraftPayloadPreview] = useState<{ value: number; metadata: PayloadLoadMetadata } | null>(null);
+  const [previewLoadEdit, setPreviewLoadEdit] = useState<Load | null>(null);
+  const [sampleModel, setSampleModel] = useState<SampleModelId>(restoredUi?.sampleModel ?? "bracket");
+  const [sampleAnalysisType, setSampleAnalysisType] = useState<SampleAnalysisType>(restoredUi?.sampleAnalysisType ?? "static_stress");
+  const [previewPrintLayerOrientation, setPreviewPrintLayerOrientation] = useState<PrintLayerOrientation | null | undefined>(undefined);
+  const [isStepbarCollapsed, setIsStepbarCollapsed] = useState(restoredUi?.isStepbarCollapsed ?? false);
+  const [showBoundaryConditionMenu, setShowBoundaryConditionMenu] = useState(false);
+  const [isRepairingModel, setIsRepairingModel] = useState(false);
+  const [singleKeyShortcutsEnabled, setSingleKeyShortcutsEnabled] = useState(() => {
+    try {
+      return window.localStorage.getItem("opencae.shortcuts.singleKey") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const [shortcutGuideOpen, setShortcutGuideOpen] = useState(false);
+  const [validationGalleryOpen, setValidationGalleryOpen] = useState(false);
+  const [modelImport, setModelImport] = useState<{ id: number; filename: string } | null>(null);
+  const didRequestRestoredHomeView = useRef(false);
+  const activeRunSourceRef = useRef<EventSource | null>(null);
+  const processingRunIdRef = useRef<string | null>(null);
+  const projectRef = useRef<Project | null>(project);
+  const projectActionGenerationRef = useRef(0);
+  const projectActionAbortRef = useRef<AbortController | null>(null);
+  const projectActionSourceRef = useRef<Project | null>(null);
+  const projectActionClientIdRef = useRef<string | null>(null);
+  const modelImportSequenceRef = useRef(0);
+  const autosaveWriteFailureNotifiedRef = useRef(false);
+  const autosaveDegradedNotifiedRef = useRef(false);
+  const overflowRecoveryHandledRef = useRef(false);
+  const fullAutosaveSnapshotRef = useRef<() => AutosavedWorkspace | null>(() => null);
+  const flushAutosaveRef = useRef<() => void>(() => undefined);
+  const stepFaceHealNotifiedRef = useRef(false);
+  const stepHoleSupportAuditRef = useRef<string | null>(null);
+  const workspaceShortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => undefined);
+  const workspaceMainRef = useRef<HTMLElement | null>(null);
+  const shortcutGuideRef = useFocusTrap<HTMLDivElement>(shortcutGuideOpen, () => setShortcutGuideOpen(false));
+  const resultFrameIndexRef = useRef(0);
+  const resultPlaybackFramePositionRef = useRef(0);
+  const resultPlaybackOrdinalPositionRef = useRef(0);
+  const resultPlaybackDirectionRef = useRef<PlaybackDirection>(1);
+  const resultPlaybackEndpointHoldRemainingMsRef = useRef(0);
+  const resultPlaybackFrameControllerRef = useRef<MutableResultPlaybackFrameController | null>(null);
+  const viewerInteractingRef = useRef(false);
+  const viewerCaptureRef = useRef<(() => Promise<string>) | null>(null);
+  const captureQueueRef = useRef<CaptureQueue | null>(null);
+  const reportCaptureInFlightRef = useRef<string | null>(null);
+  // Viewer-only view-mode override for the report's boundary-conditions
+  // capture. Kept separate from viewMode so flipping the viewer to model view
+  // mid-capture does not re-trigger (and cancel) the capture effect.
+  const [captureViewMode, setCaptureViewMode] = useState<ViewMode | null>(null);
+  const stepPreviewMeasureWaitersRef = useRef<Array<() => void>>([]);
+  const reportStateRef = useRef({ viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying });
+  const initialActionConsumedRef = useRef(false);
+  if (!resultPlaybackFrameControllerRef.current) {
+    resultPlaybackFrameControllerRef.current = createResultPlaybackFrameController();
+  }
+  if (!captureQueueRef.current) captureQueueRef.current = createCaptureQueue();
+  if (!projectActionClientIdRef.current) {
+    projectActionClientIdRef.current = createProjectActionClientId();
+  }
+
+  const study = project?.studies[0] ?? null;
+  const assignedPrintLayerOrientation = useMemo<PrintLayerOrientation | null>(() => {
+    const assignment = study?.materialAssignments[0];
+    if (!assignment) return null;
+    let material;
+    try {
+      material = resolveMaterial(assignment.materialId, project?.customMaterials);
+    } catch {
+      return null;
+    }
+    const parameters = normalizeManufacturingParameters(material, assignment.parameters ?? {});
+    const process = parameters.manufacturingProcessId ? manufacturingProcessForId(parameters.manufacturingProcessId) : undefined;
+    return process?.settingsKind === "fdm" || process?.settingsKind === "build_direction" ? parameters.layerOrientation ?? "z" : null;
+  }, [project?.customMaterials, study?.materialAssignments]);
+  const printLayerOrientation = printLayerOrientationForViewer(assignedPrintLayerOrientation, previewPrintLayerOrientation);
+  const selectedFace = useMemo(() => displayModel?.faces.find((face) => face.id === selectedFaceId) ?? null, [displayModel, selectedFaceId]);
+  const displayUnitSystem = project?.unitSystem ?? "SI";
+  const displayModelForUi = useMemo(() => displayModel ? displayModelForUnits(displayModel, displayUnitSystem) : null, [displayModel, displayUnitSystem]);
+  const resultSummaryForUi = useMemo(() => resultSummary ? resultSummaryForUnits(resultSummary, displayUnitSystem) : null, [displayUnitSystem, resultSummary]);
+  // The legend's max is the averaged surface field; the headline peak is the
+  // unaveraged element value. Show both on the legend (2026-09 review F8).
+  const resultPeaks = useMemo<Partial<Record<ResultMode, string>>>(() => {
+    if (!resultSummaryForUi || !isStructuralResultSummary(resultSummaryForUi)) return {};
+    return {
+      stress: `Peak ${formatResultMetric(resultSummaryForUi.maxStress, resultSummaryForUi.maxStressUnits)}`,
+      displacement: `Peak ${formatResultMetric(resultSummaryForUi.maxDisplacement, resultSummaryForUi.maxDisplacementUnits)}`
+    };
+  }, [resultSummaryForUi]);
+  const resultFieldsForUi = useMemo(() => {
+    const converted = resultFields.map((field) => resultFieldForUnits(field, displayUnitSystem));
+    return resultSummary && isModalResultSummary(resultSummary)
+      ? synthesizeModalPhaseFields(converted, selectedModeIndex)
+      : converted;
+  }, [displayUnitSystem, resultFields, resultSummary, selectedModeIndex]);
+  const resultFrameCache = useMemo(() => createResultFrameCache(resultFieldsForUi), [resultFieldsForUi]);
+  const packedResultPlaybackCache = useMemo(() => createPackedResultPlaybackCache(resultFieldsForUi), [resultFieldsForUi]);
+  const resultFieldsSignature = useMemo(() => resultFieldsSignatureForCache(resultFieldsForUi), [resultFieldsForUi]);
+  const playbackFrameIndexes = useMemo(
+    () => packedResultPlaybackCache ? Array.from(packedResultPlaybackCache.frameIndexes) : resultFrameCache.frameIndexes,
+    [packedResultPlaybackCache, resultFrameCache]
+  );
+  const resultVisualOrdinalPosition = resultPlaybackPlaying
+    ? resultPlaybackOrdinalPosition
+    : playbackOrdinalForSolverFramePosition(playbackFrameIndexes, resultFrameIndex);
+  const resultVisualFramePosition = resultPlaybackPlaying
+    ? resultPlaybackFramePosition
+    : resultFrameIndex;
+  const resultPlaybackCacheKey = useMemo(() => [
+    completedRunId,
+    activeRunId,
+    activeResultVariantId || "no-variant",
+    displayModelForUi?.id ?? "no-model",
+    displayModelForUi?.nativeCad?.contentBase64?.length ?? displayModelForUi?.visualMesh?.contentBase64?.length ?? 0,
+    resultMode,
+    selectedModeIndex,
+    stressComponent,
+    JSON.stringify(resultColorScaleSettings),
+    showDeformed ? "deformed" : "undeformed",
+    stressExaggeration.toFixed(2),
+    study?.meshSettings.preset ?? "no-mesh",
+    displayUnitSystem,
+    resultFieldsSignature,
+    resultSurfaceMesh?.id ?? "no-surface",
+    resultFrameCache.frameIndexes.join(",")
+  ].join("|"), [activeResultVariantId, activeRunId, completedRunId, displayModelForUi, displayUnitSystem, resultColorScaleSettings, resultFieldsSignature, resultSurfaceMesh?.id, resultFrameCache.frameIndexes, resultMode, selectedModeIndex, showDeformed, stressComponent, stressExaggeration, study?.meshSettings.preset]);
+  const visibleResultFieldsForUi = useMemo(
+    () => {
+      if (DEBUG_RESULT_FRAME_CACHE_ONLY) {
+        if (resultPlaybackPlaying) return resultFrameCache.fieldsForFramePosition(resultVisualFramePosition);
+        return resultFrameCache.fieldsForFrame(resultFrameIndex);
+      }
+      if (resultPlaybackPlaying) {
+        return packedResultPlaybackCache?.fieldsForFramePosition(resultVisualFramePosition) ?? resultFrameCache.fieldsForFramePosition(resultVisualFramePosition);
+      }
+      return packedResultPlaybackCache?.fieldsForFrame(resultFrameIndex) ?? resultFrameCache.fieldsForFrame(resultFrameIndex);
+    },
+    [packedResultPlaybackCache, resultFrameCache, resultFrameIndex, resultPlaybackPlaying, resultVisualFramePosition]
+  );
+  const resultPlaybackBufferCacheForViewer = !DEBUG_RESULT_FRAME_CACHE_ONLY && resultPlaybackCacheState.status === "ready"
+    ? resultPlaybackCacheState.cache.packed ?? null
+    : null;
+  const activeResultSelectionForUi = useMemo(() => selectActiveResultField({
+    fields: visibleResultFieldsForUi,
+    resultMode,
+    stressComponent,
+    surfaceMesh: resultSurfaceMesh,
+    frameIndex: resultFrameIndex,
+    modeIndex: selectedModeIndex
+  }), [resultFrameIndex, resultMode, resultSurfaceMesh, selectedModeIndex, stressComponent, visibleResultFieldsForUi]);
+  const resultDisplayEligible = useMemo(() => study ? isResultDisplayEligible({
+    studyType: study.type,
+    summary: resultSummary,
+    fields: visibleResultFieldsForUi,
+    completedRunId,
+    resultMode,
+    stressComponent,
+    surfaceMesh: resultSurfaceMesh,
+    frameIndex: resultFrameIndex,
+    modeIndex: selectedModeIndex
+  }) : false, [completedRunId, resultFrameIndex, resultMode, resultSummary, resultSurfaceMesh, selectedModeIndex, stressComponent, study, visibleResultFieldsForUi]);
+  useEffect(() => {
+    const available = availableStressComponents(resultFields);
+    if (available.length > 0 && !available.includes(stressComponent)) setStressComponent("von_mises");
+  }, [resultFields, stressComponent]);
+  const activeCanonicalResultField = useMemo(() => {
+    return selectActiveResultField({
+      fields: resultFields,
+      resultMode,
+      stressComponent,
+      surfaceMesh: resultSurfaceMesh,
+      frameIndex: resultFrameIndex,
+      modeIndex: selectedModeIndex
+    }).scalarField;
+  }, [resultFields, resultFrameIndex, resultMode, resultSurfaceMesh, selectedModeIndex, stressComponent]);
+  const activeResultColorScaleKey = activeCanonicalResultField ? semanticResultFieldKey(activeCanonicalResultField) : null;
+  const activeResultColorScaleSetting = activeResultColorScaleKey
+    ? resultColorScaleSettings[activeResultColorScaleKey] ?? DEFAULT_RESULT_COLOR_SCALE_SETTING
+    : DEFAULT_RESULT_COLOR_SCALE_SETTING;
+  const canonicalScaleFields = useMemo(() => resultMode === "stress" && stressComponent !== "von_mises"
+    ? [...resultFields, ...derivedStressFieldsForComponent(resultFields, stressComponent)]
+    : resultFields, [resultFields, resultMode, stressComponent]);
+  const activeCanonicalAutomaticRange = useMemo(() => activeCanonicalResultField
+    ? automaticResultFieldRange(canonicalScaleFields, semanticResultFieldKey, activeCanonicalResultField)
+    : { min: 0, max: 1 }, [activeCanonicalResultField, canonicalScaleFields]);
+  const activeResultColorScale = useMemo(() => {
+    const field = activeCanonicalResultField;
+    if (!field) return resolveResultColorScale({
+      type: resultMode,
+      component: resultMode === "stress" ? stressComponent : undefined,
+      automaticRange: { min: 0, max: 1 }
+    });
+    const automaticRange = {
+      min: resultValueForUnits(field, activeCanonicalAutomaticRange.min, displayUnitSystem).value,
+      max: resultValueForUnits(field, activeCanonicalAutomaticRange.max, displayUnitSystem).value
+    };
+    const displaySetting: ResultColorScaleSetting = {
+      ...activeResultColorScaleSetting,
+      ...(activeResultColorScaleSetting.manualMin !== undefined
+        ? { manualMin: resultValueForUnits(field, activeResultColorScaleSetting.manualMin, displayUnitSystem).value }
+        : {}),
+      ...(activeResultColorScaleSetting.manualMax !== undefined
+        ? { manualMax: resultValueForUnits(field, activeResultColorScaleSetting.manualMax, displayUnitSystem).value }
+        : {})
+    };
+    return resolveResultColorScale({
+      type: field.type,
+      component: field.component,
+      automaticRange,
+      setting: displaySetting
+    });
+  }, [activeCanonicalAutomaticRange, activeCanonicalResultField, activeResultColorScaleSetting, displayUnitSystem, resultMode, stressComponent]);
+  const activeResultColorScaleControl = useMemo(() => {
+    if (!activeCanonicalResultField || !activeResultColorScaleKey) return undefined;
+    const displayAutomaticMin = resultValueForUnits(activeCanonicalResultField, activeCanonicalAutomaticRange.min, displayUnitSystem).value;
+    const displayAutomaticMax = resultValueForUnits(activeCanonicalResultField, activeCanonicalAutomaticRange.max, displayUnitSystem).value;
+    const displaySetting: ResultColorScaleSetting = {
+      ...activeResultColorScaleSetting,
+      ...(activeResultColorScaleSetting.manualMin !== undefined
+        ? { manualMin: resultValueForUnits(activeCanonicalResultField, activeResultColorScaleSetting.manualMin, displayUnitSystem).value }
+        : {}),
+      ...(activeResultColorScaleSetting.manualMax !== undefined
+        ? { manualMax: resultValueForUnits(activeCanonicalResultField, activeResultColorScaleSetting.manualMax, displayUnitSystem).value }
+        : {})
+    };
+    return {
+      setting: displaySetting,
+      automaticMin: displayAutomaticMin,
+      automaticMax: displayAutomaticMax,
+      displayMin: activeResultColorScale.min,
+      displayMax: activeResultColorScale.max,
+      units: activeResultSelectionForUi.scalarField?.units ?? activeCanonicalResultField.units
+    };
+  }, [activeCanonicalAutomaticRange, activeCanonicalResultField, activeResultColorScale, activeResultColorScaleKey, activeResultColorScaleSetting, activeResultSelectionForUi.scalarField?.units, displayUnitSystem]);
+  const activeEnvelopeVariant = resultVariants.find((variant) => variant.id === activeResultVariantId && variant.kind === "envelope");
+  const resolvedResultProbesForUi = useMemo(() => resultProbes.flatMap((probe) => {
+    const resolved = resolveResultProbe(probe, activeResultSelectionForUi.scalarField, resultSurfaceMesh);
+    if (!resolved) return [];
+    const governingMode = resultMode === "displacement" ? "displacement" : resultMode === "stress" ? "stress" : undefined;
+    const governingId = governingMode
+      ? governingVariantIdForProbe(probe, activeEnvelopeVariant?.governingVariantIndices, governingMode)
+      : undefined;
+    const governingName = governingId ? resultVariantRefs.find((reference) => reference.id === governingId)?.name ?? governingId : undefined;
+    return [{ ...resolved, ...(governingName ? { governingVariantName: governingName } : {}) }];
+  }), [activeEnvelopeVariant?.governingVariantIndices, activeResultSelectionForUi.scalarField, resultMode, resultProbes, resultSurfaceMesh, resultVariantRefs]);
+  const resultProbeTopologyKey = resultProbeTopologySignature(project?.id, completedRunId, displayModel?.id, resultSurfaceMesh, activeResultVariantId);
+  // In-browser wasm meshing has no cooperative cancel; terminate the mesh
+  // worker if the workspace unmounts mid-mesh (no-op when idle or flag off).
+  useEffect(() => () => cancelWasmMeshing("Meshing cancelled: workspace closed."), []);
+  useEffect(() => {
+    setResultProbes([]);
+    setResultProbeLimitReached(false);
+  }, [resultProbeTopologyKey]);
+  useEffect(() => {
+    if (!DEBUG_RESULTS) return;
+    const frameField = visibleResultFieldsForUi.find((field) => field.type === "stress")
+      ?? visibleResultFieldsForUi.find((field) => field.type === "displacement");
+    console.debug("[OpenFEA results] visible frame", {
+      frameIndex: resultFrameIndex,
+      timeSeconds: frameField?.timeSeconds,
+      stress: debugResultField(visibleResultFieldsForUi.find((field) => field.type === "stress")),
+      displacement: debugResultField(visibleResultFieldsForUi.find((field) => field.type === "displacement"))
+    });
+  }, [resultFrameIndex, visibleResultFieldsForUi]);
+  useEffect(() => {
+    if (resultPlaybackPlaying) return;
+    const packed = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache.packed : undefined;
+    if (!packed) return;
+    resultPlaybackFrameControllerRef.current?.setPackedFrame(packed, resultVisualFramePosition);
+  }, [resultPlaybackCacheState, resultPlaybackPlaying, resultVisualFramePosition, visibleResultFieldsForUi]);
+  const resultPlaybackCacheLabel = useMemo(() => {
+    if (resultPlaybackCacheState.status === "preparing") return "Preparing smooth playback";
+    if (resultPlaybackCacheState.status === "ready") {
+      if (resultPlaybackCacheState.cache.mode === "full") return `Smooth playback ready · ${resultPlaybackCacheState.cache.frameCount} interpolated frames`;
+      if (resultPlaybackCacheState.cache.mode === "reducedFps") return `Smooth playback ready · ${resultPlaybackCacheState.cache.presentationFps} fps cache`;
+      return "Playback cached at solver frames";
+    }
+    if (resultPlaybackCacheState.status === "fallback" || resultPlaybackCacheState.status === "error") return resultPlaybackCacheState.message;
+    return "";
+  }, [resultPlaybackCacheState]);
+  const commitPlaybackViewerFrame = useCallback((framePosition: number) => {
+    const cache = resultPlaybackCacheState.status === "ready" ? resultPlaybackCacheState.cache : null;
+    if (cache?.packed) {
+      resultPlaybackFrameControllerRef.current?.setPackedFrame(cache.packed, framePosition);
+    }
+  }, [resultPlaybackCacheState]);
+  const solverRunning = Boolean(processingRunId) || (runProgress > 0 && runProgress < 100);
+  const runButtonProgress = Math.min(100, Math.max(0, Math.round(runProgress)));
+  reportStateRef.current = { viewMode, resultMode, resultSummary, completedRunId, resultPlaybackPlaying };
+  const runReadiness = useMemo(() => readinessForStudy(study, project?.customMaterials), [project?.customMaterials, study]);
+  const canRunSimulation = runReadiness.every((item) => item.done) && !solverRunning && !convergenceBusy;
+  const missingRunItems = runReadiness.filter((item) => !item.done).map((item) => item.label);
+  const hasActualVolumeMesh = Boolean(study?.meshSettings.summary?.artifacts?.actualCoreModel);
+  const openStepNeedsRepair = stepGeometryNeedsRepair(project) && !hasActualVolumeMesh;
+  // STL/OBJ previews cannot be volume-meshed; before this gate a placeholder
+  // mesh marked the step done and the run failed blaming the browser build
+  // (2026-09 review D6).
+  const previewOnlyGeometry = isPreviewOnlyGeometry(displayModel) && !hasActualVolumeMesh;
+  const effectiveMissingRunItems = [
+    ...missingRunItems,
+    ...(openStepNeedsRepair ? ["Closed STEP solid"] : []),
+    ...(previewOnlyGeometry ? ["Meshable geometry (STEP)"] : [])
+  ];
+  const effectiveCanRunSimulation = canRunSimulation && !openStepNeedsRepair && !previewOnlyGeometry;
+  const canUndoAction = undoStack.length > 0 && !solverRunning && !convergenceBusy;
+  const canRedoAction = redoStack.length > 0 && !solverRunning && !convergenceBusy;
+  // One notice for the whole workspace (2026-09 review D7): a failed mesh or
+  // run, or results cleared by an edit, used to be visible only on the panel
+  // where it happened and as a footer pill.
+  const workspaceNotice = workspaceNoticeFor({ meshError, meshing: meshPhaseProgress !== null, runError, solverRunning, resultsOutdatedBy, resultsOutdatedSequence, openNote, dismissedKey: dismissedNoticeKey });
+  const stepNotices: Partial<Record<StepId, WorkspaceNoticeTone>> = workspaceNotice?.step ? { [workspaceNotice.step]: workspaceNotice.tone } : {};
+  // The generated volume mesh's boundary, for the Mesh step's viewer. "Toggle
+  // mesh" used to draw nothing for uploads and a decorative box for samples
+  // (2026-09 review D13).
+  // Faces carrying a support (teal) or a load (amber), tinted on the model so
+  // an assignment is visible where it lives, not only as a callout (2026-09 review F2).
+  const assignedFaceTints = useMemo<ViewerFaceTint[]>(() => {
+    if (!study) return [];
+    const faceIdsFor = (selectionRef: string) => study.namedSelections.find((item) => item.id === selectionRef)?.geometryRefs.filter((ref) => ref.entityType === "face").map((ref) => ref.entityId) ?? [];
+    const tints = new Map<string, string>();
+    for (const load of study.loads) for (const faceId of faceIdsFor(load.selectionRef)) tints.set(faceId, "#f59e0b");
+    for (const support of study.constraints) for (const faceId of faceIdsFor(support.selectionRef)) tints.set(faceId, "#2dd4bf");
+    return [...tints].map(([faceId, color]) => ({ faceId, color }));
+  }, [study]);
+  const meshArtifactModel = (study?.meshSettings.summary?.artifacts as { actualCoreModel?: { model?: unknown } } | undefined)?.actualCoreModel?.model;
+  const meshPreviewSurface = useMemo(() => {
+    if (!meshArtifactModel) return undefined;
+    try {
+      return solverSurfaceMeshFromModel(meshArtifactModel as Parameters<typeof solverSurfaceMeshFromModel>[0], "mesh-preview");
+    } catch {
+      return undefined;
+    }
+  }, [meshArtifactModel]);
+
+  useEffect(() => {
+    setResultMode((currentMode) => compatibleResultModeForSummary(resultSummary, currentMode));
+  }, [resultSummary]);
+
+  useEffect(() => {
+    projectRef.current = project;
+    if (projectActionAbortRef.current && project !== projectActionSourceRef.current) {
+      invalidateProjectAction();
+    }
+  }, [project]);
+
+  useEffect(() => {
+    if (!reloadResultsRunId) return undefined;
+    const sourceProject = projectRef.current;
+    let cancelled = false;
+    void getResults(reloadResultsRunId, project && study ? { projectId: project.id, studyId: study.id } : undefined)
+      .then((results) => {
+        if (cancelled || projectRef.current !== sourceProject) return;
+        applyReloadedResults(results, reloadResultsRunId, "Simulation results restored after reload.");
+      })
+      .catch(async (localError) => {
+        if (cancelled || projectRef.current !== sourceProject) return;
+        try {
+          const cloudSnapshot = await restoreEncryptedCloudBackup(reloadResultsRunId);
+          if (cancelled || projectRef.current !== sourceProject) return;
+          const parsed = cloudSnapshot ? parseAutosavedWorkspacePayload(JSON.stringify(cloudSnapshot)) : null;
+          const cloudResults = parsed?.projectFile.results;
+          if (!cloudResults?.fields.length) throw localError;
+          applyReloadedResults(cloudResults, reloadResultsRunId, "Simulation results restored from the encrypted cloud recovery backup.");
+        } catch (cloudError) {
+          if (cancelled || projectRef.current !== sourceProject) return;
+          const message = errorMessage(cloudError, errorMessage(localError, "Could not restore simulation results after reload."));
+          setRunError(message);
+          pushMessage(message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadResultsRunId]);
+
+  function applyReloadedResults(results: Awaited<ReturnType<typeof getResults>>, runId: string, message: string) {
+    setResultSummary(results.summary);
+    setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+    setResultVariants(results.variants ?? []);
+    setResultVariantRefs(resultVariantRefsForBundle(results));
+    setActiveResultVariantId(results.activeVariantId ?? results.variants?.[0]?.id ?? "");
+    setResultSurfaceMesh(results.surfaceMesh);
+    setSolverMeshSummary(solverMeshSummaryFromResults(results));
+    setReportCaptures(results.reportCaptures ? { runId, captures: results.reportCaptures } : null);
+    setActiveRunId(runId);
+    setCompletedRunId(runId);
+    setRunProgress(100);
+    setRunError(null);
+    pushMessage(message);
+  }
+
+  useEffect(() => () => projectActionAbortRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (!initialAction || initialActionConsumedRef.current) return;
+    initialActionConsumedRef.current = true;
+    if (initialAction.type === "loadSample") void handleLoadSample(initialAction.sample, initialAction.analysisType);
+    else if (initialAction.type === "createProject") handleCreateProject();
+    else handleOpenProject(initialAction.file);
+    // The unmount cleanup above aborts the action this just started. Under
+    // StrictMode's simulated unmount that left the start screen dead, so let
+    // the remount start it again; a real unmount never remounts.
+    return () => {
+      initialActionConsumedRef.current = false;
+    };
+  }, [initialAction]);
+
+  useEffect(() => {
+    if (didRequestRestoredHomeView.current) return;
+    if (!restoredProjectFile || homeRequested || !project || !displayModel) return;
+    didRequestRestoredHomeView.current = true;
+    requestDefaultHomeView();
+  }, [displayModel, homeRequested, project, restoredProjectFile]);
+
+  useEffect(() => {
+    resultPlaybackFrameControllerRef.current?.clear();
+  }, [resultPlaybackCacheKey]);
+  useEffect(() => {
+    if (!playbackFrameIndexes.length) return;
+    setResultFrameIndex((current) => playbackFrameIndexes.includes(current) ? current : playbackFrameIndexes[0] ?? 0);
+    const currentFramePosition = resultPlaybackFramePositionRef.current;
+    const nextFramePosition = playbackFrameIndexes.includes(Math.round(currentFramePosition)) ? currentFramePosition : playbackFrameIndexes[0] ?? 0;
+    const nextOrdinalPosition = playbackOrdinalForSolverFramePosition(playbackFrameIndexes, nextFramePosition);
+    resultPlaybackFramePositionRef.current = nextFramePosition;
+    resultPlaybackOrdinalPositionRef.current = nextOrdinalPosition;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(nextOrdinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+    resultPlaybackEndpointHoldRemainingMsRef.current = 0;
+    setResultPlaybackFramePosition(nextFramePosition);
+    setResultPlaybackOrdinalPosition(nextOrdinalPosition);
+  }, [playbackFrameIndexes, resultPlaybackReverseLoop]);
+
+  useEffect(() => {
+    if (activeStep !== "results" || playbackFrameIndexes.length < 2) {
+      setResultPlaybackPlaying(false);
+    }
+  }, [activeStep, playbackFrameIndexes.length]);
+
+  useEffect(() => {
+    if (activeStep !== "results" || playbackFrameIndexes.length < 2 || !resultFieldsForUi.length) {
+      setResultPlaybackCacheState({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    const navigatorWithMemory = typeof navigator === "undefined" ? undefined : navigator as Navigator & { deviceMemory?: number };
+    const playbackFieldsForSelectedMode = playbackFieldsForResultMode(resultFieldsForUi, resultMode, stressComponent);
+    const packedFields = packResultFieldsForPlayback(playbackFieldsForSelectedMode);
+    setResultPlaybackCacheState({ status: "preparing", cacheKey: resultPlaybackCacheKey });
+    void preparePlaybackFramesInWorker({
+      ...(packedFields ? { packedFields } : { fields: playbackFieldsForSelectedMode }),
+      frameIndexes: playbackFrameIndexes,
+      playbackFps: PLAYBACK_CACHE_PREP_FPS,
+      budgetBytes: playbackMemoryBudgetBytes(navigatorWithMemory?.deviceMemory),
+      cacheKey: resultPlaybackCacheKey
+    })
+      .then((cache) => {
+        if (cancelled || cache.cacheKey !== resultPlaybackCacheKey) return;
+        if (cache.mode === "fallback" || !cache.frames.length) {
+          setResultPlaybackCacheState({ status: "fallback", cacheKey: resultPlaybackCacheKey, message: "Using live playback for this result size" });
+          return;
+        }
+        setResultPlaybackCacheState({ status: "ready", cacheKey: resultPlaybackCacheKey, cache });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setResultPlaybackCacheState({ status: "error", cacheKey: resultPlaybackCacheKey, message: "Using live playback for this browser" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeStep, playbackFrameIndexes, resultFieldsForUi, resultMode, resultPlaybackCacheKey, stressComponent]);
+
+  useEffect(() => {
+    if (!resultPlaybackPlaying || activeStep !== "results" || playbackFrameIndexes.length < 2) return;
+    const frameDurationMs = 1000 / Math.max(1, Math.min(30, resultPlaybackFps));
+    let animationFrameId = 0;
+    let lastTimestamp: number | null = null;
+    let lastViewerTimestamp = 0;
+    let lastCommittedTimestamp = 0;
+    let ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    let direction = resultPlaybackDirectionRef.current;
+    let endpointHoldRemainingMs = resultPlaybackEndpointHoldRemainingMsRef.current;
+    const advancePlaybackFrame = (timestamp: number) => {
+      if (lastTimestamp !== null) {
+        const playbackState = advancePlaybackTimeline({
+          frameCount: playbackFrameIndexes.length,
+          frameDurationMs,
+          elapsedMs: timestamp - lastTimestamp,
+          mode: resultPlaybackReverseLoop ? "reverse" : "restart",
+          state: { ordinalPosition, direction, endpointHoldRemainingMs }
+        });
+        ordinalPosition = playbackState.ordinalPosition;
+        direction = playbackState.direction;
+        endpointHoldRemainingMs = playbackState.endpointHoldRemainingMs;
+        const framePosition = solverFramePositionForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
+        resultPlaybackFramePositionRef.current = framePosition;
+        resultPlaybackOrdinalPositionRef.current = ordinalPosition;
+        resultPlaybackDirectionRef.current = direction;
+        resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldRemainingMs;
+        const playbackViewerFrameIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : frameDurationMs;
+        if (timestamp - lastViewerTimestamp >= playbackViewerFrameIntervalMs) {
+          lastViewerTimestamp = timestamp;
+          commitPlaybackViewerFrame(framePosition);
+        }
+        const playbackCommitIntervalMs = viewerInteractingRef.current ? Number.POSITIVE_INFINITY : PLAYBACK_UI_COMMIT_INTERVAL_MS;
+        if (timestamp - lastCommittedTimestamp >= playbackCommitIntervalMs) {
+          lastCommittedTimestamp = timestamp;
+          if (!viewerInteractingRef.current) {
+            setResultPlaybackOrdinalPosition((current) => Math.abs(current - ordinalPosition) < 0.0001 ? current : ordinalPosition);
+            setResultPlaybackFramePosition((current) => Math.abs(current - framePosition) < 0.0001 ? current : framePosition);
+            const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
+            if (nextFrameIndex !== resultFrameIndexRef.current) {
+              resultFrameIndexRef.current = nextFrameIndex;
+              startTransition(() => setResultFrameIndex(nextFrameIndex));
+            }
+          }
+        }
+      }
+      lastTimestamp = timestamp;
+      animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
+    };
+    animationFrameId = window.requestAnimationFrame(advancePlaybackFrame);
+    return () => window.cancelAnimationFrame(animationFrameId);
+  }, [activeStep, commitPlaybackViewerFrame, playbackFrameIndexes, resultPlaybackFps, resultPlaybackPlaying, resultPlaybackReverseLoop]);
+
+  useEffect(() => {
+    const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+  }, [playbackFrameIndexes.length, resultPlaybackReverseLoop]);
+
+  const handleViewerInteractionChange = useCallback((interacting: boolean) => {
+    viewerInteractingRef.current = interacting;
+    if (interacting) return;
+    const framePosition = resultPlaybackFramePositionRef.current;
+    const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+    const nextFrameIndex = frameIndexForPlaybackOrdinal(playbackFrameIndexes, ordinalPosition);
+    commitPlaybackViewerFrame(framePosition);
+    setResultPlaybackOrdinalPosition(ordinalPosition);
+    setResultPlaybackFramePosition(framePosition);
+    if (nextFrameIndex !== resultFrameIndexRef.current) {
+      resultFrameIndexRef.current = nextFrameIndex;
+      startTransition(() => setResultFrameIndex(nextFrameIndex));
+    }
+  }, [commitPlaybackViewerFrame, playbackFrameIndexes]);
+
+  const handleAddResultProbe = useCallback((anchor: ResultProbeAnchor) => {
+    if (resultPlaybackPlaying) return;
+    if (resultProbes.length >= MAX_RESULT_PROBES) {
+      setResultProbeLimitReached(true);
+      pushMessage(`Probe limit reached (${MAX_RESULT_PROBES}). Remove a pin before adding another.`);
+      return;
+    }
+    const next = appendResultProbe(resultProbes, anchor, createResultProbeId());
+    setResultProbeLimitReached(next.limitReached);
+    setResultProbes(next.pins);
+  }, [resultPlaybackPlaying, resultProbes.length]);
+
+  const handleRemoveResultProbe = useCallback((probeId: string) => {
+    setResultProbes((current) => current.filter((probe) => probe.id !== probeId));
+    setResultProbeLimitReached(false);
+  }, []);
+
+  const handleClearResultProbes = useCallback(() => {
+    setResultProbes([]);
+    setResultProbeLimitReached(false);
+  }, []);
+
+  const handleResultColorScaleSettingChange = useCallback((setting: ResultColorScaleSetting) => {
+    if (!activeCanonicalResultField || !activeResultColorScaleKey) return;
+    const canonicalSetting: ResultColorScaleSetting = {
+      rangeMode: setting.rangeMode,
+      bands: setting.bands,
+      ...(setting.manualMin !== undefined
+        ? { manualMin: resultValueFromDisplayUnits(activeCanonicalResultField, setting.manualMin, displayUnitSystem) }
+        : {}),
+      ...(setting.manualMax !== undefined
+        ? { manualMax: resultValueFromDisplayUnits(activeCanonicalResultField, setting.manualMax, displayUnitSystem) }
+        : {})
+    };
+    setResultColorScaleSettings((current) => ({ ...current, [activeResultColorScaleKey]: canonicalSetting }));
+  }, [activeCanonicalResultField, activeResultColorScaleKey, displayUnitSystem]);
+  const handleMeasureDisplayModelDimensions = useCallback((dimensions: NonNullable<DisplayModel["dimensions"]>) => {
+    // The STEP preview just finished tessellating; release any boundary-figure
+    // capture waiting for the model view to have real geometry.
+    stepPreviewMeasureWaitersRef.current.splice(0).forEach((resolve) => resolve());
+    setDisplayModel((current) => {
+      if (!current?.nativeCad) return current;
+      if (
+        current.dimensions?.x === dimensions.x &&
+        current.dimensions?.y === dimensions.y &&
+        current.dimensions?.z === dimensions.z &&
+        current.dimensions?.units === dimensions.units
+      ) {
+        return current;
+      }
+      return { ...current, dimensions };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (draftLoadType !== "gravity" && selectedPayloadObject) {
+      setSelectedPayloadObject(null);
+    }
+  }, [draftLoadType, selectedPayloadObject]);
+
+  useEffect(() => {
+    if (activeStep !== "loads") setPreviewLoadEdit(null);
+  }, [activeStep]);
+
+  useEffect(() => {
+    resultFrameIndexRef.current = resultFrameIndex;
+  }, [resultFrameIndex]);
+
+  useEffect(() => {
+    resultPlaybackFramePositionRef.current = resultPlaybackFramePosition;
+  }, [resultPlaybackFramePosition]);
+
+  useEffect(() => {
+    resultPlaybackOrdinalPositionRef.current = resultPlaybackOrdinalPosition;
+  }, [resultPlaybackOrdinalPosition]);
+
+  const handleResultFrameChange = useCallback((frameIndex: number) => {
+    setResultFrameIndex(frameIndex);
+    setResultPlaybackFramePosition(frameIndex);
+    const ordinalPosition = playbackOrdinalForSolverFramePosition(playbackFrameIndexes, frameIndex);
+    setResultPlaybackOrdinalPosition(ordinalPosition);
+    resultFrameIndexRef.current = frameIndex;
+    resultPlaybackFramePositionRef.current = frameIndex;
+    resultPlaybackOrdinalPositionRef.current = ordinalPosition;
+    resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+    resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldForPlaybackOrdinal(ordinalPosition, playbackFrameIndexes.length);
+  }, [playbackFrameIndexes, resultPlaybackReverseLoop]);
+
+  function handleResultPlaybackToggle() {
+    setResultPlaybackPlaying((playing) => {
+      if (!playing) setShowDeformed(true);
+      if (!playing) {
+        const ordinalPosition = resultPlaybackOrdinalPositionRef.current;
+        resultPlaybackDirectionRef.current = playbackDirectionForLoopStart(ordinalPosition, playbackFrameIndexes.length, resultPlaybackReverseLoop);
+        resultPlaybackEndpointHoldRemainingMsRef.current = endpointHoldForPlaybackOrdinal(ordinalPosition, playbackFrameIndexes.length);
+      }
+      return !playing;
+    });
+  }
+
+  const draftLoadPreview = useMemo<DraftLoadPreview | undefined>(() => {
+    if (!study || activeStep !== "loads") return undefined;
+    const isPayloadMass = draftLoadType === "gravity";
+    const face = isPayloadMass && selectedPayloadObject ? faceForPayloadObject(selectedPayloadObject) : selectedFace;
+    const point = isPayloadMass ? selectedPayloadObject?.center ?? null : selectedLoadPoint;
+    if (!face || !point) return undefined;
+    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+    const selection = existingSelection ?? namedSelectionForFace(study, face);
+    const value = isPayloadMass ? draftPayloadPreview?.value ?? draftLoadValue : draftLoadValue;
+    const payloadMetadata = isPayloadMass ? draftPayloadPreview?.metadata ?? {} : {};
+    return {
+      selection,
+      load: {
+        id: "draft-load-preview",
+        type: draftLoadType,
+        selectionRef: selection.id,
+        parameters: {
+          value,
+          units: unitsForLoadType(draftLoadType),
+          direction: directionVectorForLabel(draftLoadDirection, face, displayModel ?? undefined),
+          directionMode: draftLoadDirection,
+          applicationPoint: point,
+          ...(isPayloadMass && selectedPayloadObject ? { payloadObject: selectedPayloadObject } : {}),
+          ...payloadMetadata
+        },
+        status: "complete"
+      }
+    };
+  }, [activeStep, displayModel, draftLoadDirection, draftLoadType, draftLoadValue, draftPayloadPreview, selectedFace, selectedLoadPoint, selectedPayloadObject, study]);
+
+  const loadMarkers = useMemo<ViewerLoadMarker[]>(() => {
+    // Modal analysis ignores loads and hides the Loads step; drawing their
+    // arrows anyway implied they mattered (2026-09 review D17).
+    const markerStudy: Study | null = study?.type === "modal_analysis" ? { ...study, loads: [] } as Study : study;
+    const markers = createViewerLoadMarkers({ study: markerStudy, loadPreviews: previewLoadEdit ? [previewLoadEdit] : [], draftLoadPreview, displayModel: displayModel ?? undefined });
+    return markers.map((marker) => {
+      const converted = loadValueForUnits(marker.value, marker.units, displayUnitSystem);
+      return { ...marker, value: converted.value, units: converted.units };
+    });
+  }, [displayModel, displayUnitSystem, draftLoadPreview, previewLoadEdit, study]);
+  const supportMarkers = useMemo<ViewerSupportMarker[]>(() => {
+    if (!study) return [];
+    const faceCounts = new Map<string, number>();
+    let fixedSupportCount = 0;
+    let prescribedSupportCount = 0;
+    return study.constraints.flatMap((support) => {
+      const selection = study.namedSelections.find((item) => item.id === support.selectionRef);
+      const faceId = selection?.geometryRefs[0]?.entityId;
+      if (!faceId) return [];
+      const stackIndex = faceCounts.get(faceId) ?? 0;
+      faceCounts.set(faceId, stackIndex + 1);
+      const supportOrdinal = support.type === "fixed" ? ++fixedSupportCount : ++prescribedSupportCount;
+      return [{
+        id: support.id,
+        faceId,
+        type: support.type,
+        displayLabel: supportDisplayLabel(support, supportOrdinal),
+        label: selection?.geometryRefs[0]?.label ?? selection?.name ?? "selected face",
+        stackIndex
+      }];
+    });
+  }, [study]);
+
+  function handleWorkspaceShortcut(event: KeyboardEvent) {
+    if (!project || !displayModel) return;
+    const key = event.key.toLowerCase();
+    const editableTarget = isEditableShortcutTarget(event.target as HTMLElement | null);
+    if ((event.metaKey || event.ctrlKey) && key === "s") {
+      // Cmd/Ctrl+S stays global, even inside text inputs, so a save request is never silently dropped.
+      event.preventDefault();
+      void handleSaveProject();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && key === "z") {
+      // Editable fields keep their native undo/redo instead of mutating app history.
+      if (editableTarget) return;
+      event.preventDefault();
+      if (event.shiftKey) {
+        handleRedoAction();
+      } else {
+        handleUndoAction();
+      }
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || editableTarget) return;
+    // Single-key shortcuts: honor the user's off-switch (WCAG 2.1.4) and stay
+    // inert while a modal/menu overlay is open.
+    if (!singleKeyShortcutsEnabled) return;
+    if (document.querySelector('[role="dialog"], .condition-menu')) return;
+    if (key === "h") {
+      event.preventDefault();
+      handleFitDefaultView();
+      return;
+    }
+    const shortcutStep = workflowStepForShortcut(key, activeStep, { meshStatus: study?.meshSettings.status ?? "not_started", studyType: study?.type });
+    if (!shortcutStep) return;
+    event.preventDefault();
+    navigateToStep(shortcutStep);
+  }
+
+  // Keep the latest handler in a ref so the mount-once listener never reads stale state (e.g. Cmd+S saving outdated results).
+  useEffect(() => {
+    workspaceShortcutHandlerRef.current = handleWorkspaceShortcut;
+  });
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => workspaceShortcutHandlerRef.current(event);
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  function handleSkipToMain(event: ReactMouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    const main = workspaceMainRef.current;
+    if (!main) return;
+    window.history.replaceState(window.history.state, "", "#workspace-main");
+    main.focus();
+  }
+
+  useEffect(() => {
+    if (!storageRecoveryNoticeOpen) return undefined;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setStorageRecoveryNoticeOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [storageRecoveryNoticeOpen]);
+
+  const autosaveUiSnapshot = useMemo<WorkspaceUiSnapshot>(() => ({
+    activeStep,
+    homeRequested,
+    selectedFaceId,
+    selectedLoadPoint,
+    selectedPayloadObject,
+    viewMode,
+    themeMode,
+    projectionMode,
+    resultMode,
+    selectedModeIndex,
+    stressComponent,
+    resultColorScaleSettings,
+    showDeformed,
+    showDimensions,
+    sectionPlane,
+    stressExaggeration,
+    resultFrameIndex,
+    resultPlaybackFps,
+    resultPlaybackReverseLoop,
+    isStepbarCollapsed,
+    draftLoadType,
+    draftLoadValue,
+    draftLoadDirection,
+    sampleModel,
+    sampleAnalysisType,
+    activeRunId,
+    completedRunId,
+    runProgress,
+    resultsOutdatedBy,
+    undoStack,
+    redoStack,
+    status,
+    logs
+  }), [
+    activeRunId,
+    activeStep,
+    completedRunId,
+    draftLoadDirection,
+    draftLoadType,
+    draftLoadValue,
+    homeRequested,
+    isStepbarCollapsed,
+    logs,
+    projectionMode,
+    redoStack,
+    resultFrameIndex,
+    resultMode,
+    resultColorScaleSettings,
+    selectedModeIndex,
+    stressComponent,
+    resultPlaybackFps,
+    resultPlaybackReverseLoop,
+    runProgress,
+    sampleAnalysisType,
+    sampleModel,
+    selectedFaceId,
+    selectedLoadPoint,
+    selectedPayloadObject,
+    sectionPlane,
+    showDeformed,
+    showDimensions,
+    status,
+    stressExaggeration,
+    themeMode,
+    undoStack,
+    viewMode
+  ]);
+
+  function notifyAutosaveWriteFailure() {
+    if (autosaveWriteFailureNotifiedRef.current) return;
+    autosaveWriteFailureNotifiedRef.current = true;
+    pushMessage("Autosave failed: browser storage is full or unavailable.");
+    void offerOverflowRecoveryOptions();
+  }
+
+  function notifyAutosaveDegraded() {
+    if (autosaveDegradedNotifiedRef.current) return;
+    autosaveDegradedNotifiedRef.current = true;
+    pushMessage("Autosave kept the project setup, but the mesh artifact and results exceed browser storage.");
+    void offerOverflowRecoveryOptions();
+  }
+
+  async function offerOverflowRecoveryOptions() {
+    if (overflowRecoveryHandledRef.current) return;
+    overflowRecoveryHandledRef.current = true;
+    setOverflowRecoveryNeeded(true);
+    try {
+      const persistent = await requestPersistentBrowserStorage();
+      if (persistent) pushMessage("Persistent browser storage enabled to reduce automatic eviction.");
+    } catch {
+      // Persistence is best-effort; the saved recovery preference still follows.
+    }
+    if (cloudBackupPreference === "local") {
+      pushMessage("Cloud backup not enabled. Use Save project to keep a complete local file.");
+      return;
+    }
+    if (cloudBackupPreference === "cloud") {
+      await saveOverflowRecoveryBackup();
+      return;
+    }
+    setStorageRecoveryNoticeOpen(true);
+  }
+
+  async function saveOverflowRecoveryBackup() {
+    const snapshot = fullAutosaveSnapshotRef.current();
+    const runId = completedRunId || activeRunId;
+    if (!snapshot || !runId) {
+      pushMessage("Cloud backup could not start because there is no completed workspace snapshot.");
+      return;
+    }
+    setCloudBackupBusy(true);
+    try {
+      const backup = await saveEncryptedCloudBackup(snapshot, runId);
+      pushMessage(`Encrypted cloud recovery backup saved until ${new Date(backup.expiresAt).toLocaleDateString()}.`);
+    } catch (error) {
+      pushMessage(`${errorMessage(error, "Cloud backup failed.")} Use Save project to keep a complete local file.`);
+    } finally {
+      setCloudBackupBusy(false);
+    }
+  }
+
+  function handleStoragePreference(preference: CloudBackupPreference) {
+    setCloudBackupPreference(preference);
+    setStorageRecoveryNoticeOpen(false);
+    const remembered = writeCloudBackupPreference(preference);
+    if (preference === "local") {
+      pushMessage("Project recovery will stay local. Use Save project to keep a complete file.");
+    } else if (!overflowRecoveryNeeded) {
+      pushMessage("Encrypted recovery preference saved. OpenFEA will use it if this project outgrows browser autosave.");
+    } else {
+      void saveOverflowRecoveryBackup();
+    }
+    if (!remembered) pushMessage("This storage choice could not be remembered after the browser closes.");
+  }
+
+  // A normal reload tears down the delayed autosave effects before their
+  // timers fire. Keep a render-current writer behind a stable pagehide
+  // listener so setup changes made immediately before reload are not lost.
+  fullAutosaveSnapshotRef.current = () => {
+    if (!project || !displayModel) return null;
+    const savedAt = new Date().toISOString();
+    const results = resultFields.length && resultSummary ? {
+      activeRunId,
+      completedRunId,
+      summary: resultSummary,
+      fields: resultFields,
+      ...(resultVariants.length ? { variants: resultVariants } : {}),
+      ...(resultVariantRefs.length ? { variantRefs: resultVariantRefs } : {}),
+      ...(activeResultVariantId ? { activeVariantId: activeResultVariantId } : {}),
+      ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+      ...(solverMeshSummary ? { solverMeshSummary } : {}),
+      ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
+    } : undefined;
+    return buildAutosavedWorkspace({ project, displayModel, savedAt, results, ui: autosaveUiSnapshot });
+  };
+
+  flushAutosaveRef.current = () => {
+    const snapshot = fullAutosaveSnapshotRef.current();
+    if (!snapshot) return;
+    flushAutosavedWorkspace(
+      snapshot,
+      buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot, snapshot.savedAt)
+    );
+  };
+
+  useEffect(() => installAutosavePageHideFlush(() => flushAutosaveRef.current()), []);
+
+  useEffect(() => {
+    if (!overflowRecoveryRequest) return;
+    void offerOverflowRecoveryOptions();
+  }, [overflowRecoveryRequest]);
+
+  // Selections referencing placeholder "face-upload-*" faces can never map
+  // onto the meshed geometry: legacy generic box faces (uploads made while the
+  // STEP face registry was unavailable — the CSP regression) and viewport
+  // picks made before the registry finished loading ("face-upload-picked-*").
+  // Rebuild the real registry and remap or flag those selections as soon as
+  // such a project is open or such a pick lands.
+  useEffect(() => {
+    if (!project || !displayModel) return undefined;
+    const legacyUpload = hasLegacyStepUploadFaces(displayModel);
+    if (!legacyUpload && !hasUnresolvedStepFaceSelections(project, displayModel)) return undefined;
+    let cancelled = false;
+    void import("./stepFaces")
+      .then((stepFaces) => stepFaces.stepFaceRegistryFromBase64(displayModel.nativeCad!.contentBase64!))
+      .then((registry) => {
+        if (cancelled || !registry.displayFaces.length) return;
+        const heal = healStepFaceSelections(project, displayModel, registry);
+        // Unresolved-only heals must not write state: the selections are
+        // unchanged and re-setting equivalent objects would loop this effect.
+        // Legacy uploads still always swap in the registry's real faces.
+        if (heal.remapped.length || heal.removed.length || legacyUpload) {
+          setProject(heal.project);
+          setDisplayModel(heal.displayModel);
+        }
+        const message = legacyStepFaceHealMessage(heal);
+        // Project mutations intentionally re-run this effect while unresolved
+        // selections remain. Notify once for the loaded workspace instead of
+        // keying on the growing message text and spamming every mutation.
+        if (message && !stepFaceHealNotifiedRef.current) {
+          stepFaceHealNotifiedRef.current = true;
+          pushMessage(message);
+        }
+      })
+      .catch(() => {
+        // Registry still unavailable (e.g. import failure): leave the
+        // placeholder faces in place; meshing will surface its own error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [displayModel, project]);
+
+  // Healthy STEP projects may still contain a fixed support saved on the
+  // circular bottom of a blind hole. Audit each distinct set of STEP support
+  // refs once, redirect matching caps to their cylindrical walls, and refresh
+  // older saved display faces with the surface metadata used by the rod glyph.
+  useEffect(() => {
+    if (
+      !project ||
+      !displayModel?.nativeCad?.contentBase64 ||
+      displayModel.nativeCad.format !== "step" ||
+      (displayModel.faces.length > 0 && displayModel.faces.every((face) => face.id.startsWith("face-upload-"))) ||
+      hasUnresolvedStepFaceSelections(project, displayModel)
+    ) return undefined;
+
+    const supportFaceIds = project.studies.flatMap((study) => {
+      const selectionById = new Map(study.namedSelections.map((selection) => [selection.id, selection]));
+      return study.constraints.flatMap((constraint) =>
+        selectionById.get(constraint.selectionRef)?.geometryRefs
+          .filter((ref) => ref.entityType === "face")
+          .map((ref) => ref.entityId) ?? []
+      );
+    }).sort();
+    const metadataMissing = displayModel.faces.some((face) => face.id.startsWith("step-face-") && !face.surfaceType);
+    if (!supportFaceIds.length && !metadataMissing) return undefined;
+
+    const auditKey = [
+      displayModel.id,
+      displayModel.nativeCad.filename,
+      displayModel.nativeCad.contentBase64.length,
+      metadataMissing ? "metadata-missing" : "metadata-current",
+      ...supportFaceIds
+    ].join(":");
+    if (stepHoleSupportAuditRef.current === auditKey) return undefined;
+    stepHoleSupportAuditRef.current = auditKey;
+
+    let cancelled = false;
+    void import("./stepFaces")
+      .then((stepFaces) => stepFaces.stepFaceRegistryFromBase64(displayModel.nativeCad!.contentBase64!))
+      .then((registry) => {
+        if (cancelled || !registry.displayFaces.length) return;
+        const heal = healStepHoleSupportSelections(project, displayModel, registry);
+        if (heal.remapped.length) {
+          setProject(heal.project);
+          pushMessage(`Updated ${heal.remapped.map((item) => `${item.selectionName} to ${item.toLabel}`).join(", ")}.`);
+        }
+        if (metadataMissing || heal.remapped.length) setDisplayModel(heal.displayModel);
+      })
+      .catch(() => {
+        if (stepHoleSupportAuditRef.current === auditKey) stepHoleSupportAuditRef.current = null;
+      });
+    return () => {
+      cancelled = true;
+      if (stepHoleSupportAuditRef.current === auditKey) stepHoleSupportAuditRef.current = null;
+    };
+  }, [displayModel, project]);
+
+  useEffect(() => {
+    if (!project || !displayModel) return;
+    return scheduleAutosavedUiSnapshotWrite(
+      () => buildAutosavedWorkspaceUiSnapshot(autosaveUiSnapshot),
+      undefined,
+      AUTOSAVE_UI_WRITE_DELAY_MS,
+      notifyAutosaveWriteFailure
+    );
+  }, [autosaveUiSnapshot, displayModel, project]);
+
+  useEffect(() => {
+    if (!project || !displayModel) return;
+    return scheduleAutosavedWorkspaceWrite(() => buildAutosavedWorkspace({
+      project,
+      displayModel,
+      results: resultFields.length && resultSummary ? {
+        activeRunId,
+        completedRunId,
+        summary: resultSummary,
+        fields: resultFields,
+        ...(resultVariants.length ? { variants: resultVariants } : {}),
+        ...(resultVariantRefs.length ? { variantRefs: resultVariantRefs } : {}),
+        ...(activeResultVariantId ? { activeVariantId: activeResultVariantId } : {}),
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+        ...(solverMeshSummary ? { solverMeshSummary } : {}),
+        ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
+      } : undefined,
+      ui: autosaveUiSnapshot
+    }), undefined, AUTOSAVE_HEAVY_WRITE_DELAY_MS, notifyAutosaveWriteFailure, notifyAutosaveDegraded);
+  }, [
+    activeResultVariantId,
+    activeRunId,
+    activeStep,
+    completedRunId,
+    displayModel,
+    draftLoadDirection,
+    draftLoadType,
+    draftLoadValue,
+    homeRequested,
+    project,
+    redoStack,
+    resultFields,
+    resultSurfaceMesh,
+    resultSummary,
+    resultVariantRefs,
+    resultVariants,
+    reportCaptures,
+    runProgress,
+    sampleAnalysisType,
+    sampleModel,
+    selectedFaceId,
+    selectedLoadPoint,
+    selectedPayloadObject,
+    showDeformed,
+    showDimensions,
+    solverMeshSummary,
+    themeMode,
+    undoStack,
+    viewMode
+  ]);
+
+  async function openProjectResponse(
+    action: Promise<{ project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle }>,
+    options: { actionHandle: ProjectActionHandle; nextStep?: StepId; staleMessage?: string }
+  ) {
+    let response: { project: Project; displayModel: DisplayModel; message?: string; notice?: string; results?: LocalResultBundle };
+    try {
+      response = await action;
+    } catch (error) {
+      completeProjectAction(options.actionHandle);
+      throw error;
+    }
+    if (!options.actionHandle.isCurrent()) {
+      completeProjectAction(options.actionHandle);
+      if (options.staleMessage) pushMessage(options.staleMessage);
+      return false;
+    }
+    // Clear the request token before setting project state; the project-change
+    // effect treats any state change during an active action as superseding it.
+    completeProjectAction(options.actionHandle);
+    // Stop watching any run from the previous project so it cannot overwrite the new project's results.
+    activeRunSourceRef.current?.close();
+    activeRunSourceRef.current = null;
+    processingRunIdRef.current = null;
+    setProcessingRunId(null);
+    setRunTiming(null);
+    invalidateCompletedRunState();
+    setHomeRequested(false);
+    stepFaceHealNotifiedRef.current = false;
+    // Keep the imperative snapshot in sync immediately. The effect below is
+    // intentionally retained for ordinary state mutations, but async model
+    // operations must not have a render-sized window where they can compare
+    // against the previous project and overwrite a newer workspace.
+    projectRef.current = response.project;
+    setProject(response.project);
+    setDisplayModel(response.displayModel);
+    requestDefaultHomeView();
+    setUndoStack([]);
+    setRedoStack([]);
+    setSelectedLoadPoint(null);
+    setSelectedPayloadObject(null);
+    if (response.results?.fields.length) {
+      setResultSummary(response.results.summary);
+      setResultFields(withDerivedSurfaceSafetyFactorFields(response.results));
+      setResultVariants(response.results.variants ?? []);
+      setResultVariantRefs(resultVariantRefsForBundle(response.results));
+      setActiveResultVariantId(response.results.activeVariantId ?? response.results.variants?.[0]?.id ?? "");
+      setResultSurfaceMesh(response.results.surfaceMesh);
+      setSolverMeshSummary(response.results.solverMeshSummary ?? null);
+      const restoredRunId = response.results.completedRunId ?? response.results.activeRunId ?? latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
+      setReportCaptures(response.results.reportCaptures && restoredRunId ? { runId: restoredRunId, captures: response.results.reportCaptures } : null);
+      setResultFrameIndex(0);
+      setActiveRunId(response.results.activeRunId ?? restoredRunId);
+      setCompletedRunId(restoredRunId);
+      setRunProgress(100);
+      if (options.nextStep) {
+        applyStep(options.nextStep);
+        setViewMode("model");
+      } else {
+        setViewMode("results");
+        setActiveStep("results");
+      }
+    } else {
+      applyStep("model");
+      setViewMode("model");
+      const nextCompletedRunId = latestCompletedRunId(response.project.studies[0] ?? null, "") ?? "";
+      setActiveRunId(nextCompletedRunId);
+      setCompletedRunId(nextCompletedRunId);
+    }
+    pushMessage(response.message ?? "Project opened.");
+    setOpenNote(response.notice ?? null);
+    return true;
+  }
+
+  function handleLoadSample(nextSample = sampleModel, nextAnalysisType = sampleAnalysisType) {
+    requestGeometryReplacement(`Loading the ${sampleOptionFor(nextSample).title} sample`, () => void performLoadSample(nextSample, nextAnalysisType));
+  }
+
+  async function performLoadSample(nextSample: SampleModelId, nextAnalysisType: SampleAnalysisType) {
+    const actionHandle = beginProjectAction(projectRef.current);
+    const opened = await openProjectResponse(loadSampleProject(nextSample, nextAnalysisType), { actionHandle, nextStep: "model" });
+    if (opened) {
+      setSampleModel(nextSample);
+      setSampleAnalysisType(nextAnalysisType);
+    }
+  }
+
+  function handleCreateProject() {
+    const actionHandle = beginProjectAction(projectRef.current);
+    void openProjectResponse(createProject(), { actionHandle });
+  }
+
+  function handleOpenProject(file: File) {
+    const actionHandle = beginProjectAction(projectRef.current);
+    void openProjectResponse(importLocalProject(file), { actionHandle }).catch((error: unknown) => {
+      if (isAbortError(error)) return;
+      pushMessage(error instanceof Error ? error.message : "Could not open local project.");
+    });
+  }
+
+  /**
+   * Runs `proceed` immediately when nothing would be lost, otherwise parks it
+   * behind the confirm dialog. Skipped from the start screen, where the user
+   * has already left the workspace.
+   */
+  function requestGeometryReplacement(actionLabel: string, proceed: () => void) {
+    const losses = homeRequested ? [] : geometryReplacementLosses(study, resultFields.length > 0);
+    if (!losses.length) {
+      proceed();
+      return;
+    }
+    setPendingGeometryReplacement({ actionLabel, losses, proceed });
+  }
+
+  function handleUploadModel(file: File) {
+    requestGeometryReplacement(`Replacing the model with ${file.name}`, () => performUploadModel(file));
+  }
+
+  function performUploadModel(file: File) {
+    if (!project) return;
+    const sourceProject = project;
+    const actionHandle = beginProjectAction(sourceProject);
+    const importStartedAt = Date.now();
+    const importId = modelImportSequenceRef.current + 1;
+    modelImportSequenceRef.current = importId;
+    setModelImport({ id: importId, filename: file.name });
+    const extension = file.name.trim().split(".").pop()?.toLowerCase();
+    pushMessage(extension === "step" || extension === "stp" ? "Uploading model and checking STEP topology..." : "Uploading model...");
+    void openProjectResponse(uploadModel(project.id, file, project, {
+      signal: actionHandle.signal,
+      isCurrent: actionHandle.isCurrent,
+      clientId: actionHandle.clientId,
+      generation: actionHandle.generation
+    }), { actionHandle }).catch((error: unknown) => {
+      if (isAbortError(error)) return;
+      pushMessage(error instanceof Error ? error.message : "Could not upload model.");
+    }).finally(() => {
+      const remainingIndicatorMs = Math.max(0, MODEL_IMPORT_INDICATOR_MIN_MS - (Date.now() - importStartedAt));
+      window.setTimeout(() => {
+        setModelImport((current) => current?.id === importId ? null : current);
+      }, remainingIndicatorMs);
+    });
+  }
+
+  async function handleRepairModel() {
+    if (!project || isRepairingModel) return;
+    const actionHandle = beginProjectAction(project);
+    setIsRepairingModel(true);
+    pushMessage("Repairing open STEP surfaces...");
+    try {
+      await openProjectResponse(repairUploadedStepModel(project.id, project, {
+        signal: actionHandle.signal,
+        isCurrent: actionHandle.isCurrent,
+        clientId: actionHandle.clientId,
+        generation: actionHandle.generation
+      }), {
+        actionHandle,
+        nextStep: "model",
+        staleMessage: "The repaired model was not applied because the workspace changed during repair."
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        pushMessage("Model repair stopped because the workspace changed.");
+        return;
+      }
+      pushMessage(`Model repair failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsRepairingModel(false);
+    }
+  }
+
+  function beginProjectAction(sourceProject: Project | null): ProjectActionHandle {
+    invalidateProjectAction();
+    const controller = new AbortController();
+    const generation = projectActionGenerationRef.current;
+    projectActionAbortRef.current = controller;
+    projectActionSourceRef.current = sourceProject;
+    return {
+      clientId: projectActionClientIdRef.current!,
+      generation,
+      signal: controller.signal,
+      isCurrent: () =>
+        projectActionGenerationRef.current === generation &&
+        projectActionAbortRef.current === controller &&
+        !controller.signal.aborted &&
+        projectRef.current === sourceProject
+    };
+  }
+
+  function completeProjectAction(actionHandle: ProjectActionHandle): void {
+    if (projectActionGenerationRef.current !== actionHandle.generation) return;
+    projectActionAbortRef.current = null;
+    projectActionSourceRef.current = null;
+  }
+
+  function invalidateProjectAction(): void {
+    projectActionGenerationRef.current += 1;
+    projectActionAbortRef.current?.abort();
+    projectActionAbortRef.current = null;
+    projectActionSourceRef.current = null;
+  }
+
+  async function handleSaveProject() {
+    if (!project || !displayModel) return;
+    try {
+      const saved = await saveProjectToLocalDisk(project, displayModel, resultSummary ? {
+        activeRunId,
+        completedRunId,
+        summary: resultSummary,
+        fields: resultFields,
+        ...(resultVariants.length ? { variants: resultVariants } : {}),
+        ...(resultVariantRefs.length ? { variantRefs: resultVariantRefs } : {}),
+        ...(activeResultVariantId ? { activeVariantId: activeResultVariantId } : {}),
+        ...(resultSurfaceMesh ? { surfaceMesh: resultSurfaceMesh } : {}),
+        ...(solverMeshSummary ? { solverMeshSummary } : {}),
+        ...(reportCaptures?.runId === completedRunId ? { reportCaptures: reportCaptures.captures } : {})
+      } : undefined);
+      if (!saved) return;
+      setProject((current) => current === project ? { ...current, updatedAt: saved.savedAt } : current);
+      if (saved.handle && isRecentProjectsSupported()) {
+        try {
+          await defaultRecentProjectService().add(saved.handle, { filename: saved.handle.name, projectName: project.name });
+        } catch (error) {
+          pushMessage(`Project saved to local disk. ${errorMessage(error, "Recent Projects could not be updated.")}`);
+          return;
+        }
+      }
+      pushMessage("Project saved to local disk.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      pushMessage(error instanceof Error ? error.message : "Could not save project.");
+    }
+  }
+
+  const handleRegisterViewerCapture = useCallback((capture: (() => Promise<string>) | null) => {
+    viewerCaptureRef.current = capture;
+    if (capture) setViewerCaptureRevision((revision) => revision + 1);
+  }, []);
+
+  async function handleExportResultPng() {
+    const field = activeResultSelectionForUi.scalarField;
+    if (!project || !field || viewMode !== "results") {
+      setPngExportError("Open a rendered result field before exporting a PNG.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setPngExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
+    const suggestedName = suggestedResultPngFilename({
+      projectName: project.name,
+      resultMode,
+      stressComponent: resultMode === "stress" ? stressComponent : undefined,
+      field
+    });
+    setPngExportBusy(true);
+    setPngExportError(null);
+    try {
+      // Acquire the handle immediately from the click gesture; WebGL capture is
+      // queued afterward because report and manual reads share one canvas.
+      const saveTarget = await prepareBlobSaveToDisk(suggestedName, {
+        description: "PNG result image",
+        accept: { "image/png": [".png"] }
+      });
+      if (saveTarget === "cancelled") return;
+      const png = await captureQueueRef.current!.enqueue(async () => {
+        const capture = viewerCaptureRef.current;
+        if (!capture) throw new Error("The 3D result view is still loading. Wait for it to appear, then export again.");
+        return capture();
+      });
+      await saveTarget.save(pngDataUrlToBlob(png));
+      pushMessage(`Exported ${suggestedName}.`);
+    } catch (error) {
+      const message = errorMessage(error, "Could not export the current result image.");
+      setPngExportError(message);
+      pushMessage(message);
+    } finally {
+      setPngExportBusy(false);
+    }
+  }
+
+  async function handleExportResultHtml() {
+    if (!project || !study || !displayModel || !resultSummary || !resultFields.length || !resultSurfaceMesh) {
+      setHtmlExportError("Run a result with a solver surface mesh before exporting the offline viewer.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setHtmlExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
+    const suggestedName = suggestedResultHtmlFilename(project.name);
+    setHtmlExportBusy(true);
+    setHtmlExportError(null);
+    try {
+      const saveTarget = await prepareBlobSaveToDisk(suggestedName, {
+        description: "Self-contained OpenFEA result viewer",
+        accept: { "text/html": [".html"] }
+      });
+      if (saveTarget === "cancelled") return;
+      const html = buildResultViewerHtml({
+        project,
+        study,
+        displayModel,
+        summary: resultSummary,
+        fields: resultFields,
+        surfaceMesh: resultSurfaceMesh
+      });
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      if (blob.size > 50 * 1024 * 1024 && !window.confirm(`The offline viewer is ${(blob.size / 1024 / 1024).toFixed(1)} MB. Save it anyway?`)) return;
+      await saveTarget.save(blob);
+      pushMessage(`Exported ${suggestedName}.`);
+    } catch (error) {
+      const message = errorMessage(error, "Could not export the offline result viewer.");
+      setHtmlExportError(message);
+      pushMessage(message);
+    } finally {
+      setHtmlExportBusy(false);
+    }
+  }
+
+  async function handleExportResultData(format: SelectedResultExportFormat) {
+    if (!project || !study || !displayModel || !resultSummary || !resultFields.length || !resultSurfaceMesh) {
+      setDataExportError("Run an analysis with a canonical solver mesh before exporting raw result data.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setDataExportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
+    setDataExportBusy(format);
+    setDataExportError(null);
+    try {
+      const canonicalModel = buildOpenFeaCoreModelForStudy(study, displayModel, project.customMaterials).model;
+      const variantRef = resultVariantRefs.find((variant) => variant.id === activeResultVariantId);
+      const state = selectedResultStateForExport({
+        summary: resultSummary,
+        fields: resultFields,
+        selectedModeIndex,
+        selectedFrameIndex: resultPlaybackPlaying
+          ? nearestResultFrameIndex(playbackFrameIndexes, resultVisualFramePosition)
+          : resultFrameIndex
+      });
+      const exportInput: SelectedResultExportInput = {
+        projectName: project.name,
+        projectSchemaVersion: project.schemaVersion,
+        analysisType: study.type,
+        ...(variantRef ? { variant: { id: variantRef.id, name: variantRef.name } } : {}),
+        state,
+        model: canonicalModel,
+        surfaceMesh: resultSurfaceMesh,
+        fields: resultFields
+      };
+      const suggestedName = selectedResultExportFilename(exportInput, format);
+      const saveTarget = await prepareBlobSaveToDisk(suggestedName, format === "csv"
+        ? { description: "OpenFEA selected-state result CSV", accept: { "text/csv": [".csv"] } }
+        : { description: "VTK XML unstructured-grid result", accept: { "application/vnd.vtk.vtu+xml": [".vtu"] } });
+      if (saveTarget === "cancelled") return;
+      const exported = buildSelectedResultExport(exportInput, format);
+      await saveTarget.save(new Blob(exported.parts, { type: exported.mimeType }));
+      pushMessage(`Exported ${suggestedName} (${exported.selectedFields.length} canonical fields, selected state only).`);
+    } catch (error) {
+      const message = errorMessage(error, `Could not export the selected result as ${format.toUpperCase()}.`);
+      setDataExportError(message);
+      pushMessage(message);
+    } finally {
+      setDataExportBusy(null);
+    }
+  }
+
+  const boundaryConditionCount = (study?.constraints.length ?? 0) + (study?.loads.length ?? 0);
+  const hasNativeCadModel = Boolean(displayModel?.nativeCad);
+  useEffect(() => {
+    const runId = completedRunId;
+    if (!runId || !resultSummary || !resultFields.length || viewMode !== "results" || !viewerCaptureRef.current) return;
+    const captureBoundaryView = boundaryConditionCount > 0;
+    // Recapture when the run predates the boundary-conditions figure (or a
+    // framing revision of it) so older saved results gain the current figure
+    // the next time their results view is open.
+    const boundaryCurrent = reportCaptures?.captures.boundary?.revision === BOUNDARY_CAPTURE_REVISION;
+    const capturesComplete = reportCaptures?.runId === runId && (boundaryCurrent || !captureBoundaryView);
+    if (capturesComplete || reportCaptureInFlightRef.current === runId) return;
+    const sourceSummary = resultSummary;
+    const capture = viewerCaptureRef.current;
+    let cancelled = false;
+    reportCaptureInFlightRef.current = runId;
+    setReportCaptureBusy(true);
+    void captureQueueRef.current!.enqueue(() => captureResultViews({
+      getViewMode: () => reportStateRef.current.viewMode,
+      getResultMode: () => reportStateRef.current.resultMode,
+      setResultMode,
+      getResultFrameIndex: () => resultFrameIndexRef.current,
+      setResultFrameIndex: handleResultFrameChange,
+      getPlaybackPlaying: () => reportStateRef.current.resultPlaybackPlaying,
+      setPlaybackPlaying: setResultPlaybackPlaying,
+      resultFields,
+      surfaceMeshRef: resultSurfaceMesh?.id,
+      capture,
+      isCurrent: () => reportStateRef.current.resultSummary === sourceSummary && reportStateRef.current.completedRunId === runId,
+      setViewMode: (mode) => setCaptureViewMode(mode === "results" ? null : mode),
+      captureBoundaryView,
+      // Uploaded STEP previews re-tessellate when the viewer leaves the
+      // results view; wait for that (with a fallback timeout) before shooting.
+      ...(hasNativeCadModel
+        ? {
+            waitForBoundaryViewReady: () => new Promise<void>((resolve) => {
+              const timer = window.setTimeout(() => resolve(), 10000);
+              stepPreviewMeasureWaitersRef.current.push(() => {
+                window.clearTimeout(timer);
+                resolve();
+              });
+            })
+          }
+        : {})
+    })).then(async (captures) => {
+      if (cancelled) return;
+      await saveRunReportCaptures(runId, captures);
+      if (cancelled || reportStateRef.current.completedRunId !== runId) return;
+      setReportCaptures({ runId, captures });
+      setReportError(null);
+      pushMessage("Report images saved with simulation results.");
+    }).catch((error) => {
+      if (cancelled) return;
+      const message = errorMessage(error, "Could not save report images with the simulation results.");
+      setReportError(message);
+      pushMessage(message);
+    }).finally(() => {
+      if (reportCaptureInFlightRef.current === runId) reportCaptureInFlightRef.current = null;
+      setReportCaptureBusy(false);
+    });
+    return () => {
+      cancelled = true;
+      setCaptureViewMode(null);
+    };
+  }, [boundaryConditionCount, completedRunId, hasNativeCadModel, reportCaptures, resultFields, resultSummary, resultSurfaceMesh?.id, viewMode, viewerCaptureRevision]);
+
+  async function handleGenerateReport(options?: { targetSafetyFactor?: number }) {
+    if (!project || !study || !resultSummary) {
+      setReportError("Run a simulation before generating a report.");
+      return;
+    }
+    if (solverRunning) {
+      setReportError("Wait for the active solve to finish before generating a report.");
+      return;
+    }
+    if (resultsOutdatedBy) {
+      setReportError(STALE_RESULTS_EXPORT_MESSAGE);
+      return;
+    }
+
+    const sourceSummary = resultSummary;
+    const sourceRunId = completedRunId;
+    const captures = reportCaptures?.runId === sourceRunId ? reportCaptures.captures : null;
+    if (!captures) {
+      setReportError("Report images are still being saved with this simulation. Wait for image preparation to finish, then generate the report again.");
+      return;
+    }
+    const generatedAt = new Date();
+    setReportBusy(true);
+    setReportError(null);
+    try {
+      const saveTarget = await prepareBlobSaveToDisk(suggestedReportFilename(project.name, generatedAt), {
+        description: "PDF report",
+        accept: { "application/pdf": [".pdf"] }
+      });
+      if (saveTarget === "cancelled") return;
+      const reportData = buildReportData({
+        project,
+        study,
+        displayModel,
+        resultSummary: sourceSummary,
+        resultFields,
+        solverMeshSummary,
+        convergenceRecords: project.convergenceRecords,
+        // A report is always generated after the run finished, so runTiming is null by
+        // then; the completed elapsed time is what the "Solve wall time" row needs.
+        runTiming: runTiming ?? (solveElapsedMs === null ? null : { elapsedMs: solveElapsedMs }),
+        unitSystem: displayUnitSystem,
+        captures,
+        generatedAt,
+        exaggeration: stressExaggeration,
+        // The slider is an emphasis multiplier on an auto-fit, so the report caption needs
+        // the factor the viewport actually applied, not the control's value.
+        //
+        // capFraction is left at the production default deliberately. CadViewer widens its
+        // own cap to 1 under ?debugResults=1, but that flag is import.meta.env.DEV-gated and
+        // exists to inspect the viewport, not to change what a report asserts — a exported
+        // PDF should carry the factor a real user would see.
+        resolvedDeformation: resolvedDeformation({
+          surfaceMesh: resultSurfaceMesh,
+          resultFields,
+          resultMode,
+          deformationScale: stressExaggeration,
+          showDeformed
+        }),
+        showDeformed,
+        targetSafetyFactor: options?.targetSafetyFactor
+      });
+      const { renderReportPdf } = await import("./report/reportPdf");
+      const blob = await renderReportPdf(reportData);
+      await saveTarget.save(blob);
+    } catch (error) {
+      setReportError(error instanceof Error ? error.message : "Could not generate the simulation report.");
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  function pushMessage(message: string) {
+    setStatus(message);
+    setLogs((current) => [{ message, at: Date.now() }, ...current].slice(0, WORKSPACE_LOG_LIMIT));
+  }
+
+  function clearLogs() {
+    setLogs([]);
+  }
+
+  async function updateStudy(action: Promise<{ study: Study; message: string }>, nextStep?: StepId) {
+    const response = await action;
+    // Snapshot the latest committed project (not the render closure) so quick consecutive mutations
+    // each capture their true pre-mutation state, then merge the study into the current project.
+    const projectBeforeUpdate = projectRef.current;
+    if (projectBeforeUpdate) {
+      recordUndoSnapshot(projectBeforeUpdate);
+      setProject((current) => current
+        ? { ...current, studies: current.studies.map((item) => (item.id === response.study.id ? response.study : item)) }
+        : current);
+    }
+    // Any study change (loads, supports, materials, mesh, solver settings)
+    // makes the previous run's results stale; never keep showing them.
+    // The previous results stay viewable but are marked outdated (rail,
+    // legend, pill, notice) and are refused by report and export until the
+    // next run; they used to be destroyed on the spot (2026-09 review D4).
+    if (resultFields.length && !resultsOutdatedBy) {
+      pushMessage("Results are now outdated: the study changed since the last run.");
+    }
+    if (resultFields.length) {
+      setResultsOutdatedBy(response.message);
+      setResultsOutdatedSequence((sequence) => sequence + 1);
+    }
+    pushMessage(response.message);
+    if (nextStep) navigateToStep(nextStep);
+  }
+
+  function handleSaveCustomMaterial(material: CustomMaterial) {
+    const currentProject = projectRef.current;
+    if (!currentProject) return;
+    const existing = currentProject.customMaterials?.find((candidate) => candidate.id === material.id);
+    const assigned = currentProject.studies.some((candidate) => candidate.materialAssignments.some((assignment) => assignment.materialId === material.id));
+    const customMaterials = existing
+      ? (currentProject.customMaterials ?? []).map((candidate) => candidate.id === material.id ? material : candidate)
+      : [...(currentProject.customMaterials ?? []), material];
+    recordUndoSnapshot(currentProject);
+    setProject({ ...currentProject, customMaterials, updatedAt: new Date().toISOString() });
+    if (existing && assigned) {
+      invalidateCompletedRunState();
+      pushMessage("Previous results cleared: an assigned custom material was edited.");
+    }
+    pushMessage(existing ? `Custom material ${material.name} updated.` : `Custom material ${material.name} created.`);
+  }
+
+  function handleDeleteCustomMaterial(materialId: string) {
+    const currentProject = projectRef.current;
+    if (!currentProject) return;
+    const assigned = currentProject.studies.some((candidate) => candidate.materialAssignments.some((assignment) => assignment.materialId === materialId));
+    if (assigned) {
+      pushMessage("Assigned custom materials cannot be deleted.");
+      return;
+    }
+    const material = currentProject.customMaterials?.find((candidate) => candidate.id === materialId);
+    if (!material) return;
+    recordUndoSnapshot(currentProject);
+    setProject({
+      ...currentProject,
+      customMaterials: currentProject.customMaterials?.filter((candidate) => candidate.id !== materialId),
+      updatedAt: new Date().toISOString()
+    });
+    pushMessage(`Custom material ${material.name} deleted.`);
+  }
+
+  function handleGenerateMesh(preset: MeshQuality) {
+    if (!project || !study) return;
+    setMeshError(null);
+    setOpenNote(null);
+    // The mesh stage builds the whole Core model, so a missing boundary
+    // condition used to surface here as "generated an invalid Core model:
+    // Steady thermal analysis requires…" (2026-09 review D16). Check the same
+    // readiness rows the Run step shows and say it in the user's words.
+    const setupBlockers = runReadiness.filter((item) => !item.done && item.label !== "Mesh generated").flatMap((item) => item.blockers);
+    if (setupBlockers.length) {
+      const message = `Complete the study before meshing: ${setupBlockers.join(" ")}`;
+      setMeshError(message);
+      pushMessage(message);
+      return;
+    }
+    setMeshPhaseProgress({ phase: "load", phaseIndex: 0, phaseCount: 8, message: "Loading gmsh WebAssembly module..." });
+    // generateMesh rethrows quality-gate and STEP topology rejections so the
+    // primary failure remains visible without starting another heavy CAD job.
+    void updateStudy(generateMesh(study.id, preset, study, displayModel ?? undefined, pushMessage, setMeshPhaseProgress), shouldAutoAdvanceAfterMeshGeneration() ? "run" : undefined)
+      .catch((error: unknown) => {
+        setMeshPhaseProgress(null);
+        if (isAbortError(error)) {
+          pushMessage(error.message || "Mesh generation cancelled.");
+          return;
+        }
+        const meshFailure = error instanceof Error ? error.message : String(error);
+        setMeshError(meshFailure);
+        pushMessage(`Mesh generation failed: ${meshFailure}`);
+      })
+      .finally(() => setMeshPhaseProgress(null));
+  }
+
+  function handleCancelMesh() {
+    cancelWasmMeshing("Mesh generation cancelled.");
+  }
+
+  async function handleRunMeshConvergence(caseId: string, probe: ConvergenceProbe) {
+    const sourceProject = projectRef.current;
+    if (!sourceProject || !study || study.type !== "static_stress" || !displayModel || convergenceBusy || solverRunning) return;
+    setConvergenceBusy(true);
+    setConvergenceProgress("Preparing coarse convergence mesh.");
+    pushMessage("Starting static mesh-convergence study (coarse → medium → fine).");
+    try {
+      const record = await runMeshConvergence(study, caseId, probe, displayModel, {
+        customMaterials: sourceProject.customMaterials,
+        onProgress: setConvergenceProgress
+      });
+      if (projectRef.current !== sourceProject) {
+        pushMessage("Convergence finished, but the project changed during the run; the stale record was not attached.");
+        return;
+      }
+      const nextProject: Project = {
+        ...sourceProject,
+        convergenceRecords: [...(sourceProject.convergenceRecords ?? []), record],
+        updatedAt: new Date().toISOString()
+      };
+      projectRef.current = nextProject;
+      setProject(nextProject);
+      const label = record.classification === "apparent_convergence"
+        ? "apparent convergence"
+        : record.classification === "unconverged"
+          ? "unconverged"
+          : "inconclusive";
+      pushMessage(`Mesh-convergence study complete: ${label}. Working mesh and active results were unchanged.`);
+    } catch (error) {
+      pushMessage(`Mesh-convergence study failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setConvergenceBusy(false);
+      setConvergenceProgress("");
+      setMeshPhaseProgress(null);
+    }
+  }
+
+  function handleViewportFaceSelect(face: DisplayFace, point?: [number, number, number], payloadObject?: PayloadObjectSelection) {
+    setSelectedFaceId(face.id);
+    const isPayloadObjectLoad = activeStep === "loads" && draftLoadType === "gravity";
+    const nextLoadPoint = activeStep === "loads" ? (isPayloadObjectLoad ? payloadObject?.center ?? selectedPayloadObject?.center ?? point ?? face.center : point ?? face.center) : null;
+    setSelectedPayloadObject((current) => nextSelectedPayloadObject({ activeStep, draftLoadType, current, payloadObject }));
+    setSelectedLoadPoint(nextLoadPoint);
+    if (displayModel && !displayModel.faces.some((item) => item.id === face.id)) {
+      setDisplayModel({ ...displayModel, faces: [...displayModel.faces, face] });
+    }
+    // Select, then act: a viewer pick only chooses the face. The panel's Add
+    // button commits it, the same way loads already work. Picking used to
+    // create a support on the spot, so orbit misfires and exploratory clicks
+    // placed constraints (2026-09 review F1).
+    pushMessage(`${face.label} selected.`);
+  }
+
+  function handleViewerMiss() {
+    if (!shouldClearPayloadSelectionOnViewerMiss({ activeStep, draftLoadType })) return;
+    setSelectedPayloadObject(null);
+    setSelectedLoadPoint(null);
+  }
+
+  async function addLoadForFace(type: LoadType, value: number, face: DisplayFace, direction: LoadDirectionLabel, applicationPoint?: [number, number, number] | null, payloadObject?: PayloadObjectSelection | null, payloadMetadata: PayloadLoadMetadata = {}) {
+    if (!study) return;
+    const existingSelection = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+    const selection = existingSelection ?? namedSelectionForFace(study, face);
+    const nextSelections = existingSelection ? study.namedSelections : [...study.namedSelections, selection];
+    const load: Load = {
+      id: `load-${crypto.randomUUID()}`,
+      type,
+      selectionRef: selection.id,
+      parameters: { label: nextLoadLabel(study.loads), value, units: unitsForLoadType(type), direction: directionVectorForLabel(direction, face, displayModel ?? undefined), directionMode: direction, ...(applicationPoint ? { applicationPoint } : {}), ...(payloadObject ? { payloadObject } : {}), ...(type === "gravity" || type === "remote_force" || type === "bolt_preload" ? payloadMetadata : {}) },
+      status: "complete"
+    };
+    const structuralStudy = study.type === "static_stress" || study.type === "dynamic_structural" ? study : null;
+    const loadCases = structuralStudy ? loadCasesWithAddedLoad(structuralStudy, load.id) : undefined;
+    await updateStudy(
+      saveStudyPatch(study.id, { namedSelections: nextSelections, loads: [...study.loads, load], ...(loadCases ? { loadCases } : {}) }, "Load added.", study)
+    );
+  }
+
+  async function handleRenameProject(name: string) {
+    if (!project) return;
+    const nextName = name.trim().replace(/\s+/g, " ");
+    if (!nextName || nextName === project.name) return;
+    try {
+      const response = await renameProject(project.id, nextName, project);
+      recordUndoSnapshot(project);
+      setProject(response.project);
+      pushMessage(response.message);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Could not rename project.");
+    }
+  }
+
+  function recordUndoSnapshot(snapshot: Project) {
+    setUndoStack((history) => [...history, cloneProjectSharingEmbeddedModels(snapshot)].slice(-30));
+    setRedoStack([]);
+  }
+
+  function applyStep(step: StepId) {
+    setActiveStep(step);
+    if (step === "results") {
+      setViewMode("results");
+      return;
+    }
+    if (["material", "supports", "loads", "mesh", "run"].includes(step) && viewMode === "results") {
+      setViewMode("model");
+    }
+  }
+
+  function navigateToStep(step: StepId) {
+    if (step === activeStep) return;
+    if (!canNavigateToStep(step, { meshStatus: study?.meshSettings.status ?? "not_started" })) {
+      pushMessage("Generate the mesh before going to Run.");
+      return;
+    }
+    // A face picked for one step is not a target for the next: the last face
+    // clicked while placing supports used to arrive pre-selected on Loads
+    // (2026-09 review F1).
+    setSelectedFaceId(null);
+    setSelectedLoadPoint(null);
+    setSelectedPayloadObject(null);
+    applyStep(step);
+  }
+
+  function handleStepSelect(step: StepId) {
+    navigateToStep(step);
+  }
+
+  function handleCreateStaticSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalStaticStressStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Static simulation created.");
+  }
+
+  function handleCreateDynamicSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalDynamicStructuralStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Dynamic structural simulation created.");
+  }
+
+  function handleCreateModalSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalModalStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Modal analysis created.");
+  }
+
+  function handleCreateThermalSimulation() {
+    if (!project || !displayModel) return;
+    const nextStudy = createLocalThermalStudy(project, displayModel);
+    const nextProject = { ...project, studies: [nextStudy], updatedAt: new Date().toISOString() };
+    recordUndoSnapshot(project);
+    setProject(nextProject);
+    applyStep(displayModel.bodyCount > 0 ? "material" : "model");
+    pushMessage("Steady-state thermal simulation created.");
+  }
+
+  function invalidateCompletedRunState() {
+    resultVariantLoadGenerationRef.current += 1;
+    setResultsOutdatedBy(null);
+    setResultSummary(null);
+    setSolveElapsedMs(null);
+    setCompletedRunId("");
+    setReportCaptures(null);
+    setActiveRunId("");
+    setRunProgress(0);
+    setResultFields([]);
+    setResultVariants([]);
+    setResultVariantRefs([]);
+    setActiveResultVariantId("");
+    setResultSurfaceMesh(undefined);
+    setSolverMeshSummary(null);
+    setResultFrameIndex(0);
+    setResultPlaybackFramePosition(0);
+    setResultPlaybackOrdinalPosition(0);
+    setResultPlaybackPlaying(false);
+    setResultPlaybackCacheState({ status: "idle" });
+    /* View state is deliberately NOT reset here. Invalidating a run drops the result DATA;
+       resetting how the user was looking at it as well meant that tweaking a load and
+       re-running silently threw away their stress measure, their result mode and the
+       deformed-shape toggle every single time. Everything here is reconciled against the
+       next summary anyway: compatibleResultModeForSummary re-derives the mode, the
+       component effect re-guards an unavailable stress component, and the completion
+       branch sets the mode and mode index for thermal, modal and dynamic runs.
+
+       Probes are the exception and must still be cleared: they resolve by index into one
+       specific run's surface mesh, so carrying them across would silently mis-resolve
+       them onto different geometry. */
+    setResultProbes([]);
+    setResultProbeLimitReached(false);
+    setCaptureViewMode(null);
+  }
+
+  function handleUpdateSolverSettings(settings: Partial<DynamicSolverSettings & ModalSolverSettings> & { fidelity?: SimulationFidelity }) {
+    if (!study) return;
+    const nextSettings = study.type === "dynamic_structural"
+      ? normalizedDynamicSolverSettings(study.solverSettings, { ...study.solverSettings, ...settings }, settings)
+      : study.type === "modal_analysis"
+        ? ModalSolverSettingsSchema.parse({ ...study.solverSettings, ...settings })
+        : { ...study.solverSettings, ...settings };
+    invalidateCompletedRunState();
+    void updateStudy(
+      saveStudyPatch(
+        study.id,
+        { solverSettings: nextSettings },
+        "Solver settings updated.",
+        study
+      )
+    );
+  }
+
+  function handleChangeStudyType(type: Study["type"]) {
+    if (!study || study.type === type || solverRunning) return;
+    // Backend and fidelity survive the switch; the transient settings are
+    // schema defaults going to dynamic and dropped going back to static.
+    const backend = study.solverSettings.backend;
+    const fidelity = study.solverSettings.fidelity;
+    const carried = { ...(backend ? { backend } : {}), ...(fidelity ? { fidelity } : {}) };
+    const defaultNames = ["Static Stress", "Dynamic Structural", "Modal Analysis", "Steady-State Thermal"];
+    const name = defaultNames.includes(study.name)
+      ? (type === "dynamic_structural" ? "Dynamic Structural" : type === "modal_analysis" ? "Modal Analysis" : type === "steady_state_thermal" ? "Steady-State Thermal" : "Static Stress")
+      : study.name;
+    const patch: Partial<Study> = type === "dynamic_structural"
+      ? { type, name, constraints: study.type === "steady_state_thermal" ? [] : study.constraints, loads: study.type === "steady_state_thermal" ? [] : study.loads, loadCases: study.type === "steady_state_thermal" ? [{ id: "case-default", name: "Default", enabled: true, loadIds: [] }] : study.loadCases, loadCombinations: study.type === "steady_state_thermal" ? [] : study.loadCombinations, solverSettings: DynamicSolverSettingsSchema.parse(carried) }
+      : type === "modal_analysis"
+        ? { type, name, constraints: study.type === "steady_state_thermal" ? [] : study.constraints, loads: study.type === "steady_state_thermal" ? [] : study.loads, solverSettings: ModalSolverSettingsSchema.parse(carried) }
+        : type === "steady_state_thermal"
+          ? { type, name, constraints: [], loads: [], loadCases: [], loadCombinations: [], solverSettings: carried }
+          : { type, name, constraints: study.type === "steady_state_thermal" ? [] : study.constraints, loads: study.type === "steady_state_thermal" ? [] : study.loads, loadCases: study.type === "steady_state_thermal" ? [{ id: "case-default", name: "Default", enabled: true, loadIds: [] }] : study.loadCases, loadCombinations: study.type === "steady_state_thermal" ? [] : study.loadCombinations, solverSettings: carried };
+    void updateStudy(saveStudyPatch(
+      study.id,
+      patch,
+      type === "dynamic_structural"
+        ? study.type === "steady_state_thermal"
+          ? "Study switched to dynamic structural analysis. Thermal boundaries and loads were cleared."
+          : "Study switched to dynamic structural analysis."
+        : type === "modal_analysis"
+          ? study.type === "steady_state_thermal"
+            ? "Study switched to modal analysis. Thermal boundaries and loads were cleared."
+            : "Study switched to modal analysis. Saved loads are not used by the modal solve."
+          : type === "steady_state_thermal"
+            ? "Study switched to steady-state thermal analysis. Structural supports and loads were cleared."
+            : study.type === "steady_state_thermal"
+              ? "Study switched to static stress analysis. Thermal boundaries and loads were cleared."
+              : "Study switched to static stress analysis.",
+      study
+    ));
+  }
+
+  function normalizedDynamicSolverSettings(
+    currentSettings: DynamicSolverSettings,
+    mergedSettings: DynamicSolverSettings & { fidelity?: SimulationFidelity },
+    patch: Partial<DynamicSolverSettings>
+  ) {
+    const minimumOutputInterval = Math.max(DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS, MIN_DYNAMIC_OUTPUT_INTERVAL_SECONDS);
+    const requestedOutputInterval = patch.outputInterval ?? currentSettings.outputInterval ?? DEFAULT_DYNAMIC_OUTPUT_INTERVAL_SECONDS;
+    return {
+      ...mergedSettings,
+      loadProfile: isDynamicLoadProfile(mergedSettings.loadProfile) ? mergedSettings.loadProfile : "ramp",
+      outputInterval: Math.max(
+        requestedOutputInterval,
+        mergedSettings.timeStep,
+        minimumOutputInterval
+      )
+    };
+  }
+
+  function isDynamicLoadProfile(value: unknown): value is DynamicSolverSettings["loadProfile"] {
+    return value === "ramp" || value === "step" || value === "quasi_static" || value === "sinusoidal";
+  }
+
+  function handleBoundaryConditionType(type: "fixed" | "prescribed_displacement" | "prescribed_temperature" | LoadType) {
+    setShowBoundaryConditionMenu(false);
+    if (type === "fixed" || type === "prescribed_displacement" || type === "prescribed_temperature") {
+      // The face stays selected; the Supports panel's Add button commits it.
+      applyStep("supports");
+      return;
+    }
+    setDraftLoadType(type);
+    setDraftLoadValue(defaultValueForLoadType(type));
+    applyStep("loads");
+  }
+
+  function handleRotateModel(axis: RotationAxis) {
+    setViewAxis(axis);
+    setViewAxisSignal((value) => value + 1);
+    pushMessage(`View aligned perpendicular to ${axis.toUpperCase()} axis.`);
+  }
+
+  function handleResetModelOrientation() {
+    setDisplayModel((current) => (current ? resetDisplayModelOrientation(current) : current));
+    requestDefaultHomeView();
+    pushMessage("Model orientation reset.");
+  }
+
+  function requestDefaultHomeView() {
+    setViewAxis(null);
+    setFitSignal((value) => value + 1);
+  }
+
+  function handleFitDefaultView() {
+    requestDefaultHomeView();
+  }
+
+  function handleUnitSystemChange(unitSystem: UnitSystem) {
+    if (!project || project.unitSystem === unitSystem) return;
+    recordUndoSnapshot(project);
+    setProject({ ...project, unitSystem });
+    pushMessage(`Project units switched to ${unitSystem === "SI" ? "metric" : "imperial"}.`);
+  }
+
+  // Undo and redo persist the same way every other whole-project edit does —
+  // through `setProject`, which the autosave effect writes. They previously
+  // also called `saveStudyPatch` without the current study it requires at
+  // runtime, so every undo threw, logged a failure, and left "Needs attention"
+  // over a change that had in fact applied.
+  function handleUndoAction() {
+    if (!project || !canUndoAction || processingRunIdRef.current) return;
+    const previous = undoStack[undoStack.length - 1];
+    if (!previous) return;
+    setUndoStack(undoStack.slice(0, -1));
+    setRedoStack([...redoStack, cloneProjectSharingEmbeddedModels(project)]);
+    invalidateCompletedRunState();
+    projectRef.current = cloneProjectSharingEmbeddedModels(previous);
+    setProject(projectRef.current);
+    pushMessage("Undo applied.");
+  }
+
+  function handleRedoAction() {
+    if (!project || !canRedoAction || processingRunIdRef.current) return;
+    const next = redoStack[redoStack.length - 1];
+    if (!next) return;
+    setRedoStack(redoStack.slice(0, -1));
+    setUndoStack([...undoStack, cloneProjectSharingEmbeddedModels(project)].slice(-30));
+    invalidateCompletedRunState();
+    projectRef.current = cloneProjectSharingEmbeddedModels(next);
+    setProject(projectRef.current);
+    pushMessage("Redo applied.");
+  }
+
+  async function handleResultVariantChange(variantId: string) {
+    if (!completedRunId || variantId === activeResultVariantId) return;
+    const generation = ++resultVariantLoadGenerationRef.current;
+    try {
+      const inMemory = resultVariants.find((variant) => variant.id === variantId);
+      const variant = inMemory ?? await getRunVariant(completedRunId, variantId);
+      if (generation !== resultVariantLoadGenerationRef.current) return;
+      const withSafetyFactor = withDerivedSurfaceSafetyFactorFields({
+        summary: variant.summary,
+        fields: variant.fields
+      });
+      setResultSummary(variant.summary);
+      setResultFields(withSafetyFactor);
+      setActiveResultVariantId(variant.id);
+      if (resultVariantRefs.find((reference) => reference.id === variant.id)?.persistedSeparately) {
+        // Dynamic cases are deliberately one-at-a-time in memory; their full
+        // transient payloads remain separate IndexedDB records.
+        setResultVariants([variant]);
+      }
+      setResultFrameIndex(0);
+      setResultPlaybackFramePosition(0);
+      setResultPlaybackPlaying(false);
+      setRunError(null);
+      pushMessage(`Showing ${variant.name}.`);
+    } catch (error) {
+      if (generation !== resultVariantLoadGenerationRef.current) return;
+      const message = errorMessage(error, "Could not load the selected result variant.");
+      setRunError(message);
+      pushMessage(message);
+    }
+  }
+
+  async function handleRunSimulation() {
+    if (!study) return;
+    if (!effectiveCanRunSimulation) {
+      pushMessage(effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}.` : "Simulation is already running.");
+      return;
+    }
+    // Solver eligibility needs the model's display dimensions, which the
+    // viewer measures after its first frame. Say so instead of letting the
+    // solver refuse with "requires usable block-like display dimensions"
+    // (2026-09 review D27).
+    if (!displayModel?.dimensions) {
+      const message = "The 3D view has not finished measuring the model yet. Wait for the model to appear in the viewer, then run again.";
+      setRunError(message);
+      pushMessage(message);
+      return;
+    }
+    setResultPlaybackPlaying(false);
+    setRunError(null);
+    pushMessage("Starting simulation run.");
+    pushMessage(runDiagnosticsMessage(study, displayModel ?? undefined));
+    let response: Awaited<ReturnType<typeof runSimulation>>;
+    try {
+      response = await runSimulation(study.id, study, displayModel ?? undefined, {
+        onRunStatus: pushMessage,
+        resultRenderBounds,
+        customMaterials: project?.customMaterials,
+        // A-M4 local-first meshing: when the run meshes geometry before
+        // solving, persist the meshed study (with its stored artifact) so
+        // later runs reuse it instead of re-meshing.
+        onStudyMeshed: (meshedStudy) => {
+          const current = projectRef.current;
+          if (!current) return;
+          const next = { ...current, studies: current.studies.map((item) => (item.id === meshedStudy.id ? meshedStudy : item)) };
+          // Keep the imperative snapshot synchronized before the worker can
+          // finish. A fast solve may complete before React commits the state
+          // update, and the completion guard below must see the meshed study.
+          projectRef.current = next;
+          setProject(next);
+        }
+      });
+    } catch (error) {
+      setProcessingRunId(null);
+      setRunProgress(0);
+      setRunTiming(null);
+      setResultPlaybackPlaying(false);
+      const message = errorMessage(error, "Could not start simulation.");
+      setRunError(message);
+      pushMessage(message);
+      return;
+    }
+    invalidateCompletedRunState();
+    setActiveRunId(response.run.id);
+    setProcessingRunId(response.run.id);
+    setRunProgress(0);
+    setRunTiming(null);
+    pushMessage(response.message);
+    const source = subscribeToRun(response.run.id, async (event: RunEvent) => {
+      if (typeof event.progress === "number") setRunProgress(event.progress);
+      setRunTiming(timingFromRunEvent(event));
+      pushMessage(messageWithEta(event));
+      if (event.type === "complete") {
+        source.close();
+        if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
+        const completedElapsedMs = timingFromRunEvent(event)?.elapsedMs;
+        if (typeof completedElapsedMs === "number") setSolveElapsedMs(completedElapsedMs);
+        setRunTiming(null);
+        try {
+          const results = await getResults(response.run.id, { projectId: study.projectId, studyId: study.id });
+          const currentStudy = projectRef.current?.studies.find((candidate) => candidate.id === study.id);
+          if (processingRunIdRef.current !== response.run.id || currentStudy?.type !== study.type) {
+            pushMessage("Completed results were ignored because the active project or analysis changed during the run.");
+            // Leave no completed progress behind for an abandoned run, or the status pill
+            // reads "Results ready" for results this branch just threw away.
+            setRunProgress(0);
+            return;
+          }
+          if (study.type === "dynamic_structural" && (!isStructuralResultSummary(results.summary) || !hasDynamicPlaybackFrames(results.summary, results.fields))) {
+            pushMessage("Dynamic results did not include animation frames.");
+            setResultPlaybackPlaying(false);
+            setRunProgress(0);
+            return;
+          }
+          setResultSummary(results.summary);
+          setResultFields(withDerivedSurfaceSafetyFactorFields(results));
+          setResultVariants(results.variants ?? []);
+          setResultVariantRefs(resultVariantRefsForBundle(results));
+          setActiveResultVariantId(results.activeVariantId ?? results.variants?.[0]?.id ?? "");
+          setResultSurfaceMesh(results.surfaceMesh);
+          setSolverMeshSummary(solverMeshSummaryFromResults(results));
+          setReportCaptures(results.reportCaptures ? { runId: response.run.id, captures: results.reportCaptures } : null);
+          setResultFrameIndex(0);
+          setResultPlaybackPlaying(false);
+          if (study.type === "dynamic_structural") setResultMode("stress");
+          if (isThermalResultSummary(results.summary)) setResultMode("temperature");
+          if (isModalResultSummary(results.summary)) {
+            setSelectedModeIndex(results.summary.modes[0]?.modeIndex ?? 1);
+            setResultMode("mode_shape");
+            setShowDeformed(true);
+          }
+          setCompletedRunId(response.run.id);
+          processingRunIdRef.current = null;
+          setProcessingRunId(null);
+          setViewMode("results");
+          setActiveStep("results");
+          if (results.summary.diagnostics?.some((diagnostic) => diagnostic.id === "local-results-persistence")) {
+            pushMessage("Completed results exceeded or could not use IndexedDB storage.");
+            setOverflowRecoveryRequest((request) => request + 1);
+          }
+          const truncation = truncationMessageForDiagnostics(results.summary.diagnostics);
+          if (truncation) pushMessage(truncation);
+        } catch (error) {
+          if (processingRunIdRef.current !== response.run.id) return;
+          processingRunIdRef.current = null;
+          setProcessingRunId(null);
+          const message = errorMessage(error, "Could not load simulation results.");
+          setRunError(message);
+          pushMessage(message);
+          setResultPlaybackPlaying(false);
+          setRunProgress(0);
+        }
+      } else if (event.type === "cancelled" || event.type === "error") {
+        source.close();
+        if (activeRunSourceRef.current === source) activeRunSourceRef.current = null;
+        if (processingRunIdRef.current === response.run.id) processingRunIdRef.current = null;
+        setProcessingRunId(null);
+        setResultPlaybackPlaying(false);
+        setRunProgress(0);
+        setRunTiming(null);
+        if (event.type === "error") setRunError(event.message || "Simulation run failed.");
+      }
+    });
+    activeRunSourceRef.current = source;
+    processingRunIdRef.current = response.run.id;
+  }
+
+  async function handleCancelSimulation() {
+    const runId = processingRunIdRef.current;
+    activeRunSourceRef.current?.close();
+    activeRunSourceRef.current = null;
+    processingRunIdRef.current = null;
+    setProcessingRunId(null);
+    setResultPlaybackPlaying(false);
+    setRunProgress(0);
+    setRunTiming(null);
+    if (!runId) {
+      pushMessage("Simulation processing stopped.");
+      return;
+    }
+    try {
+      const response = await cancelRun(runId);
+      pushMessage(response.message);
+    } catch (error) {
+      pushMessage(error instanceof Error ? error.message : "Simulation processing stopped locally.");
+    }
+  }
+
+  function handleOpenStartMenu() {
+    setHomeRequested(true);
+  }
+
+  function handleAnalyticsEnabledChange(enabled: boolean) {
+    if (!setAnalyticsEnabled(enabled)) {
+      pushMessage("OpenFEA could not save the analytics choice in this browser. The current setting was not changed.");
+      return;
+    }
+    setAnalyticsEnabledState(enabled);
+  }
+
+  function handleToggleSingleKeyShortcuts() {
+    setSingleKeyShortcutsEnabled((enabled) => {
+      const next = !enabled;
+      try {
+        window.localStorage.setItem("opencae.shortcuts.singleKey", next ? "on" : "off");
+      } catch {
+        // Ignore storage failures (e.g. private browsing); keep in-memory state.
+      }
+      return next;
+    });
+  }
+
+  function renderTopbar(showRunButton: boolean) {
+    if (!project) return null;
+    return (
+      <header className="topbar">
+        <button className="brand brand-button" type="button" onClick={handleOpenStartMenu} title="Back to start menu" aria-label="Back to start menu">
+          <OpenFeaLogoMark />OpenFEA <span className="beta-tag">Beta</span>
+        </button>
+        <div className="topbar-divider topbar-divider-project" />
+        <div className="breadcrumb">
+          <ProjectNameChip name={project.name} onRename={handleRenameProject} />
+          {study ? <><span className="breadcrumb-sep">/</span><span>{study.name}</span></> : <><span className="breadcrumb-sep">/</span><span>No simulation</span></>}
+        </div>
+        <div className="topbar-tools" aria-label="Workspace tools">
+          <div className="history-tools" role="group" aria-label="Undo and redo">
+            <button className="icon-button history-button" type="button" title="Undo last change" aria-label="Undo last change" disabled={!canUndoAction} onClick={handleUndoAction}><UndoIcon /></button>
+            <button className="icon-button history-button" type="button" title="Redo last change" aria-label="Redo last change" disabled={!canRedoAction} onClick={handleRedoAction}><RedoIcon /></button>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            title="Open validation gallery"
+            aria-label="Open validation gallery"
+            aria-expanded={validationGalleryOpen}
+            onClick={() => setValidationGalleryOpen(true)}
+          >
+            <FlaskConical size={17} aria-hidden="true" />
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-expanded={shortcutGuideOpen}
+            aria-controls="workspace-shortcut-guide"
+            title="Show keyboard shortcuts"
+            aria-label="Show keyboard shortcuts"
+            onClick={() => { setStorageRecoveryNoticeOpen(false); setShortcutGuideOpen((open) => !open); }}
+          >
+            <Keyboard size={17} aria-hidden="true" />
+          </button>
+          {shortcutGuideOpen ? (
+            <>
+              <div className="shortcut-popover-backdrop" aria-hidden="true" onMouseDown={() => setShortcutGuideOpen(false)} />
+              <div ref={shortcutGuideRef} className="shortcut-popover" id="workspace-shortcut-guide" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+                <button className="shortcut-popover-close" type="button" aria-label="Close keyboard shortcuts" onClick={() => setShortcutGuideOpen(false)}>
+                  <X size={16} aria-hidden="true" />
+                </button>
+                <KeyboardShortcutGuide />
+                <label className="shortcut-toggle">
+                  <input type="checkbox" aria-label="Single-key shortcuts" checked={singleKeyShortcutsEnabled} onChange={handleToggleSingleKeyShortcuts} />
+                  <span>
+                    <strong>Single-key shortcuts</strong>
+                    <small>Enable N, B, and H when you are not typing in a field.</small>
+                  </span>
+                </label>
+              </div>
+            </>
+          ) : null}
+        </div>
+        <button
+          className={`storage-status-button ${cloudBackupPreference ?? "unselected"}`}
+          type="button"
+          aria-label={`Project storage: ${cloudBackupPreference === "cloud" ? "recovery on" : cloudBackupPreference === "local" ? "local only" : "choose storage"}`}
+          aria-expanded={storageRecoveryNoticeOpen}
+          aria-controls="project-storage-notice"
+          title="Review project storage choice"
+          onClick={() => { setShortcutGuideOpen(false); setStorageRecoveryNoticeOpen((open) => !open); }}
+        >
+          {cloudBackupPreference === "cloud" ? <CloudUpload size={15} aria-hidden="true" /> : <HardDrive size={15} aria-hidden="true" />}
+          <span>{cloudBackupPreference === "cloud" ? "Recovery on" : cloudBackupPreference === "local" ? "Local only" : "Storage"}</span>
+        </button>
+        {showRunButton ? (
+          <button
+            className={`primary topbar-action ${solverRunning ? "running" : ""}`}
+            onClick={solverRunning ? () => void handleCancelSimulation() : handleRunSimulation}
+            disabled={solverRunning ? false : !effectiveCanRunSimulation}
+            title={solverRunning ? "Stop the running simulation" : effectiveMissingRunItems.length ? `Complete before running: ${effectiveMissingRunItems.join(", ")}` : "Run simulation"}
+            aria-label={solverRunning ? `Stop simulation: ${runButtonProgress}% complete` : "Run simulation"}
+            aria-busy={solverRunning}
+            style={{ "--run-progress": `${runButtonProgress}%` } as CSSProperties}
+          >
+            <span aria-hidden="true">{solverRunning ? "■" : "▶"}</span><span className="topbar-action-label">{solverRunning ? `Stop ${runButtonProgress}%` : "Run simulation"}</span>
+          </button>
+        ) : null}
+      </header>
+    );
+  }
+
+  function renderStorageRecoveryNotice() {
+    if (!storageRecoveryNoticeOpen) return null;
+    return (
+      <ProjectStorageNotice
+        preference={cloudBackupPreference}
+        busy={cloudBackupBusy}
+        recoveryNeeded={overflowRecoveryNeeded}
+        analyticsEnabled={analyticsEnabled}
+        onChooseCloud={() => handleStoragePreference("cloud")}
+        onChooseLocal={() => handleStoragePreference("local")}
+        onAnalyticsEnabledChange={handleAnalyticsEnabledChange}
+        onDownloadProject={() => {
+          setStorageRecoveryNoticeOpen(false);
+          void handleSaveProject();
+        }}
+        onDismiss={() => setStorageRecoveryNoticeOpen(false)}
+      />
+    );
+  }
+
+  if (shouldShowStartScreen({ homeRequested, hasProject: Boolean(project), hasDisplayModel: Boolean(displayModel), hasStudy: Boolean(study) }) || !project || !displayModel || !displayModelForUi) {
+    // "Back to start" keeps the project in memory and autosave; offer the way
+    // back so Create/Load do not read as the only options (2026-09 review D23).
+    const continueProject = project && displayModel && study
+      ? { name: project.name, onContinue: () => setHomeRequested(false) }
+      : undefined;
+    return <StartScreen onLoadSample={handleLoadSample} onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} continueProject={continueProject} />;
+  }
+
+  if (project && displayModel && displayModelForUi && !study) {
+    return (
+      <div className={`app-shell theme-${themeMode} simulation-type-shell ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
+        {renderTopbar(false)}
+        <CreateSimulationScreen
+          onCreateStatic={handleCreateStaticSimulation}
+          onCreateDynamic={handleCreateDynamicSimulation}
+          onCreateModal={handleCreateModalSimulation}
+          onCreateThermal={handleCreateThermalSimulation}
+        />
+        <BottomPanel status={status} logs={logs} meshStatus="Not generated" solverStatus="Idle" onClearLogs={clearLogs} />
+        {renderStorageRecoveryNotice()}
+      </div>
+    );
+  }
+
+  if (!study) return null;
+
+  return (
+    <div className={`app-shell theme-${themeMode} ${isStepbarCollapsed ? "stepbar-collapsed" : ""}`}>
+      <a className="skip-link" href="#workspace-main" onClick={handleSkipToMain}>Skip to main content</a>
+      <h1 className="visually-hidden">{project?.name ? `OpenFEA — ${project.name}` : "OpenFEA workspace"}</h1>
+      {renderTopbar(true)}
+
+      <main ref={workspaceMainRef} className="workspace" id="workspace-main" tabIndex={-1}>
+        <StepBar
+          activeStep={activeStep}
+          collapsed={isStepbarCollapsed}
+          project={project}
+          themeMode={themeMode}
+          onSelect={handleStepSelect}
+          onToggleCollapsed={() => setIsStepbarCollapsed((collapsed) => !collapsed)}
+          onToggleTheme={() => setThemeMode((mode) => (mode === "dark" ? "light" : "dark"))}
+          onUnitSystemChange={handleUnitSystemChange}
+          study={study}
+          hasResults={resultDisplayEligible && !resultsOutdatedBy}
+          readiness={runReadiness}
+          notices={stepNotices}
+        />
+        <Suspense fallback={(
+          <section className="viewer-shell viewer-loading" aria-label="3D CAD viewer loading">
+            <div className="viewer-import-card" role="status" aria-live="polite">
+              <span className="viewer-import-spinner" aria-hidden="true" />
+              <strong>Preparing the 3D view…</strong>
+              <small>Loading the viewer. The model appears as soon as it is ready.</small>
+            </div>
+          </section>
+        )}>
+          <CadViewer
+            displayModel={displayModelForUi}
+            importingModelFilename={modelImport?.filename}
+            activeStep={activeStep}
+            selectedFaceId={selectedFaceId}
+            payloadObjectSelectionMode={Boolean(study && activeStep === "loads" && draftLoadType === "gravity")}
+            selectedPayloadObject={selectedPayloadObject}
+            onViewerMiss={handleViewerMiss}
+            onSelectFace={handleViewportFaceSelect}
+            viewMode={captureViewMode ?? viewMode}
+            resultsEligible={resultDisplayEligible}
+            resultMode={resultMode}
+            stressComponent={stressComponent}
+            showDeformed={showDeformed}
+            resultPlaybackPlaying={resultPlaybackPlaying}
+            // The boundary-figure capture hides the dimension overlay: its
+            // lines/labels sit outside the model and force the report camera
+            // to zoom far out; the dimensions are already tabled in section 1.
+            showDimensions={captureViewMode ? false : showDimensions}
+            stressExaggeration={stressExaggeration}
+            resultFields={visibleResultFieldsForUi}
+            resultColorScale={activeResultColorScale}
+            sectionPlane={sectionPlane}
+            resultProbes={resultProbes}
+            onAddResultProbe={handleAddResultProbe}
+            surfaceMesh={resultSurfaceMesh}
+            meshPreviewSurface={meshPreviewSurface}
+            captureBusy={reportCaptureBusy}
+            resultsStale={Boolean(resultsOutdatedBy)}
+            resultPeaks={resultPeaks}
+            assignedFaceTints={assignedFaceTints}
+            resultPlaybackBufferCache={resultPlaybackBufferCacheForViewer}
+            resultPlaybackFrameController={resultPlaybackPlaying && resultPlaybackCacheState.status === "ready" && resultPlaybackCacheState.cache.packed ? resultPlaybackFrameControllerRef.current : undefined}
+            meshSummary={solverMeshSummary ?? study.meshSettings.summary}
+            unitSystem={displayUnitSystem}
+            themeMode={themeMode}
+            projectionMode={projectionMode}
+            onProjectionModeChange={setProjectionMode}
+            fitSignal={fitSignal}
+            viewAxis={viewAxis}
+            viewAxisSignal={viewAxisSignal}
+            loadMarkers={loadMarkers}
+            supportMarkers={supportMarkers}
+            printLayerOrientation={printLayerOrientation}
+            onMeasureDisplayModelDimensions={handleMeasureDisplayModelDimensions}
+            onResultRenderBoundsChange={setResultRenderBounds}
+            onViewerInteractionChange={handleViewerInteractionChange}
+            onRegisterCapture={handleRegisterViewerCapture}
+          />
+        </Suspense>
+        <RightPanel
+          activeStep={activeStep}
+          notice={workspaceNotice}
+          resultControlsBusy={reportCaptureBusy}
+          onDismissNotice={() => workspaceNotice && setDismissedNoticeKey(workspaceNotice.key)}
+          onNoticeStep={(step) => navigateToStep(step)}
+          project={project}
+          displayModel={displayModelForUi}
+          study={study}
+          selectedFace={selectedFace}
+          viewMode={viewMode}
+          resultMode={resultMode}
+          selectedModeIndex={selectedModeIndex}
+          stressComponent={stressComponent}
+          showDeformed={showDeformed}
+          showDimensions={showDimensions}
+          sectionPlane={sectionPlane}
+          stressExaggeration={stressExaggeration}
+          resultSummary={resultDisplayEligible ? resultSummaryForUi : null}
+          resultFields={resultDisplayEligible ? resultFieldsForUi : []}
+          resultColorScale={activeResultColorScale}
+          resultColorScaleControl={activeResultColorScaleControl}
+          onResultColorScaleSettingChange={handleResultColorScaleSettingChange}
+          resultVariants={resultVariantRefs}
+          activeResultVariantId={activeResultVariantId}
+          onResultVariantChange={handleResultVariantChange}
+          resultProbes={resolvedResultProbesForUi}
+          resultProbeLimitReached={resultProbeLimitReached}
+          onRemoveResultProbe={handleRemoveResultProbe}
+          onClearResultProbes={handleClearResultProbes}
+          runProgress={runProgress}
+          runError={runError}
+          runTiming={runTiming}
+          solveElapsedMs={solveElapsedMs}
+          onGenerateReport={handleGenerateReport}
+          onExportResultPng={handleExportResultPng}
+          onExportResultHtml={handleExportResultHtml}
+          onExportResultData={handleExportResultData}
+          onSaveProject={handleSaveProject}
+          reportBusy={reportBusy}
+          reportError={reportError}
+          reportDisabled={solverRunning || convergenceBusy || Boolean(resultsOutdatedBy)}
+          pngExportBusy={pngExportBusy}
+          pngExportError={pngExportError}
+          htmlExportBusy={htmlExportBusy}
+          htmlExportError={htmlExportError}
+          dataExportBusy={dataExportBusy}
+          dataExportError={dataExportError}
+          sampleModel={sampleModel}
+          sampleAnalysisType={sampleAnalysisType}
+          draftLoadType={draftLoadType}
+          draftLoadValue={draftLoadValue}
+          draftSupportTemperature={draftSupportTemperature}
+          onDraftSupportTemperatureChange={setDraftSupportTemperature}
+          draftLoadDirection={draftLoadDirection}
+          selectedLoadPoint={selectedLoadPoint}
+          selectedPayloadObject={selectedPayloadObject}
+          onFitView={handleFitDefaultView}
+          onRotateModel={handleRotateModel}
+          onResetModelOrientation={handleResetModelOrientation}
+          onLoadSample={handleLoadSample}
+          onUploadModel={handleUploadModel}
+          onRepairModel={() => void handleRepairModel()}
+          isRepairingModel={isRepairingModel}
+          onViewModeChange={setViewMode}
+          onResultModeChange={setResultMode}
+          onSelectedModeIndexChange={(modeIndex) => {
+            setSelectedModeIndex(modeIndex);
+            setResultFrameIndex(0);
+            setResultPlaybackFramePosition(0);
+            setResultPlaybackPlaying(false);
+          }}
+          onStressComponentChange={setStressComponent}
+          onToggleDeformed={() => setShowDeformed((value) => !value)}
+          onToggleDimensions={() => setShowDimensions((value) => !value)}
+          onSectionPlaneChange={setSectionPlane}
+          onStressExaggerationChange={setStressExaggeration}
+          onAssignMaterial={(materialId, parameters) =>
+            updateStudy(assignMaterial(study.id, materialId, parameters, study, project?.customMaterials), shouldAutoAdvanceAfterMaterialAssignment() ? "supports" : undefined)
+          }
+          onSaveCustomMaterial={handleSaveCustomMaterial}
+          onDeleteCustomMaterial={handleDeleteCustomMaterial}
+          onPreviewPrintLayerOrientation={setPreviewPrintLayerOrientation}
+          onAddSupport={(selectionRef, options, extras) => {
+            if (options?.type === "prescribed_temperature") {
+              const constraint: Constraint = {
+                id: `constraint-${crypto.randomUUID()}`,
+                type: "prescribed_temperature",
+                selectionRef: selectionRef ?? "",
+                parameters: { label: nextSupportLabel(study.constraints, "prescribed_temperature"), value: options.value ?? 20, units: "°C" },
+                status: "complete"
+              };
+              updateStudy(saveStudyPatch(study.id, { constraints: [...study.constraints, constraint] }, "Temperature boundary added.", study));
+              return;
+            }
+            if (options?.type === "prescribed_displacement") {
+              const component = options.component ?? "z";
+              const extraRefs = [...new Set((extras?.selectionRefs ?? []).filter((ref) => ref && ref !== selectionRef))];
+              const constraint: Constraint = {
+                id: `constraint-${crypto.randomUUID()}`,
+                type: "prescribed_displacement",
+                selectionRef: selectionRef ?? "",
+                ...(extraRefs.length ? { selectionRefs: extraRefs } : {}),
+                parameters: {
+                  label: nextSupportLabel(study.constraints, "prescribed_displacement"),
+                  value: options.value ?? 0,
+                  units: "mm",
+                  component
+                },
+                status: "complete"
+              };
+              updateStudy(saveStudyPatch(
+                study.id,
+                { constraints: [...study.constraints, constraint] },
+                extraRefs.length ? `Prescribed displacement added on ${extraRefs.length + 1} faces.` : "Prescribed displacement added.",
+                study
+              ));
+              return;
+            }
+            const extraRefs = [...new Set((extras?.selectionRefs ?? []).filter((ref) => ref && ref !== selectionRef))];
+            if (!extraRefs.length) {
+              updateStudy(addSupport(study.id, selectionRef, study));
+              return;
+            }
+            const constraint: Constraint = {
+              id: `constraint-${crypto.randomUUID()}`,
+              type: "fixed",
+              selectionRef: selectionRef ?? "",
+              selectionRefs: extraRefs,
+              parameters: { label: nextSupportLabel(study.constraints, "fixed") },
+              status: "complete"
+            };
+            updateStudy(saveStudyPatch(
+              study.id,
+              { constraints: [...study.constraints, constraint] },
+              `Fixed support added on ${extraRefs.length + 1} faces.`,
+              study
+            ));
+          }}
+          onUpdateSupport={(support: Constraint, targetFace?: DisplayFace) => {
+            const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
+            const nextSupport = retarget ? { ...support, selectionRef: retarget.selection.id } : support;
+            void updateStudy(
+              saveStudyPatch(
+                study.id,
+                {
+                  ...(retarget ? { namedSelections: retarget.namedSelections } : {}),
+                  constraints: study.constraints.map((item) => (item.id === support.id ? nextSupport : item))
+                },
+                retarget ? `Support moved to ${targetFace!.label}.` : "Support updated.",
+                study
+              )
+            );
+          }}
+          onRemoveSupport={(supportId) =>
+            updateStudy(saveStudyPatch(study.id, { constraints: study.constraints.filter((item) => item.id !== supportId) }, "Support removed.", study))
+          }
+          onDraftLoadTypeChange={(type) => {
+            setDraftLoadType(type);
+          }}
+          onDraftLoadValueChange={(value) => {
+            setDraftLoadValue(value);
+          }}
+          onDraftLoadDirectionChange={(direction) => {
+            setDraftLoadDirection(direction);
+          }}
+          onAddLoad={(type, value, selectionRef, direction, payloadMetadata = {}) => {
+            const selection = study.namedSelections.find((item) => item.id === selectionRef);
+            const faceId = selection?.geometryRefs[0]?.entityId;
+            const payloadObject = type === "gravity" ? selectedPayloadObject : null;
+            const fallbackPayloadFace = payloadObject ? faceForPayloadObject(payloadObject) : null;
+            const face = selectedFace?.id === faceId || (!selection && selectedFace) ? selectedFace : displayModel.faces.find((item) => item.id === faceId) ?? fallbackPayloadFace;
+            const directionFace = face ?? displayModel.faces[0];
+            if (!directionFace) return;
+            const applicationPoint = type === "gravity" && payloadObject ? payloadObject.center : selectedLoadPoint;
+            // Multi-face loads (Decision 2): extras arrive via payloadMetadata
+            // and are stored as selectionRefs on the load (adapter unions facets).
+            const { selectionRefs: extraRefsRaw, ...restMetadata } = payloadMetadata;
+            const extraRefs = [...new Set((extraRefsRaw ?? []).filter((ref) => ref && ref !== selectionRef))];
+            if (selection) {
+              updateStudy(addLoad(
+                study.id, type, value, selection.id,
+                directionVectorForLabel(direction, directionFace, displayModel ?? undefined),
+                applicationPoint, payloadObject, study,
+                { ...restMetadata, ...(extraRefs.length ? { selectionRefs: extraRefs } : {}) },
+                direction,
+                extraRefs.length ? { selectionRefs: extraRefs } : undefined
+              ));
+              setSelectedLoadPoint(null);
+              if (type === "gravity") setSelectedPayloadObject(null);
+              return;
+            }
+            if (!face) return;
+            void addLoadForFace(type, value, face, direction, applicationPoint ?? face.center, payloadObject, payloadMetadata);
+            setSelectedLoadPoint(null);
+            if (type === "gravity") setSelectedPayloadObject(null);
+          }}
+          onDraftPayloadPreviewChange={setDraftPayloadPreview}
+          onUpdateLoad={(load: Load, targetFace?: DisplayFace) => {
+            const retarget = targetFace ? selectionPatchForFace(study, targetFace) : null;
+            const nextLoad = retarget ? { ...load, selectionRef: retarget.selection.id } : load;
+            void updateStudy(
+              saveStudyPatch(
+                study.id,
+                {
+                  ...(retarget ? { namedSelections: retarget.namedSelections } : {}),
+                  loads: study.loads.map((item) => (item.id === load.id ? nextLoad : item))
+                },
+                retarget ? `Load moved to ${targetFace!.label}.` : "Load updated.",
+                study
+              )
+            );
+          }}
+          onPreviewLoadEdit={setPreviewLoadEdit}
+          onRemoveLoad={(loadId) =>
+            updateStudy(saveStudyPatch(study.id, {
+              loads: study.loads.filter((item) => item.id !== loadId),
+              ...((study.type === "static_stress" || study.type === "dynamic_structural") ? {
+                loadCases: structuralLoadCases(study).map((loadCase) => ({ ...loadCase, loadIds: loadCase.loadIds.filter((id) => id !== loadId) }))
+              } : {})
+            }, "Load removed.", study))
+          }
+          onLoadCasesChange={(loadCases, loadCombinations) =>
+            updateStudy(saveStudyPatch(study.id, { loadCases, loadCombinations }, "Load cases updated.", study))
+          }
+          onGenerateMesh={handleGenerateMesh}
+          onConnectionsChange={(contacts) => updateStudy(saveStudyPatch(study.id, { contacts, meshSettings: { ...study.meshSettings, status: "not_started", meshRef: undefined, summary: undefined } }, "Assembly connections updated. Regenerate the mesh.", study))}
+          onCancelMesh={handleCancelMesh}
+          meshPhaseProgress={meshPhaseProgress}
+          meshError={meshError}
+          onRunMeshConvergence={(caseId, probe) => void handleRunMeshConvergence(caseId, probe)}
+          convergenceBusy={convergenceBusy}
+          convergenceProgress={convergenceProgress}
+          onUpdateSolverSettings={handleUpdateSolverSettings}
+          onChangeStudyType={handleChangeStudyType}
+          onRunSimulation={handleRunSimulation}
+          onCancelSimulation={handleCancelSimulation}
+          canCancelSimulation={solverRunning}
+          canRunSimulation={effectiveCanRunSimulation}
+          missingRunItems={effectiveMissingRunItems}
+          runReadiness={runReadiness}
+          resultFrameIndex={resultFrameIndex}
+          resultFramePosition={resultVisualFramePosition}
+          resultFrameOrdinalPosition={resultVisualOrdinalPosition}
+          onResultFrameChange={handleResultFrameChange}
+          resultPlaybackPlaying={resultPlaybackPlaying}
+          resultPlaybackFps={resultPlaybackFps}
+          resultPlaybackReverseLoop={resultPlaybackReverseLoop}
+          resultPlaybackCacheLabel={resultPlaybackCacheLabel}
+          onResultPlaybackToggle={handleResultPlaybackToggle}
+          onResultPlaybackFpsChange={setResultPlaybackFps}
+          onResultPlaybackReverseLoopChange={setResultPlaybackReverseLoop}
+          onStepSelect={handleStepSelect}
+        />
+        {showBoundaryConditionMenu && study ? (
+          <BoundaryConditionMenu
+            open
+            studyType={study.type}
+            onSelect={handleBoundaryConditionType}
+            onClose={() => setShowBoundaryConditionMenu(false)}
+          />
+        ) : null}
+      </main>
+
+      <BottomPanel
+        status={status}
+        logs={logs}
+        meshStatus={study?.meshSettings.status === "complete" ? "Ready" : "Not generated"}
+        solverStatus={solverRunning ? "Running" : runError ? "Error" : resultsOutdatedBy ? "Outdated" : runProgress >= 100 ? "Complete" : "Idle"}
+        onClearLogs={clearLogs}
+      />
+      {renderStorageRecoveryNotice()}
+      <GeometryReplaceDialog
+        open={pendingGeometryReplacement !== null}
+        actionLabel={pendingGeometryReplacement?.actionLabel ?? ""}
+        losses={pendingGeometryReplacement?.losses ?? []}
+        onCancel={() => {
+          setPendingGeometryReplacement(null);
+          pushMessage("Kept the current model.");
+        }}
+        onConfirm={() => {
+          const pending = pendingGeometryReplacement;
+          setPendingGeometryReplacement(null);
+          pending?.proceed();
+        }}
+      />
+      {validationGalleryOpen ? (
+        <Suspense fallback={null}>
+          <ValidationGallery onClose={() => setValidationGalleryOpen(false)} />
+        </Suspense>
+      ) : null}
+    </div>
+  );
+}
+
+function ProjectNameChip({ name, onRename }: { name: string; onRename: (name: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(name);
+  useEffect(() => {
+    if (!editing) setDraftName(name);
+  }, [editing, name]);
+
+  async function commitName() {
+    const nextName = draftName.trim().replace(/\s+/g, " ");
+    setEditing(false);
+    if (nextName) await onRename(nextName);
+  }
+
+  if (editing) {
+    return (
+      <>
+      <span className="visually-hidden" id="project-name-hint">Press Enter to save, Escape to cancel.</span>
+      <input
+        className="breadcrumb-chip breadcrumb-input"
+        // The breadcrumb gives this field its meaning visually; without a name
+        // it reads as an unlabelled textbox to assistive technology.
+        aria-label="Project name"
+        aria-describedby="project-name-hint"
+        value={draftName}
+        autoFocus
+        onChange={(event) => setDraftName(event.currentTarget.value)}
+        onBlur={() => void commitName()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") void commitName();
+          if (event.key === "Escape") {
+            setDraftName(name);
+            setEditing(false);
+          }
+        }}
+      />
+      </>
+    );
+  }
+
+  return (
+    <button className="breadcrumb-chip breadcrumb-button" type="button" onClick={() => setEditing(true)} title="Rename project">
+      {name}
+    </button>
+  );
+}
+
+function hasSeededBracketDemoRun(project: Project | undefined): boolean {
+  const study = project?.studies[0];
+  return Boolean(study?.runs.some((run) => run.id === "run-bracket-demo-seeded" && (run.resultRef || isRunResultReadyStatus(run.status))));
+}
+
+function cloneProjectSharingEmbeddedModels(project: Project): Project {
+  const clone = structuredClone(project);
+  // Embedded model files are immutable after upload; sharing them by reference keeps
+  // undo/redo snapshots from duplicating large base64 payloads.
+  clone.geometryFiles.forEach((geometry, index) => {
+    const embeddedModel = project.geometryFiles[index]?.metadata.embeddedModel;
+    if (embeddedModel) geometry.metadata.embeddedModel = embeddedModel;
+  });
+  return clone;
+}
+
+function latestCompletedRunId(study: Study | null, activeRunId: string): string | null {
+  if (!study) return null;
+  if (study.runs.some((run) => run.id === activeRunId && (run.resultRef || isRunResultReadyStatus(run.status)))) return activeRunId;
+  const completed = [...study.runs].reverse().find((run) => run.resultRef || isRunResultReadyStatus(run.status));
+  return completed?.id ?? null;
+}
+
+function runDiagnosticsMessage(study: Study, displayModel?: DisplayModel): string {
+  const fidelity = solverFidelityForDiagnostics(study);
+  const resolvedBackend = resolveSolverBackend(study, displayModel);
+  return [
+    `Run diagnostics: backend=${resolvedBackend.backend}${resolvedBackend.source === "auto" ? " (auto)" : ""}`,
+    `fidelity=${fidelity}`,
+    `analysis=${study.type}`,
+    `materials=${study.materialAssignments.length}`,
+    `supports=${study.constraints.length}`,
+    `loads=${study.loads.length}`,
+    `mesh=${study.meshSettings.status}`
+  ].join("; ") + ".";
+}
+
+function solverFidelityForDiagnostics(study: Study): SimulationFidelity {
+  const fidelity = (study.solverSettings as { fidelity?: unknown }).fidelity;
+  return fidelity === "detailed" || fidelity === "ultra" || fidelity === "standard" ? fidelity : "standard";
+}
+
+/**
+ * Surface pipeline resource-limit clamping in the run log. boundedSolverSettings
+ * records { requested, applied } per clamped dynamic setting; without this the
+ * user asks for N frames / a fine step and silently gets fewer/coarser.
+ */
+export function truncationMessageForDiagnostics(diagnostics: unknown): string | null {
+  if (!Array.isArray(diagnostics)) return null;
+  for (const diagnostic of diagnostics) {
+    if (!diagnostic || typeof diagnostic !== "object") continue;
+    const record = diagnostic as { id?: unknown; truncation?: unknown };
+    if (record.id !== "core-local-resource-limits" && record.id !== "core-cloud-resource-limits") continue;
+    const truncation = record.truncation as Record<string, { requested?: unknown; applied?: unknown }> | undefined;
+    if (!truncation || typeof truncation !== "object") continue;
+    const parts: string[] = [];
+    const describe = (label: string, key: string, format: (value: number) => string) => {
+      const entry = truncation[key];
+      const requested = typeof entry?.requested === "number" ? entry.requested : undefined;
+      const applied = typeof entry?.applied === "number" ? entry.applied : undefined;
+      if (requested === undefined || applied === undefined) return;
+      parts.push(`${label} ${format(requested)} reduced to ${format(applied)} to fit browser memory`);
+    };
+    describe("frames", "maxFrames", (value) => `${Math.round(value)}`);
+    describe("end time", "endTime", (value) => `${value}s`);
+    describe("time step", "timeStep", (value) => `${value}s`);
+    describe("output interval", "outputInterval", (value) => `${value}s`);
+    describe("tolerance", "tolerance", (value) => `${value}`);
+    if (parts.length) return `Resource limits applied: ${parts.join("; ")}.`;
+  }
+  return null;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
+}
+
+function timingFromRunEvent(event: RunEvent): RunTimingEstimate | null {
+  const timing: RunTimingEstimate = {};
+  if (typeof event.elapsedMs === "number" && Number.isFinite(event.elapsedMs)) timing.elapsedMs = event.elapsedMs;
+  if (typeof event.estimatedDurationMs === "number" && Number.isFinite(event.estimatedDurationMs)) timing.estimatedDurationMs = event.estimatedDurationMs;
+  if (typeof event.estimatedRemainingMs === "number" && Number.isFinite(event.estimatedRemainingMs)) timing.estimatedRemainingMs = event.estimatedRemainingMs;
+  return Object.keys(timing).length ? timing : null;
+}
+
+function messageWithEta(event: RunEvent): string {
+  if (event.type === "complete" || event.type === "cancelled" || event.type === "error") return event.message;
+  if (typeof event.estimatedRemainingMs !== "number" || !Number.isFinite(event.estimatedRemainingMs)) return event.message;
+  if (event.estimatedRemainingMs <= 1500) return `${event.message} Almost done.`;
+  return `${event.message} About ${formatLogDuration(event.estimatedRemainingMs)} remaining.`;
+}
+
+function formatLogDuration(milliseconds: number): string {
+  const seconds = Math.max(1, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
+}
+
+function endpointHoldForPlaybackOrdinal(ordinalPosition: number, frameCount: number): number {
+  if (!Number.isFinite(ordinalPosition) || frameCount < 2) return 0;
+  const lastOrdinal = frameCount - 1;
+  return ordinalPosition <= PLAYBACK_ENDPOINT_EPSILON || ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON
+    ? PLAYBACK_ENDPOINT_HOLD_MS
+    : 0;
+}
+
+function playbackDirectionForLoopStart(ordinalPosition: number, frameCount: number, reverseLoop: boolean): PlaybackDirection {
+  if (!reverseLoop || frameCount < 2) return 1;
+  const lastOrdinal = frameCount - 1;
+  return ordinalPosition >= lastOrdinal - PLAYBACK_ENDPOINT_EPSILON ? -1 : 1;
+}
+
+function selectedResultStateForExport({
+  summary,
+  fields,
+  selectedModeIndex,
+  selectedFrameIndex
+}: {
+  summary: ResultSummary;
+  fields: ResultField[];
+  selectedModeIndex: number;
+  selectedFrameIndex: number;
+}): SelectedResultState {
+  if (isModalResultSummary(summary)) {
+    const mode = summary.modes.find((candidate) => candidate.modeIndex === selectedModeIndex) ?? summary.modes[0];
+    if (!mode) throw new Error("The selected modal result has no converged mode to export.");
+    return { kind: "modal_mode", modeIndex: mode.modeIndex, frequencyHz: mode.frequencyHz };
+  }
+  if (isStructuralResultSummary(summary) && summary.transient) {
+    const frameField = fields.find((field) => field.frameIndex === selectedFrameIndex && field.timeSeconds !== undefined);
+    return {
+      kind: "dynamic_frame",
+      frameIndex: selectedFrameIndex,
+      ...(frameField?.timeSeconds === undefined ? {} : { timeSeconds: frameField.timeSeconds })
+    };
+  }
+  return { kind: "static" };
+}
+
+function nearestResultFrameIndex(frameIndexes: readonly number[], framePosition: number): number {
+  if (!frameIndexes.length) return Math.max(0, Math.round(framePosition));
+  let nearest = frameIndexes[0]!;
+  let distance = Math.abs(nearest - framePosition);
+  for (let index = 1; index < frameIndexes.length; index += 1) {
+    const candidate = frameIndexes[index]!;
+    const candidateDistance = Math.abs(candidate - framePosition);
+    if (candidateDistance >= distance) continue;
+    nearest = candidate;
+    distance = candidateDistance;
+  }
+  return nearest;
+}
+
+function createResultPlaybackFrameController(): MutableResultPlaybackFrameController {
+  let snapshot: ReturnType<ResultPlaybackFrameController["getSnapshot"]> = null;
+  const listeners = new Set<(snapshot: NonNullable<ReturnType<ResultPlaybackFrameController["getSnapshot"]>>) => void>();
+  return {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    getSnapshot() {
+      return snapshot;
+    },
+    setPackedFrame(cache, framePosition) {
+      const nextSnapshot = { cache, framePosition };
+      snapshot = nextSnapshot;
+      for (const listener of listeners) listener(nextSnapshot);
+    },
+    clear() {
+      snapshot = null;
+    }
+  };
+}
+
+function resultFieldsSignatureForCache(fields: ResultField[]): string {
+  return fields.map((field) => {
+    const firstValue = field.values[0];
+    const lastValue = field.values[field.values.length - 1];
+    const firstSample = field.samples?.[0];
+    const lastSample = field.samples?.[field.samples.length - 1];
+    return [
+      field.type,
+      field.component ?? "von_mises",
+      field.modeIndex ?? "no-mode",
+      field.location,
+      field.frameIndex ?? "static",
+      field.timeSeconds ?? "no-time",
+      field.min,
+      field.max,
+      field.values.length,
+      field.tensorValues?.length ?? 0,
+      field.samples?.length ?? 0,
+      finiteSignatureValue(firstValue),
+      finiteSignatureValue(lastValue),
+      finiteSignatureValue(field.tensorValues?.[0]),
+      finiteSignatureValue(field.tensorValues?.[field.tensorValues.length - 1]),
+      finiteSignatureValue(firstSample?.value),
+      finiteSignatureValue(lastSample?.value)
+    ].join(":");
+  }).join("|");
+}
+
+function finiteSignatureValue(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? Number(value).toPrecision(8) : "na";
+}
+
+function createResultProbeId(): string {
+  const randomId = globalThis.crypto?.randomUUID?.();
+  return randomId ? `probe-${randomId}` : `probe-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function debugResultField(field: ResultField | undefined) {
+  if (!field) return null;
+  return {
+    type: field.type,
+    location: field.location,
+    min: field.min,
+    max: field.max,
+    values: field.values.slice(0, 5),
+    sampleValues: field.samples?.slice(0, 5).map((sample) => sample.value) ?? [],
+    sampleVectors: field.samples?.slice(0, 5).map((sample) => sample.vector ?? null) ?? []
+  };
+}
+
+/** The named selection for a picked face, creating it when the study has none yet (re-targeting, 2026-09 review D3). */
+function selectionPatchForFace(study: Study, face: DisplayFace): { selection: NamedSelection; namedSelections: NamedSelection[] } {
+  const existing = study.namedSelections.find((item) => item.entityType === "face" && item.geometryRefs.some((ref) => ref.entityId === face.id));
+  if (existing) return { selection: existing, namedSelections: study.namedSelections };
+  const selection = namedSelectionForFace(study, face);
+  return { selection, namedSelections: [...study.namedSelections, selection] };
+}
+
+function namedSelectionForFace(study: Study, face: DisplayFace): NamedSelection {
+  const bodyId = study.geometryScope[0]?.bodyId ?? "body-uploaded";
+  return {
+    id: `selection-${face.id}`,
+    name: face.label,
+    entityType: "face",
+    geometryRefs: [{ bodyId, entityType: "face", entityId: face.id, label: face.label }],
+    fingerprint: `${face.id}-${face.center.map((value) => value.toFixed(3)).join("-")}`
+  };
+}
+
+function faceForPayloadObject(payloadObject: PayloadObjectSelection): DisplayFace {
+  return {
+    id: `payload-face-${payloadObject.id}`,
+    label: payloadObject.label,
+    color: "#4da3ff",
+    center: payloadObject.center,
+    normal: [0, 0, 1],
+    stressValue: 0
+  };
+}
+
+function defaultValueForLoadType(type: LoadType) {
+  if (type === "heat_flux") return 10_000;
+  if (type === "heat_generation") return 1_000_000;
+  if (type === "pressure" || type === "surface_traction") return 100;
+  if (type === "volume_force") return 1000;
+  if (type === "gravity") return 5;
+  return 500;
+}
+
+async function saveProjectToLocalDisk(project: Project, displayModel: DisplayModel, results?: LocalResultBundle): Promise<{ savedAt: string; handle?: SaveFilePickerHandle } | null> {
+  const savedAt = new Date().toISOString();
+  const filename = suggestedProjectFilename(project.name);
+  const target = await prepareBlobSaveToDisk(filename, {
+    description: "OpenFEA project",
+    accept: { "application/json": [".json", ".openfea", ".opencae"] }
+  });
+  if (target === "cancelled") return null;
+  const savedResults = results?.fields.length ? await portableResultBundle(results, getRunVariant) : undefined;
+  const blob = new Blob([JSON.stringify(buildLocalProjectFile(project, displayModel, savedAt, savedResults), null, 2)], {
+    type: "application/json"
+  });
+  await target.save(blob);
+  return { savedAt, ...(target.handle ? { handle: target.handle } : {}) };
+}
+
+function resultVariantRefsForBundle(results: Pick<LocalResultBundle, "variants" | "variantRefs">): RunVariantRef[] {
+  return results.variantRefs ?? results.variants?.map((variant) => ({
+    id: variant.id,
+    name: variant.name,
+    kind: variant.kind,
+    ...(variant.caseId ? { caseId: variant.caseId } : {}),
+    ...(variant.combinationId ? { combinationId: variant.combinationId } : {})
+  })) ?? [];
+}
+
+function structuralLoadCases(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>) {
+  return study.loadCases?.length
+    ? study.loadCases
+    : [{ id: "case-default", name: "Default", enabled: true, loadIds: study.loads.map((load) => load.id) }];
+}
+
+function loadCasesWithAddedLoad(study: Extract<Study, { type: "static_stress" | "dynamic_structural" }>, loadId: string) {
+  return structuralLoadCases(study).map((loadCase, index) => index === 0
+    ? { ...loadCase, loadIds: [...loadCase.loadIds, loadId] }
+    : loadCase);
+}
+
+function isAbortError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "AbortError";
+}
+
+function createProjectActionClientId(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  return `workspace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function UndoIcon() {
+  return <RotateCcw size={18} aria-hidden="true" />;
+}
+
+function RedoIcon() {
+  return <RotateCcw className="redo-icon" size={18} aria-hidden="true" />;
+}

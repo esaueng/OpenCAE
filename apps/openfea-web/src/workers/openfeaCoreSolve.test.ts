@@ -1,0 +1,555 @@
+import { describe, expect, test } from "vitest";
+import { isModalResultSummary, isStructuralResultSummary } from "@openfea/schema";
+import type { DisplayModel, Study } from "@openfea/schema";
+import { bracketDemoProject, bracketDisplayModel } from "@openfea/samples";
+import { validateModelJson } from "@openfea/core";
+import {
+  buildOpenFeaCoreModelForStudy,
+  geometrySourceForStudy,
+  hasActualCoreVolumeMesh,
+  hasMeshableGeometrySource,
+  isComplexGeometry,
+  isSimpleBlockLikeDisplayModel,
+  normalizeSolverBackend,
+  OPENFEA_CORE_MESH_REQUIRED_REASON,
+  openFeaCoreEligibility,
+  studyForCoreGeometryDispatch,
+  trySolveOpenFeaCoreStudy
+} from "./openfeaCoreSolve";
+
+const displayModel = {
+  id: "display-cantilever",
+  name: "Cantilever",
+  bodyCount: 1,
+  dimensions: { x: 100, y: 30, z: 10, units: "mm" },
+  faces: [
+    { id: "face-fixed", label: "Fixed", color: "#94a3b8", center: [0, 15, 5], normal: [-1, 0, 0], stressValue: 0 },
+    { id: "face-load", label: "Load", color: "#94a3b8", center: [100, 15, 5], normal: [1, 0, 0], stressValue: 0 }
+  ]
+} satisfies DisplayModel;
+
+const staticStudy = {
+  id: "study-static",
+  projectId: "project-1",
+  name: "Static Stress",
+  type: "static_stress",
+  geometryScope: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body" }],
+  materialAssignments: [{ id: "mat-assignment", materialId: "mat-aluminum-6061", selectionRef: "selection-body", parameters: {}, status: "complete" }],
+  namedSelections: [
+    {
+      id: "selection-body",
+      name: "Body",
+      entityType: "body",
+      geometryRefs: [{ bodyId: "body-1", entityType: "body", entityId: "body-1", label: "Body" }],
+      fingerprint: "body"
+    },
+    {
+      id: "selection-fixed",
+      name: "Fixed face",
+      entityType: "face",
+      geometryRefs: [{ bodyId: "body-1", entityType: "face", entityId: "face-fixed", label: "Fixed" }],
+      fingerprint: "face-fixed"
+    },
+    {
+      id: "selection-load",
+      name: "Load face",
+      entityType: "face",
+      geometryRefs: [{ bodyId: "body-1", entityType: "face", entityId: "face-load", label: "Load" }],
+      fingerprint: "face-load"
+    }
+  ],
+  contacts: [],
+  constraints: [{ id: "constraint-fixed", type: "fixed", selectionRef: "selection-fixed", parameters: {}, status: "complete" }],
+  loads: [{ id: "load-force", type: "force", selectionRef: "selection-load", parameters: { value: 100, units: "N", direction: [0, 0, -1] }, status: "complete" }],
+  meshSettings: { preset: "medium", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+  solverSettings: { backend: "opencae_core_local", fidelity: "standard" },
+  validation: [],
+  runs: []
+} satisfies Study;
+
+describe("OpenFEA Core browser solver adapter", () => {
+  test("normalizes every backend selection to the local browser solver (cloud retired)", () => {
+    expect(normalizeSolverBackend({ solverSettings: { backend: "cloudflare_fea" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core_cloud" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: { backend: "opencae_core_local" } })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend({ solverSettings: {} })).toBe("opencae_core_local");
+    expect(normalizeSolverBackend(undefined)).toBe("opencae_core_local");
+  });
+
+  test("accepts static force studies with usable block dimensions", () => {
+    const eligibility = openFeaCoreEligibility(staticStudy, displayModel);
+
+    expect(eligibility).toEqual({ ok: true });
+  });
+
+  test("rejects the Bracket Demo without an actual Core volume mesh", () => {
+    const bracketStudy = bracketDemoProject.studies[0]!;
+    const eligibility = openFeaCoreEligibility(bracketStudy, bracketDisplayModel);
+
+    expect(isSimpleBlockLikeDisplayModel(bracketDisplayModel)).toBe(false);
+    expect(isComplexGeometry(bracketDisplayModel, bracketStudy)).toBe(true);
+    expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
+    expect(eligibility.ok).toBe(false);
+    if (eligibility.ok) throw new Error("Bracket should not be Core-preview eligible.");
+    expect(eligibility.reason).toMatch(/needs a volume mesh|in-browser meshing is unavailable/i);
+  });
+
+  test("treats the Bracket Demo as cloud-meshable without an actual Core volume mesh", () => {
+    const bracketStudy = bracketDemoProject.studies[0]!;
+    const geometry = geometrySourceForStudy(bracketStudy, bracketDisplayModel);
+
+    expect(hasActualCoreVolumeMesh(bracketStudy, bracketDisplayModel)).toBe(false);
+    expect(hasMeshableGeometrySource(bracketStudy, bracketDisplayModel)).toBe(true);
+    expect(geometry).toMatchObject({
+      kind: "sample_procedural",
+      sampleId: "bracket",
+      units: "mm",
+      descriptor: expect.objectContaining({
+        base: expect.any(Object),
+        upright: expect.any(Object),
+        gusset: expect.any(Object),
+        holes: expect.any(Array),
+        surfaces: expect.any(Object)
+      })
+    });
+  });
+
+  test("solves eligible static studies through the production Core pipeline", { timeout: 60000 }, () => {
+    const outcome = trySolveOpenFeaCoreStudy({ study: staticStudy, runId: "run-core-1", displayModel });
+
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) throw new Error(outcome.reason);
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
+    // Preserve the actual local CPU solver identity and browser runner stamp.
+    expect(outcome.result.summary.provenance).toMatchObject({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-sparse-tet",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      units: "mm-N-s-MPa",
+      runnerVersion: "browser-0.1.0"
+    });
+    expect(outcome.result.summary.maxStress).toBeGreaterThan(0);
+    expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0);
+    expect(outcome.result.fields.map((field) => field.id).sort()).toEqual([
+      "displacement-surface",
+      "safety-factor",
+      "safety-factor-surface",
+      "stress-max-shear-surface",
+      "stress-principal-max-surface",
+      "stress-principal-min-surface",
+      "stress-surface",
+      "stress-von-mises-element"
+    ]);
+    const surfaceMesh = outcome.result.surfaceMesh as { id: string; nodes: unknown[] };
+    expect(surfaceMesh.id).toBe("solver-surface");
+    const displacement = outcome.result.fields.find((field) => field.id === "displacement-surface");
+    expect(displacement?.location).toBe("node");
+    expect(displacement?.values.length).toBe(surfaceMesh.nodes.length);
+    expect(displacement?.vectors?.length).toBe(surfaceMesh.nodes.length);
+    expect(outcome.result.diagnostics?.some((entry) => (entry as { id?: unknown })?.id === "browser-solve-limits")).toBe(true);
+  });
+
+  test("maps prescribed-displacement supports to Core Dirichlet values (Decision 1)", () => {
+    const pdStudy = {
+      ...staticStudy,
+      id: "study-pd",
+      constraints: [
+        { id: "constraint-fixed", type: "fixed", selectionRef: "selection-fixed", parameters: {}, status: "complete" },
+        { id: "constraint-pd", type: "prescribed_displacement", selectionRef: "selection-load", parameters: { value: 0.5, units: "mm", component: "z" }, status: "complete" }
+      ],
+      loads: []
+    } satisfies Study;
+    expect(openFeaCoreEligibility(pdStudy, displayModel)).toEqual({ ok: true });
+    const built = buildOpenFeaCoreModelForStudy(pdStudy, displayModel);
+    const pd = built.model.boundaryConditions.find((bc) => bc.type === "prescribedDisplacement");
+    expect(pd).toMatchObject({ type: "prescribedDisplacement", component: "z" });
+    // Study values are display mm; the browser path builds m-based Core models.
+    expect((pd as { value?: number }).value).toBeCloseTo(0.0005, 12);
+    const outcome = trySolveOpenFeaCoreStudy({ study: pdStudy, runId: "run-core-pd-1", displayModel });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+    if (!outcome.ok) return;
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected structural results.");
+    // Imposed 0.5 mm on the load face: peak displacement must reflect it.
+    expect(outcome.result.summary.maxDisplacement).toBeGreaterThan(0.4);
+  });
+
+  test("unions multi-face supports/loads into one surface set (Decision 2)", () => {
+    const multiStudy = {
+      ...staticStudy,
+      id: "study-multi",
+      constraints: [
+        { id: "constraint-fixed", type: "fixed", selectionRef: "selection-fixed", selectionRefs: ["selection-load"], parameters: {}, status: "complete" }
+      ]
+    } satisfies Study;
+    const built = buildOpenFeaCoreModelForStudy(multiStudy, displayModel);
+    const bc = built.model.boundaryConditions.find((candidate) => candidate.name === "fixedSupport0");
+    expect(bc).toBeTruthy();
+    // The union node set covers both faces: more nodes than the single-face set.
+    const single = buildOpenFeaCoreModelForStudy(staticStudy, displayModel);
+    const singleNodes = single.model.nodeSets.find((set) => set.name === "fixedNodes0");
+    const multiNodes = built.model.nodeSets.find((set) => set.name === "fixedNodes0");
+    expect(multiNodes!.nodes.length).toBeGreaterThan(singleNodes!.nodes.length);
+    const outcome = trySolveOpenFeaCoreStudy({ study: multiStudy, runId: "run-core-multi-1", displayModel });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+  });
+
+  test("solves modal studies without applied loads through the guarded browser pipeline", { timeout: 60000 }, () => {
+    const modalDisplayModel = {
+      ...displayModel,
+      dimensions: { x: 10, y: 10, z: 10, units: "mm" }
+    } satisfies DisplayModel;
+    const modalStudy = {
+      ...staticStudy,
+      id: "study-modal",
+      name: "Modal Analysis",
+      type: "modal_analysis",
+      loads: [],
+      // This assertion exercises the pipeline contract rather than mesh density.
+      // Keep it small so the root suite can run modal and transient cases together.
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      solverSettings: { backend: "opencae_core_local", fidelity: "standard", modeCount: 1 }
+    } satisfies Study;
+    expect(openFeaCoreEligibility(modalStudy, modalDisplayModel)).toEqual({ ok: true });
+    const outcome = trySolveOpenFeaCoreStudy({ study: modalStudy, runId: "run-core-modal-1", displayModel: modalDisplayModel });
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.solverBackend).toBe("opencae-core-modal-tet");
+    expect(isModalResultSummary(outcome.result.summary)).toBe(true);
+    if (!isModalResultSummary(outcome.result.summary)) return;
+    expect(outcome.result.summary.requestedModeCount).toBe(1);
+    expect(
+      outcome.result.summary.convergedModeCount,
+      JSON.stringify(outcome.result.summary)
+    ).toBeGreaterThan(0);
+    expect(outcome.result.fields.every((field) => field.type === "mode_shape" && field.units === "normalized")).toBe(true);
+  });
+
+  test("solves dynamic studies with OpenFEA Core transient fields", { timeout: 120000 }, () => {
+    const dynamicStudy = {
+      ...staticStudy,
+      // Coarse preset: the medium-density transient ran ~97 s on CI runners
+      // (~26 s locally) and tripped the 60 s timeout; the assertions below
+      // check contract/provenance, not mesh density.
+      meshSettings: { preset: "coarse", status: "complete", meshRef: "project-1/mesh/mesh-summary.json" },
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "opencae_core_local",
+        fidelity: "standard",
+        startTime: 0,
+        endTime: 0.1,
+        timeStep: 0.005,
+        outputInterval: 0.005,
+        dampingRatio: 0.02,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "ramp"
+      },
+      loads: [{ id: "load-force", type: "force", selectionRef: "selection-load", parameters: { value: 500, units: "N", direction: [0, 0, -1] }, status: "complete" }]
+    } satisfies Study;
+
+    const eligibility = openFeaCoreEligibility(dynamicStudy, displayModel);
+    const outcome = trySolveOpenFeaCoreStudy({ study: dynamicStudy, runId: "run-core-dynamic-1", displayModel });
+
+    expect(eligibility).toEqual({ ok: true });
+    if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.ok).toBe(true);
+    if (!isStructuralResultSummary(outcome.result.summary)) throw new Error("Expected dynamic structural results.");
+    expect(outcome.solverBackend).toBe("opencae-core-mdof-tet");
+    expect(outcome.result.summary.provenance).toMatchObject({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-mdof-tet",
+      meshSource: "structured_block_core",
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0"
+    });
+    expect(outcome.result.summary.transient?.frameCount).toBeGreaterThan(1);
+    expect(outcome.result.summary.transient?.integrationMethod).toBe("newmark_average_acceleration");
+    expect(Number.isFinite(outcome.result.summary.maxDisplacement)).toBe(true);
+    expect(outcome.result.fields.some((field) => field.type === "displacement" && field.frameIndex === 1)).toBe(true);
+    expect(outcome.result.fields.some((field) => field.type === "velocity")).toBe(true);
+    expect(outcome.result.fields.some((field) => field.type === "acceleration")).toBe(true);
+  });
+
+  test("allows complex geometry only when an actual connected Core volume mesh artifact is present", () => {
+    const actualMeshStudy = {
+      ...bracketDemoProject.studies[0]!,
+      meshSettings: {
+        preset: "medium",
+        status: "complete",
+        meshRef: "project-bracket-demo/mesh/core-volume-model.json",
+        summary: {
+          nodes: 4,
+          elements: 1,
+          warnings: [],
+          source: "actual_volume_mesh",
+          artifacts: {
+            meshConnectivity: { connectedComponents: 1 },
+            actualCoreModel: {
+              model: actualCoreModelFixture()
+            }
+          }
+        }
+      }
+    } satisfies Study;
+
+    expect(hasActualCoreVolumeMesh(actualMeshStudy, bracketDisplayModel)).toBe(true);
+    expect(openFeaCoreEligibility(actualMeshStudy, bracketDisplayModel)).toEqual({ ok: true });
+
+    const outcome = trySolveOpenFeaCoreStudy({ study: actualMeshStudy, runId: "run-actual-core", displayModel: bracketDisplayModel });
+
+    expect(outcome.ok, outcome.ok ? undefined : outcome.reason).toBe(true);
+    if (!outcome.ok) throw new Error(outcome.reason);
+    expect(outcome.solverBackend).toBe("opencae-core-sparse-tet");
+    expect(outcome.result.summary.provenance).toMatchObject({
+      kind: "opencae_core_fea",
+      solver: "opencae-core-sparse-tet",
+      meshSource: "actual_volume_mesh",
+      resultSource: "computed",
+      runnerVersion: "browser-0.1.0"
+    });
+    expect(outcome.result.artifacts?.meshConnectivity && typeof outcome.result.artifacts.meshConnectivity === "object"
+      ? (outcome.result.artifacts.meshConnectivity as { connectedComponents?: unknown }).connectedComponents
+      : undefined).toBe(1);
+  });
+
+  test("builds a valid v0.4 local Core model for a simple block study", () => {
+    const result = buildOpenFeaCoreModelForStudy(staticStudy, displayModel);
+
+    expect(result.model.schemaVersion).toBe("0.4.0");
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.meshProvenance?.meshSource).toBe("structured_block_core");
+    expect(result.model.surfaceFacets?.length).toBeGreaterThan(0);
+    expect(result.model.surfaceSets?.map((set) => set.name)).toEqual(expect.arrayContaining(["selection-fixed", "selection-load"]));
+    expect(result.model.boundaryConditions[0]).toMatchObject({ type: "fixed", nodeSet: "fixedNodes0" });
+    // Display-space -Z (front) rotates into the upright solver frame as +Y.
+    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, 100, 0] });
+    expect(result.model.coordinateSystem?.renderCoordinateSpace).toBe("solver");
+    expect(result.model.materials[0]).toMatchObject({ density: 2700, yieldStrength: 276000000 });
+  });
+
+  test("builds a valid dynamic local Core model with dynamic solver settings", () => {
+    const dynamicStudy = {
+      ...staticStudy,
+      type: "dynamic_structural",
+      solverSettings: {
+        backend: "opencae_core_local",
+        fidelity: "standard",
+        startTime: 0,
+        endTime: 0.25,
+        timeStep: 0.002,
+        outputInterval: 0.01,
+        dampingRatio: 0.04,
+        integrationMethod: "newmark_average_acceleration",
+        loadProfile: "sinusoidal"
+      }
+    } satisfies Study;
+
+    const result = buildOpenFeaCoreModelForStudy(dynamicStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.steps[0]).toMatchObject({
+      type: "dynamicLinear",
+      startTime: 0,
+      endTime: 0.25,
+      timeStep: 0.002,
+      outputInterval: 0.01,
+      dampingRatio: 0.04,
+      loadProfile: "sinusoidal"
+    });
+  });
+
+  test("converts pressure loads to Core pressure loads", () => {
+    const pressureStudy = {
+      ...staticStudy,
+      loads: [{ id: "load-pressure", type: "pressure", selectionRef: "selection-load", parameters: { value: 12, units: "kPa", direction: [0, 0, -1] }, status: "complete" }]
+    } satisfies Study;
+
+    const result = buildOpenFeaCoreModelForStudy(pressureStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.loads[0]).toMatchObject({ type: "pressure", surfaceSet: "selection-load", pressure: 12000, direction: [0, 1, 0] });
+  });
+
+  test("converts payload gravity loads to equivalent Core surface force loads", () => {
+    const payloadStudy = {
+      ...staticStudy,
+      loads: [{
+        id: "load-payload",
+        type: "gravity",
+        selectionRef: "selection-load",
+        parameters: { value: 2.5, units: "kg", direction: [0, -1, 0], payloadMassMode: "manual" },
+        status: "complete"
+      }]
+    } satisfies Study;
+
+    const result = buildOpenFeaCoreModelForStudy(payloadStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    // Display-space -Y (down) gravity rotates into the upright solver frame as -Z.
+    expect(result.model.loads[0]).toMatchObject({ type: "surfaceForce", surfaceSet: "selection-load", totalForce: [0, 0, -24.516625] });
+  });
+
+  test("applies effective printed material properties to the Core material", () => {
+    const printedStudy = {
+      ...staticStudy,
+      materialAssignments: [{ id: "mat-assignment", materialId: "mat-pla", selectionRef: "selection-body", parameters: { printed: true, infillDensity: 50, wallCount: 2, layerOrientation: "z" }, status: "complete" }]
+    } satisfies Study;
+
+    const result = buildOpenFeaCoreModelForStudy(printedStudy, displayModel);
+
+    expect(validateModelJson(result.model).ok).toBe(true);
+    expect(result.model.materials[0]?.density).toBeGreaterThan(0);
+    expect(result.model.materials[0]?.density).toBeLessThan(1240);
+    expect(result.model.materials[0]?.yieldStrength).toBeLessThan(60000000);
+  });
+
+  test("uses display-face identifiers when applying the critical FDM layer penalty", () => {
+    const printedStudy = {
+      ...staticStudy,
+      materialAssignments: [{
+        id: "mat-assignment",
+        materialId: "mat-pla",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation: "x" },
+        status: "complete"
+      }]
+    } satisfies Study;
+
+    const result = buildOpenFeaCoreModelForStudy(printedStudy, displayModel);
+
+    expect(result.model.materials[0]?.youngModulus).toBeCloseTo(3_500_000_000 * 0.65);
+    expect(result.model.materials[0]?.yieldStrength).toBeCloseTo(60_000_000 * 0.35);
+  });
+
+  test("carries weak X-build stiffness and strength through the production Core solve", { timeout: 60000 }, () => {
+    const printedStudy = (layerOrientation: "x" | "y"): Study => ({
+      ...staticStudy,
+      materialAssignments: [{
+        id: "mat-assignment",
+        materialId: "mat-pla",
+        selectionRef: "selection-body",
+        parameters: { manufacturingProcessId: "fdm", infillDensity: 100, wallCount: 3, layerOrientation },
+        status: "complete"
+      }]
+    });
+    const xBuild = trySolveOpenFeaCoreStudy({ study: printedStudy("x"), runId: "run-fdm-x", displayModel });
+    const yBuild = trySolveOpenFeaCoreStudy({ study: printedStudy("y"), runId: "run-fdm-y", displayModel });
+
+    expect(xBuild.ok).toBe(true);
+    expect(yBuild.ok).toBe(true);
+    if (!xBuild.ok || !yBuild.ok) throw new Error("Expected both directional FDM studies to solve.");
+    if (!isStructuralResultSummary(xBuild.result.summary) || !isStructuralResultSummary(yBuild.result.summary)) throw new Error("Expected structural FDM results.");
+    expect(xBuild.result.summary.maxStress).toBeCloseTo(yBuild.result.summary.maxStress, 3);
+    expect(xBuild.result.summary.maxDisplacement).toBeGreaterThan(yBuild.result.summary.maxDisplacement * 1.25);
+    expect(xBuild.result.summary.safetyFactor).toBeLessThan(yBuild.result.summary.safetyFactor * 0.6);
+  });
+
+  test("requires a local volume mesh before building a bracket Core model", () => {
+    expect(() => buildOpenFeaCoreModelForStudy(bracketDemoProject.studies[0]!, bracketDisplayModel)).toThrow(/must be meshed into a Core volume mesh before solving/i);
+  });
+
+  test("fails complex local Core model building when no geometry source exists", () => {
+    const complexDisplayModel = {
+      ...displayModel,
+      id: "display-complex-casting",
+      name: "complex casting",
+      faces: Array.from({ length: 8 }, (_value, index) => ({
+        id: `face-complex-${index}`,
+        label: `Casting face ${index}`,
+        color: "#94a3b8",
+        center: [index, 0, 0] as [number, number, number],
+        normal: [1, 0, 0] as [number, number, number],
+        stressValue: 0
+      }))
+    } satisfies DisplayModel;
+
+    expect(isComplexGeometry(complexDisplayModel, staticStudy)).toBe(true);
+    expect(hasMeshableGeometrySource(staticStudy, complexDisplayModel)).toBe(false);
+    expect(() => buildOpenFeaCoreModelForStudy(staticStudy, complexDisplayModel)).toThrow(OPENFEA_CORE_MESH_REQUIRED_REASON);
+  });
+});
+
+function actualCoreModelFixture() {
+  return {
+    schema: "opencae.model" as const,
+    schemaVersion: "0.2.0" as const,
+    nodes: { coordinates: [0, 0, 0, 0.04, 0, 0, 0, 0.04, 0, 0, 0, 0.04] },
+    materials: [{
+      name: "mat-aluminum-6061",
+      type: "isotropicLinearElastic" as const,
+      youngModulus: 68_900_000_000,
+      poissonRatio: 0.33,
+      yieldStrength: 276_000_000,
+      density: 2700
+    }],
+    elementBlocks: [{ name: "actual-volume", type: "Tet4" as const, material: "mat-aluminum-6061", connectivity: [0, 1, 2, 3] }],
+    // Real actual-mesh artifacts carry the boundary facets tagged with the
+    // selections that produced them; the cloud model builder maps study
+    // constraints/loads onto these surface sets.
+    surfaceFacets: [
+      {
+        id: 0,
+        element: 0,
+        elementFace: 1,
+        nodes: [0, 3, 2],
+        area: 0.0008,
+        normal: [-1, 0, 0] as [number, number, number],
+        center: [0, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-fixed-face",
+        sourceFaceId: "face-base-left"
+      },
+      {
+        id: 1,
+        element: 0,
+        elementFace: 0,
+        nodes: [1, 2, 3],
+        area: 0.0008 * Math.sqrt(3),
+        normal: [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)] as [number, number, number],
+        center: [0.04 / 3, 0.04 / 3, 0.04 / 3] as [number, number, number],
+        sourceSelectionRef: "selection-load-face",
+        sourceFaceId: "face-load-top"
+      }
+    ],
+    surfaceSets: [],
+    nodeSets: [
+      { name: "fixedNodes", nodes: [0, 1, 2] },
+      { name: "loadNodes", nodes: [3] }
+    ],
+    elementSets: [{ name: "allElements", elements: [0] }],
+    boundaryConditions: [{ name: "fixedSupport", type: "fixed" as const, nodeSet: "fixedNodes", components: ["x" as const, "y" as const, "z" as const] }],
+    loads: [{ name: "appliedForce", type: "nodalForce" as const, nodeSet: "loadNodes", vector: [0, -500, 0] as [number, number, number] }],
+    steps: [{ name: "loadStep", type: "staticLinear" as const, boundaryConditions: ["fixedSupport"], loads: ["appliedForce"] }],
+    coordinateSystem: { solverUnits: "m-N-s-Pa" as const, renderCoordinateSpace: "solver" },
+    meshProvenance: {
+      kind: "opencae_core_fea" as const,
+      solver: "opencae-core-sparse-tet",
+      resultSource: "computed" as const,
+      meshSource: "actual_volume_mesh"
+    }
+  };
+}
+
+// Ported from the retired api.cloudSolveRequest.test.ts (B4a): the solver-frame
+// dispatch physics guard. The wasm meshing path hands the mirrored Core model
+// builder a solver-frame study (studyForCoreGeometryDispatch), so the seeded
+// display-frame load direction must remap and the source study must not mutate.
+describe("solver-frame geometry dispatch (ported cloud-solve request physics)", () => {
+  const seededBracketStudy = bracketDemoProject.studies[0]! as Study;
+
+  test("remaps stored sample load directions into the solver global frame", () => {
+    const prepared = studyForCoreGeometryDispatch(seededBracketStudy, bracketDisplayModel);
+
+    // Seeded "Global -Z" load is stored viewer-down [0, -1, 0]; the mesher
+    // builds the bracket Z-up, so the solver-frame study must carry [0, 0, -1].
+    expect(seededBracketStudy.loads[0]!.parameters.direction).toEqual([0, -1, 0]);
+    expect(prepared.loads[0]!.parameters.direction).toEqual([0, 0, -1]);
+  });
+
+  test("does not mutate the source study", () => {
+    const direction = seededBracketStudy.loads[0]!.parameters.direction;
+    studyForCoreGeometryDispatch(seededBracketStudy, bracketDisplayModel);
+    expect(seededBracketStudy.loads[0]!.parameters.direction).toBe(direction);
+  });
+});

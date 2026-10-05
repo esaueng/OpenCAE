@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
-  OPENCAE_MODEL_SCHEMA,
-  OPENCAE_MODEL_SCHEMA_VERSION,
+  OPENFEA_MODEL_SCHEMA,
+  OPENFEA_MODEL_SCHEMA_VERSION,
   assembleNodalLoadVector,
   connectedComponents,
   elementNodeCount,
@@ -12,10 +12,10 @@ import {
 } from "../src";
 import { createSingleTetModel } from "./fixtures";
 
-describe("@opencae/core public API", () => {
+describe("@openfea/core public API", () => {
   test("exports schema constants and core utilities", () => {
-    expect(OPENCAE_MODEL_SCHEMA).toBe("opencae.model");
-    expect(OPENCAE_MODEL_SCHEMA_VERSION).toBe("0.4.0");
+    expect(OPENFEA_MODEL_SCHEMA).toBe("opencae.model");
+    expect(OPENFEA_MODEL_SCHEMA_VERSION).toBe("0.4.0");
     expect(typeof validateModelJson).toBe("function");
     expect(typeof normalizeModelJson).toBe("function");
     expect(typeof elementNodeCount).toBe("function");

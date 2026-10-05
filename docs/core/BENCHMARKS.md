@@ -5,7 +5,7 @@
 Case: 180 x 24 x 24 mm block, mat-steel (E = 200 GPa, nu = 0.29), 500 N tip load in -Z,
 fully clamped at x = 0. Theory: tip deflection 0.1782 mm (Euler-Bernoulli + 6/5 shear
 correction), outer-fiber root bending stress 39.06 MPa. Regression-tested in
-`apps/opencae-web/src/workers/localCantileverAccuracy.test.ts`.
+`apps/openfea-web/src/workers/localCantileverAccuracy.test.ts`.
 
 | Mesh (local structured block)             | Tip deflection  | Peak von Mises  | Reaction |
 | ----------------------------------------- | --------------- | --------------- | -------- |
