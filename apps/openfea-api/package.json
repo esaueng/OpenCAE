@@ -22,7 +22,7 @@
     "@openfea/storage": "workspace:*",
     "@openfea/study-core": "workspace:*",
     "@openfea/units": "workspace:*",
-    "fastify": "^5.12.1"
+    "fastify": "^5.12.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
